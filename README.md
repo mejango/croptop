@@ -1,9 +1,9 @@
 # Croptop
 
 Publish [Croptop](https://croptop.eth.sucks) sites to IPFS from Linux, macOS,
-or Windows. One binary: it runs a local [kubo](https://github.com/ipfs/kubo)
-node, renders your posts with the Croptop template, and keeps your site's
-IPNS name pointing at the latest version. The console runs in your browser,
+or Windows. One binary with an IPFS node built in: it renders your posts
+with the Croptop template, adds them to IPFS, and keeps your site's IPNS
+name pointing at the latest version. The console runs in your browser,
 so the same thing works from a phone on your network.
 
 This is a port of the Croptop scheme of the [Planet](https://github.com/Planetable/Planet)
@@ -20,7 +20,7 @@ put `croptop` somewhere on your `PATH`.
   `xattr -d com.apple.quarantine croptop` once, or right-click, Open.
 - **Linux**: `chmod +x croptop`.
 - **Windows**: unzip and run `croptop.exe` from a terminal. Windows Defender
-  may ask on first launch because kubo opens a listening port.
+  may ask on first launch because the node opens a listening port.
 
 Or build from source with Go 1.27+:
 
@@ -35,8 +35,8 @@ cd croptop && go build ./cmd/croptop
 croptop
 ```
 
-The first start downloads kubo v0.43.0 (about 40 MB, checksum verified),
-creates an IPFS repo, and opens `http://127.0.0.1:8086`. Data lives in:
+The first start creates the node's identity and blockstore and opens
+`http://127.0.0.1:8086`. Data lives in:
 
 | OS      | Data directory                             |
 |---------|--------------------------------------------|
@@ -105,11 +105,12 @@ everything else needs the passcode.
 
 ## IPFS engine
 
-Two engines are built in. `kubo` (the default for now) downloads and runs
-kubo v0.43.0 as a child process. `embedded` runs an IPFS node inside
+Two engines are built in. `embedded` (the default) runs an IPFS node inside
 croptop itself, built on boxo, kubo's own libraries: no download, no child
-process, same CIDs, same IPNS records. Switch with `croptop --engine
-embedded`; the choice is remembered. Keys are shared between engines.
+process, same CIDs, same IPNS records, NAT traversal through relays and
+hole punching. `kubo` downloads and runs kubo v0.43.0 as a child process
+instead. Switch with `croptop --engine kubo`; the choice is remembered.
+Keys are shared between engines, so switching back and forth is safe.
 
 ## Commands
 

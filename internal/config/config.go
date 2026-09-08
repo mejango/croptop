@@ -19,7 +19,7 @@ type Config struct {
 	Engine       string `json:"engine,omitempty"`  // "kubo" (downloaded sidecar) or "embedded" (boxo in-process)
 }
 
-const DefaultEngine = "kubo"
+const DefaultEngine = "embedded"
 
 func (c *Config) EngineName() string {
 	if c.Engine == "" {
