@@ -25,7 +25,7 @@ import (
 type Server struct {
 	Store     *store.Store
 	Pub       *publish.Publisher
-	Node      *ipfs.Node
+	Node      ipfs.Engine
 	Cfg       *config.Config
 	UI        fs.FS
 	Templates fs.FS

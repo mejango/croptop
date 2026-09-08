@@ -16,6 +16,16 @@ type Config struct {
 	PasscodeSalt string `json:"passcodeSalt,omitempty"`
 	PasscodeHash string `json:"passcodeHash,omitempty"`
 	KuboBin      string `json:"kuboBin,omitempty"` // use a system kubo instead of the downloaded one
+	Engine       string `json:"engine,omitempty"`  // "kubo" (downloaded sidecar) or "embedded" (boxo in-process)
+}
+
+const DefaultEngine = "kubo"
+
+func (c *Config) EngineName() string {
+	if c.Engine == "" {
+		return DefaultEngine
+	}
+	return c.Engine
 }
 
 const DefaultListen = "127.0.0.1:8086"

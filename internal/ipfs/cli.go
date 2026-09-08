@@ -121,3 +121,9 @@ func (n *Node) Info(ctx context.Context) (Info, error) {
 	n.RunJSON(ctx, &peers, "swarm", "peers")
 	return Info{PeerID: id.ID, Version: id.AgentVersion, Peers: len(peers.Peers)}, nil
 }
+
+// Provide pins the CID so kubo keeps and announces it.
+func (n *Node) Provide(ctx context.Context, cid string) error {
+	_, err := n.Run(ctx, "pin", "add", "--recursive", cid)
+	return err
+}

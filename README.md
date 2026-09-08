@@ -103,6 +103,14 @@ machine on [Tailscale](https://tailscale.com) or similar rather than
 opening the port. The published site trees at `/<site-id>/` are always open;
 everything else needs the passcode.
 
+## IPFS engine
+
+Two engines are built in. `kubo` (the default for now) downloads and runs
+kubo v0.43.0 as a child process. `embedded` runs an IPFS node inside
+croptop itself, built on boxo, kubo's own libraries: no download, no child
+process, same CIDs, same IPNS records. Switch with `croptop --engine
+embedded`; the choice is remembered. Keys are shared between engines.
+
 ## Commands
 
 ```
@@ -114,6 +122,7 @@ croptop publish <site>         render, add to IPFS, update the IPNS name
 croptop key export <site>      print the site's private key
 croptop key import <site> f    install a key for a site you already have
 croptop passcode set
+croptop engine                 print the active ipfs engine
 croptop version
 ```
 

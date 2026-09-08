@@ -27,7 +27,7 @@ func (s *Server) routesCroptop(mux *http.ServeMux) {
 			"passcode": s.Cfg.HasPasscode(),
 			"ipfs": map[string]any{
 				"running": s.Node.Running() && err == nil, "peers": info.Peers, "peerID": info.PeerID,
-				"version": info.Version, "gateway": s.Node.GatewayURL(), "lastError": s.Node.LastStderr(),
+				"version": info.Version, "lastError": s.Node.LastError(),
 			},
 		})
 	})

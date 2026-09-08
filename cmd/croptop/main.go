@@ -39,6 +39,7 @@ const usage = `croptop — publish Croptop sites to IPFS
   croptop key export <site>   print the site's private key (PEM)
   croptop key import <site> <file.pem>
   croptop passcode set     required before listening on a non-loopback address
+  croptop engine           print the active ipfs engine (kubo or embedded)
   croptop version
 
 Common flags: --data <dir> (default: ` + "%s" + `), --templates <dir>
@@ -49,7 +50,8 @@ type app struct {
 	templatesDir string
 	cfg          *config.Config
 	store        *store.Store
-	node         *ipfs.Node
+	engine       ipfs.Engine
+	kubo         *ipfs.Node // set when engine is kubo
 	pub          *publish.Publisher
 	tmpl         fs.FS
 }
@@ -77,6 +79,7 @@ func run(args []string) error {
 	force := fs.Bool("force", false, "override safety checks")
 	keyFile := fs.String("key", "", "PEM key file (adopt)")
 	container := fs.String("container", "", "Planet container path (import-planet)")
+	engineFlag := fs.String("engine", "", "ipfs engine: kubo (downloaded sidecar) or embedded (built in); remembered in config")
 	if err := fs.Parse(flagsFirst(args)); err != nil {
 		return nil
 	}
@@ -90,11 +93,14 @@ func run(args []string) error {
 		fs.Usage()
 		return nil
 	}
-	if err := a.open(); err != nil {
+	if err := a.open(*engineFlag); err != nil {
 		return err
 	}
 
 	switch cmd {
+	case "engine":
+		fmt.Println(a.cfg.EngineName())
+		return nil
 	case "serve":
 		return a.serve(*listen, *noOpen)
 	case "import-planet":
@@ -169,7 +175,7 @@ func run(args []string) error {
 	if err := a.startNode(context.Background()); err != nil {
 		return err
 	}
-	defer a.node.Stop()
+	defer a.engine.Stop()
 	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer cancel()
 	switch cmd {
@@ -220,8 +226,12 @@ func run(args []string) error {
 		fmt.Printf("adopted %s (%s) at sequence %d\n", site.Name, id, site.IPNSSequence)
 		return nil
 	case "ipfs-smoke":
-		info, err := a.node.Info(ctx)
-		fmt.Printf("%+v %v\n", info, err)
+		info, err := a.engine.Info(ctx)
+		fmt.Printf("%s: %+v %v\n", a.cfg.EngineName(), info, err)
+		if len(rest) > 0 {
+			rec, err := a.engine.NetworkRecord(ctx, rest[0])
+			fmt.Printf("record %+v err=%v\n", rec, err)
+		}
 		return nil
 	}
 	return fmt.Errorf("unknown command %q (try croptop help)", cmd)
@@ -249,10 +259,19 @@ func flagsFirst(args []string) []string {
 	return append(flags, rest...)
 }
 
-func (a *app) open() error {
+func (a *app) open(engine string) error {
 	var err error
 	if a.cfg, err = config.Load(a.dataDir); err != nil {
 		return err
+	}
+	if engine != "" && engine != a.cfg.EngineName() {
+		if engine != "kubo" && engine != "embedded" {
+			return fmt.Errorf("--engine must be kubo or embedded")
+		}
+		a.cfg.Engine = engine
+		if err := a.cfg.Save(a.dataDir); err != nil {
+			return err
+		}
 	}
 	if err := os.MkdirAll(a.dataDir, 0o755); err != nil {
 		return err
@@ -265,43 +284,55 @@ func (a *app) open() error {
 			return fmt.Errorf("--templates %s: no template.json", a.templatesDir)
 		}
 	}
-	bin := a.cfg.KuboBin
-	if bin == "" {
-		bin = filepath.Join(a.dataDir, "kubo", "ipfs")
-		if runtime.GOOS == "windows" {
-			bin += ".exe"
+	logf := func(line string) {
+		if os.Getenv("CROPTOP_DEBUG") != "" {
+			fmt.Fprintln(os.Stderr, line)
 		}
 	}
-	a.node = ipfs.NewNode(bin, filepath.Join(a.dataDir, "ipfs"))
-	a.node.Log = func(s string) {
-		if os.Getenv("CROPTOP_DEBUG") != "" {
-			fmt.Fprintln(os.Stderr, s)
+	if a.cfg.EngineName() == "embedded" {
+		e := ipfs.NewEmbedded(a.dataDir)
+		e.Log = logf
+		a.engine = e
+	} else {
+		bin := a.cfg.KuboBin
+		if bin == "" {
+			bin = filepath.Join(a.dataDir, "kubo", "ipfs")
+			if runtime.GOOS == "windows" {
+				bin += ".exe"
+			}
 		}
+		a.kubo = ipfs.NewNode(bin, filepath.Join(a.dataDir, "ipfs"))
+		a.kubo.Log = logf
+		a.engine = a.kubo
 	}
 	ffmpeg, _ := exec.LookPath("ffmpeg")
-	r := &render.Renderer{Store: a.store, Templates: a.tmpl, CIDs: a.node, FFmpeg: ffmpeg, Log: println}
-	a.pub = &publish.Publisher{Store: a.store, Node: a.node, Render: r, Log: println}
+	r := &render.Renderer{Store: a.store, Templates: a.tmpl, CIDs: a.engine, FFmpeg: ffmpeg, Log: println}
+	a.pub = &publish.Publisher{Store: a.store, Node: a.engine, Render: r, Log: println}
 	return nil
 }
 
-func (a *app) keystore() *ipfs.Keystore { return a.node.Keystore() }
+func (a *app) keystore() *ipfs.Keystore { return a.engine.Keystore() }
 
 func (a *app) startNode(ctx context.Context) error {
-	if a.cfg.KuboBin == "" {
-		bin, err := ipfs.EnsureKubo(filepath.Join(a.dataDir, "kubo"), println)
-		if err != nil {
-			return fmt.Errorf("get kubo: %w", err)
+	if a.kubo != nil {
+		if a.cfg.KuboBin == "" {
+			bin, err := ipfs.EnsureKubo(filepath.Join(a.dataDir, "kubo"), println)
+			if err != nil {
+				return fmt.Errorf("get kubo: %w", err)
+			}
+			a.kubo.Bin = bin
 		}
-		a.node.Bin = bin
+		if err := a.kubo.Init(ctx); err != nil {
+			return fmt.Errorf("ipfs init: %w", err)
+		}
+		println("starting ipfs (kubo)")
+	} else {
+		println("starting ipfs (embedded)")
 	}
-	if err := a.node.Init(ctx); err != nil {
-		return fmt.Errorf("ipfs init: %w", err)
+	if err := a.engine.Start(ctx); err != nil {
+		return fmt.Errorf("ipfs: %w", err)
 	}
-	println("starting ipfs")
-	if err := a.node.Start(ctx); err != nil {
-		return fmt.Errorf("ipfs daemon: %w", err)
-	}
-	if n := a.node.ConnectLocalNodes(ctx); n > 0 {
+	if n := a.engine.ConnectLocalNodes(ctx); n > 0 {
 		println(fmt.Sprintf("peered with %d local ipfs node(s)", n))
 	}
 	return nil
@@ -349,11 +380,11 @@ func (a *app) serve(listen string, noOpen bool) error {
 	if err := a.startNode(ctx); err != nil {
 		return err
 	}
-	defer a.node.Stop()
+	defer a.engine.Stop()
 	go a.pub.RunKeepalive(ctx, 10*time.Minute)
 	ui, _ := fs.Sub(web.FS, ".")
 	srv := &server.Server{
-		Store: a.store, Pub: a.pub, Node: a.node, Cfg: a.cfg, UI: ui, Templates: a.tmpl,
+		Store: a.store, Pub: a.pub, Node: a.engine, Cfg: a.cfg, UI: ui, Templates: a.tmpl,
 		Version: version, DataDir: a.dataDir, Log: println,
 	}
 	url := "http://" + strings.Replace(a.cfg.Listen, "0.0.0.0", "127.0.0.1", 1)

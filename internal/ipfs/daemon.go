@@ -110,7 +110,7 @@ func (n *Node) Running() bool {
 	}
 }
 
-func (n *Node) LastStderr() string { return n.stderr.String() }
+func (n *Node) LastError() string { return n.stderr.String() }
 
 func (n *Node) Stop() error {
 	n.mu.Lock()

@@ -21,7 +21,7 @@ const (
 
 type Publisher struct {
 	Store  *store.Store
-	Node   *ipfs.Node
+	Node   ipfs.Engine
 	Render *render.Renderer
 	Log    func(string)
 }
