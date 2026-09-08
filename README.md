@@ -111,6 +111,14 @@ CID; anyone installs it with `croptop template install <cid or ENS name>`
 or from the same page. The template context is documented in
 `docs/format.md`.
 
+## Widgets
+
+A post is HTML, and its attachments travel with it. Attach a script, add
+`<script type="module" src="widget.js"></script>` to the post, and it runs
+on the published page with `window.croptop` for the site, the post, the
+template settings, the chain table, the reader's wallet, and IPFS. The
+editor's widget palette inserts starter snippets. See `docs/widgets.md`.
+
 ## An always-on node
 
 ```
