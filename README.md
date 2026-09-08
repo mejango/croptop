@@ -100,6 +100,17 @@ for a new version every six hours, and re-announces it to the network every
 twelve. A site stays online because its readers host it. Each of your own
 sites shows how many nodes are hosting it.
 
+## Templates
+
+Every site renders with the built-in Croptop template until you say
+otherwise. On a site's *Template* page, *Fork to edit* copies the template
+into the site, where you can change any file with the rendered preview
+beside you; *Reset* brings the original back. Template authors publish a
+template directory with `croptop template publish <dir>` and share the
+CID; anyone installs it with `croptop template install <cid or ENS name>`
+or from the same page. The template context is documented in
+`docs/format.md`.
+
 ## An always-on node
 
 ```
@@ -146,6 +157,7 @@ croptop publish <site>         render, add to IPFS, update the IPNS name
 croptop key export <site>      print the site's private key
 croptop key import <site> f    install a key for a site you already have
 croptop passcode set
+croptop template list | install <cid or name> | publish <dir>
 croptop engine                 print the active ipfs engine
 croptop version
 ```
