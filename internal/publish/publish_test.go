@@ -34,6 +34,7 @@ func TestNextSequence(t *testing.T) {
 		{"elsewhere but forced", 3, "bafyA", rec(7, "bafyB"), nil, true, 8, nil},
 		{"offline with history", 4, "bafyA", nil, errors.New("timeout"), false, 5, nil},
 		{"fresh install offline", 0, "bafyA", nil, errors.New("timeout"), false, 0, ErrWouldResetSequence},
+		{"fresh import, stale DHT record", 0, "bafyA", rec(7, "bafyOLD"), nil, false, 8, nil},
 		{"fresh install offline forced", 0, "bafyA", nil, errors.New("timeout"), true, 1, nil},
 		{"adopted: network known, no local cid", 59, "", rec(59, "bafyX"), nil, false, 60, nil},
 	}
@@ -117,6 +118,22 @@ func TestPublishRefusesWhenElsewhere(t *testing.T) {
 	}
 	if _, err := p.Publish(context.Background(), fixtureID, true); err != nil {
 		t.Fatalf("force should publish: %v", err)
+	}
+}
+
+func TestKeepaliveBaselinesFreshImport(t *testing.T) {
+	p, s, _ := fakePublisher(t)
+	site, _ := s.Site(fixtureID)
+	cid := "bafyIMPORTED"
+	site.LastPublishedCID = &cid
+	site.IPNSSequence = 0 // imported, never published from here; network says 7 -> bafyOLD
+	s.SaveSite(site)
+	if err := p.Keepalive(context.Background(), fixtureID); err != nil {
+		t.Fatal(err)
+	}
+	site, _ = s.Site(fixtureID)
+	if site.PublishedElsewhere || site.IPNSSequence != 7 || *site.LastPublishedCID != "bafyOLD" {
+		t.Fatalf("fresh import should adopt the network baseline: %+v", site)
 	}
 }
 

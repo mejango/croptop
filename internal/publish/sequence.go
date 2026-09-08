@@ -22,7 +22,10 @@ var (
 func nextSequence(local uint64, lastCID string, net *ipfs.Record, netErr error, force bool) (uint64, error) {
 	switch {
 	case netErr == nil:
-		if lastCID != "" && net.Value != "/ipfs/"+lastCID && !force {
+		// Only a machine that has published before can be "overtaken". A fresh
+		// import or adopt (local == 0) may see an older record from a slow DHT
+		// peer; it takes the network as its baseline instead of refusing.
+		if local > 0 && lastCID != "" && net.Value != "/ipfs/"+lastCID && !force {
 			return 0, ErrPublishedElsewhere
 		}
 		return max(local, net.Sequence) + 1, nil

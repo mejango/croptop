@@ -6,6 +6,7 @@ package publish
 import (
 	"context"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/mejango/croptop/internal/ipfs"
@@ -95,8 +96,12 @@ func (p *Publisher) Keepalive(ctx context.Context, siteID string) error {
 	if err != nil {
 		return err
 	}
-	if site.PublishedElsewhere || site.LastPublishedCID == nil || !p.Node.Keystore().Has(site.ID) {
+	if site.LastPublishedCID == nil || !p.Node.Keystore().Has(site.ID) {
 		return nil
+	}
+	if site.PublishedElsewhere && site.IPNSSequence > 0 {
+		// flagged after we had published: leave the name alone until the user syncs,
+		// but keep checking whether the other machine went quiet and the record is ours again
 	}
 	nctx, cancel := context.WithTimeout(ctx, networkTimeout)
 	rec, err := p.Node.NetworkRecord(nctx, site.IPNS)
@@ -105,6 +110,14 @@ func (p *Publisher) Keepalive(ctx context.Context, siteID string) error {
 		return err // offline: try again next time
 	}
 	if rec.Value != "/ipfs/"+*site.LastPublishedCID {
+		if site.IPNSSequence == 0 {
+			// never published from here: the network's record is the baseline
+			cid := strings.TrimPrefix(rec.Value, "/ipfs/")
+			site.LastPublishedCID = &cid
+			site.IPNSSequence = rec.Sequence
+			site.PublishedElsewhere = false
+			return p.Store.SaveSite(site)
+		}
 		if rec.Sequence >= site.IPNSSequence {
 			p.log("%s is now published from another machine (sequence %d)", site.Name, rec.Sequence)
 			site.PublishedElsewhere = true
@@ -112,6 +125,7 @@ func (p *Publisher) Keepalive(ctx context.Context, siteID string) error {
 		}
 		return nil // network is behind us; the DHT will catch up
 	}
+	site.PublishedElsewhere = false // the network serves our CID; nobody else is publishing
 	seq := max(rec.Sequence, site.IPNSSequence) + 1
 	pctx, cancel := context.WithTimeout(ctx, publishTimeout)
 	defer cancel()
