@@ -215,6 +215,14 @@
           h("a", { class: "btn quiet", href: `#/site/${id}/settings` }, "Settings"),
           h("button", { class: "btn hot", id: "publish", onclick: () => publish(site) }, "Publish"))),
       strip, grid);
+    if (site.croptopTemplate && site.croptopTemplate.forked) {
+      api("GET", `/v0/croptop/sites/${id}/template/upstream`).then((st) => {
+        if (!st.changed || !st.changed.length) return;
+        m.insertBefore(h("div", { class: "state elsewhere" }, h("span", { class: "dot" }),
+          h("span", { class: "grow" }, `Your forked template is behind ${st.upstream === "built-in" ? "the built-in template" : st.upstream} by ${st.changed.length} file${st.changed.length === 1 ? "" : "s"}.`),
+          h("a", { class: "btn quiet", href: `#/site/${id}/template` }, "Review updates")), grid);
+      }).catch(() => {});
+    }
     if (site.lastPublishedCID) {
       const hosts = h("span", { class: "hosts", title: "Nodes currently announcing this version" }, "looking for hosts…");
       strip.append(hosts);
@@ -468,6 +476,7 @@
 
     const sourceText = info.source === "fork" ? "Forked copy, edits are yours" : info.source === "default" ? "Built-in Croptop template" : "Installed template " + info.choice.cid.slice(0, 16) + "…";
     const actions = h("div", { class: "actions" });
+    const updates = h("div", { class: "updates", hidden: "" });
     if (!forked) {
       actions.append(h("button", { class: "btn", onclick: async () => {
         await api("POST", `/v0/croptop/sites/${id}/template/fork`); toast("Forked. Edit any file and save."); route();
@@ -477,13 +486,24 @@
         if (!confirm("Discard your edits and go back to the original template?")) return;
         await api("POST", `/v0/croptop/sites/${id}/template/reset`); toast("Reset"); route();
       }}, "Reset to original"));
-      if (info.choice.upstream) actions.append(h("button", { class: "btn quiet", onclick: async () => {
-        const st = await api("GET", `/v0/croptop/sites/${id}/template/upstream`);
-        if (!st.changed.length) return toast("Upstream has no newer files");
-        const take = st.changed.filter((p) => confirm(`Upstream changed ${p}. Take their version?` + (st.edited.includes(p) ? " You edited this file; your edits would be lost." : "")));
-        for (const p of take) await api("POST", `/v0/croptop/sites/${id}/template/upstream/take?path=${encodeURIComponent(p)}`);
-        toast(`Took ${take.length} file(s)`); route();
-      }}, "Update from upstream"));
+      // ask what upstream (the built-in template or the ENS/IPNS source) has changed since the fork
+      api("GET", `/v0/croptop/sites/${id}/template/upstream`).then((st) => {
+        if (!st.changed || !st.changed.length) return;
+        const take = async (paths) => {
+          for (const p of paths) await api("POST", `/v0/croptop/sites/${id}/template/upstream/take?path=${encodeURIComponent(p)}`);
+          toast(`Updated ${paths.length} file${paths.length === 1 ? "" : "s"}`); route();
+        };
+        const safe = st.changed.filter((p) => !st.edited.includes(p));
+        const rows = st.changed.map((p) => h("div", { class: "row upd" },
+          h("code", {}, p),
+          st.edited.includes(p) ? h("span", { class: "help warn" }, "you edited this file; taking theirs replaces your version") : h("span", { class: "help" }, "not edited by you"),
+          h("button", { class: "btn quiet small", onclick: () => take([p]) }, "Take theirs")));
+        updates.replaceChildren(
+          h("b", {}, `${st.upstream === "built-in" ? "The built-in template" : st.upstream} has ${st.changed.length} updated file${st.changed.length === 1 ? "" : "s"} since you forked.`),
+          ...rows,
+          h("div", { class: "row" }, safe.length ? h("button", { class: "btn", onclick: () => take(safe) }, `Take all ${safe.length} you did not edit`) : null));
+        updates.hidden = false;
+      }).catch(() => {});
     }
     const choose = h("select", { onchange: async (e) => {
       await api("PUT", `/v0/croptop/sites/${id}/template`, { cid: e.target.value }); toast("Template changed"); route();
@@ -498,6 +518,7 @@
     m.replaceChildren(...[
       h("div", { class: "head" }, h("div", {}, h("h1", {}, "Template"), h("p", {}, `${site.name}. ${sourceText}.`)), actions),
       h("div", { class: "row", style: "margin-bottom:14px" }, h("label", { class: "inline" }, "Using ", choose), installBox, installBtn),
+      updates,
       forked ? null : h("p", { class: "help" }, "Fork to edit any file. The preview updates on every save. Reset brings the original back."),
       h("div", { class: "tpl" }, fileList, h("div", {}, editor, h("div", { class: "row", style: "margin-top:8px" }, save, h("span", { class: "help" }, "Cmd/Ctrl+S saves"))), preview),
     ].filter(Boolean));

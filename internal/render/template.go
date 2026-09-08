@@ -31,6 +31,9 @@ var shims = []struct {
 	{regexp.MustCompile(`\s*!=\s*nil`), ``},
 	{regexp.MustCompile(`\s*==\s*true`), ``},
 	{regexp.MustCompile(`({%\s*(?:include|extends)\s+)'([^']*)'`), `$1"$2"`},
+	// pongo2 prints Go booleans as True/False (Python style); Stencil printed
+	// true/false, and the template drops these into JavaScript.
+	{regexp.MustCompile(`{{\s*([\w.]*(?:hasVideo|hasAudio|Enabled|acceptsDonation|podcastExplicit|has_avatar|has_podcast|pinned))\s*}}`), `{{ $1|lower }}`},
 }
 
 func applyShims(src string) string {

@@ -195,8 +195,8 @@ func TestCoverImage(t *testing.T) {
 }
 
 func TestShims(t *testing.T) {
-	in := `{% if item.externalLink.count > 0 %}{% if x != nil %}{% if y == true %}{{ user_settings['maintenanceMessage'] }}{% if user_settings['maintenanceMessage'].count > 0 %}{% include './post-page.html' %}{% extends 'base.html' %}`
-	want := `{% if item.externalLink|length > 0 %}{% if x %}{% if y %}{{ user_settings.maintenanceMessage }}{% if user_settings.maintenanceMessage|length > 0 %}{% include "./post-page.html" %}{% extends "base.html" %}`
+	in := `{% if item.externalLink.count > 0 %}{% if x != nil %}{% if y == true %}{{ user_settings['maintenanceMessage'] }}{% if user_settings['maintenanceMessage'].count > 0 %}{% include './post-page.html' %}{% extends 'base.html' %}{{ article.hasVideo }}{% if article.hasVideo %}{{ planet.plausibleEnabled }}`
+	want := `{% if item.externalLink|length > 0 %}{% if x %}{% if y %}{{ user_settings.maintenanceMessage }}{% if user_settings.maintenanceMessage|length > 0 %}{% include "./post-page.html" %}{% extends "base.html" %}{{ article.hasVideo|lower }}{% if article.hasVideo %}{{ planet.plausibleEnabled|lower }}`
 	if got := applyShims(in); got != want {
 		t.Fatalf("\ngot  %s\nwant %s", got, want)
 	}
@@ -265,5 +265,24 @@ func TestRSSMatchesPlanetShape(t *testing.T) {
 	}
 	if !strings.Contains(it.Description, `src="https://`) {
 		t.Fatalf("image not absolute: %s", it.Description)
+	}
+}
+
+// Booleans dropped into the page's JavaScript must be lowercase, or the
+// post page dies with "False is not defined" before it renders anything.
+func TestPostPageHasNoPythonBooleans(t *testing.T) {
+	r, s := fixtureRenderer(t)
+	if err := r.Render(context.Background(), fixtureID); err != nil {
+		t.Fatal(err)
+	}
+	posts, _ := s.Posts(fixtureID)
+	html, _ := os.ReadFile(filepath.Join(s.PublicDir(fixtureID), posts[0].ID, "index.html"))
+	for _, bad := range []string{"= False", "= True", "(False", "(True", " False;", " True;"} {
+		if strings.Contains(string(html), bad) {
+			t.Fatalf("post page contains a Python-style boolean %q", bad)
+		}
+	}
+	if !strings.Contains(string(html), "false") {
+		t.Fatal("expected a lowercase boolean in the post page script")
 	}
 }
