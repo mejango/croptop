@@ -119,3 +119,21 @@ func TestAppleTime(t *testing.T) {
 		t.Fatalf("not reversible: %v vs %v", FromTime(a.Time()), a)
 	}
 }
+
+func TestOpsAndSettingsOnFreshSite(t *testing.T) {
+	s := &Store{Root: t.TempDir()}
+	site := &Site{ID: "NEW", Name: "n", Created: Now(), Updated: Now()}
+	if err := s.SaveSite(site); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.RecordOp("NEW", "k"); err != nil {
+		t.Fatal(err)
+	}
+	ops, err := s.Ops("NEW")
+	if err != nil || len(ops) != 1 {
+		t.Fatalf("%v %v", ops, err)
+	}
+	if m, err := s.TemplateSettings("NEW"); err != nil || len(m) != 0 {
+		t.Fatalf("%v %v", m, err)
+	}
+}

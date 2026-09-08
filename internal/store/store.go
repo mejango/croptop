@@ -115,7 +115,7 @@ func (s *Store) DeletePost(siteID, postID string) error {
 func (s *Store) TemplateSettings(siteID string) (map[string]any, error) {
 	m := map[string]any{}
 	err := readJSON(filepath.Join(s.SiteDir(siteID), "templateSettings.json"), &m)
-	if os.IsNotExist(err) {
+	if errors.Is(err, ErrNotFound) {
 		return m, nil
 	}
 	return m, err
@@ -130,7 +130,7 @@ func (s *Store) SaveTemplateSettings(siteID string, m map[string]any) error {
 func (s *Store) Ops(siteID string) (map[string]AppleTime, error) {
 	m := map[string]AppleTime{}
 	err := readJSON(filepath.Join(s.SiteDir(siteID), "ops.json"), &m)
-	if os.IsNotExist(err) {
+	if errors.Is(err, ErrNotFound) {
 		return m, nil
 	}
 	return m, err
