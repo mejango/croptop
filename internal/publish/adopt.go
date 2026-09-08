@@ -141,10 +141,7 @@ func rebuildSource(st *store.Store, siteID, pubDir string) error {
 				a = full
 			}
 		}
-		post := postFromPublic(a)
-		if md, err := os.ReadFile(filepath.Join(postDir, "article.md")); err == nil {
-			post.Content = string(md)
-		}
+		post := postFromPublic(a) // article.json carries the exact content; article.md is title + content
 		if err := st.SavePost(siteID, post); err != nil {
 			return err
 		}
@@ -158,13 +155,6 @@ func rebuildSource(st *store.Store, siteID, pubDir string) error {
 			if err := copyFile(src, filepath.Join(st.PostDir(siteID, post.ID), name)); err != nil {
 				return err
 			}
-		}
-		// mark generated files as done so they are kept byte for byte
-		if _, err := os.Stat(filepath.Join(postDir, "nft.json.cid.txt")); err == nil {
-			st.RecordOp(siteID, post.ID+"-nft-adopted")
-		}
-		if _, err := os.Stat(filepath.Join(postDir, "_cover.png")); err == nil {
-			st.RecordOp(siteID, post.ID+"-cover-adopted")
 		}
 	}
 	return nil
@@ -197,5 +187,7 @@ func postFromPublic(a render.PublicPost) *store.Post {
 	if p.Attachments == nil {
 		p.Attachments = []string{}
 	}
+	empty := "" // Planet posts carry an empty summary; nft.json's description depends on it
+	p.Summary = &empty
 	return p
 }

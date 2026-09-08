@@ -404,6 +404,11 @@ func (s *Server) modifyPost(w http.ResponseWriter, r *http.Request) {
 	}
 	now := store.Now()
 	post.Modified = &now
+	// generated files depend on title, content, and attachments; rebuild them
+	for _, f := range []string{"nft.json", "nft.json.cid.txt", "_cover.png"} {
+		os.Remove(filepath.Join(s.Store.PublicDir(site.ID), post.ID, f))
+	}
+	delete(post.CIDs, "_cover.png")
 	s.savePostAndRender(w, r, site.ID, post)
 }
 

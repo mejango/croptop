@@ -271,11 +271,6 @@ func (r *Renderer) renderPost(ctx context.Context, eng *engine, site *store.Site
 			}
 		}
 	}
-	ops, err := r.Store.Ops(site.ID)
-	if err != nil {
-		return PublicPost{}, err
-	}
-
 	// cover image for text-only and audio posts
 	cover := filepath.Join(dir, "_cover.png")
 	needsCover := p.TextOnly() || (p.AudioFilename != nil && *p.AudioFilename != "")
@@ -290,16 +285,11 @@ func (r *Renderer) renderPost(ctx context.Context, eng *engine, site *store.Site
 		if p.VideoFilename != nil && *p.VideoFilename != "" {
 			text = p.Title + "\n\n(video)"
 		}
-		opKey := p.ID + "-cover-" + shortHash(text)
-		_, exists := os.Stat(cover)
-		if exists != nil || (!hasOp(ops, opKey) && hasOpPrefix(ops, p.ID+"-cover-")) {
+		if _, err := os.Stat(cover); err != nil { // generated once; editing a post deletes it so it is redrawn
 			if err := WriteCover(cover, text); err != nil {
 				return PublicPost{}, err
 			}
-			r.Store.RecordOp(site.ID, opKey)
 			delete(p.CIDs, "_cover.png")
-		} else if !hasOpPrefix(ops, p.ID+"-cover-") {
-			r.Store.RecordOp(site.ID, opKey) // imported cover: keep as is
 		}
 		if p.TextOnly() && !contains(p.Attachments, "_cover.png") {
 			p.Attachments = append(p.Attachments, "_cover.png")
@@ -361,12 +351,12 @@ func (r *Renderer) renderPost(ctx context.Context, eng *engine, site *store.Site
 	if err := writeSwiftJSON(filepath.Join(dir, "article.json"), pp); err != nil {
 		return pp, err
 	}
-	if err := os.WriteFile(filepath.Join(dir, "article.md"), []byte(p.Content), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(dir, "article.md"), []byte(p.Title+"\n\n"+p.Content), 0o644); err != nil {
 		return pp, err
 	}
 
 	if meta.GenerateNFTMetadata && len(p.CIDs) > 0 {
-		if err := r.writeNFT(ctx, dir, site, p, pp, ops); err != nil {
+		if err := r.writeNFT(ctx, dir, site, p, pp); err != nil {
 			return pp, err
 		}
 	}
@@ -429,7 +419,14 @@ type nftMetadata struct {
 // writeNFT mirrors Planet's processNFTMetadata. The CID of nft.json keys the
 // onchain tier, so an existing nft.json is only rewritten when the inputs
 // changed, and imported ones are adopted as they are.
-func (r *Renderer) writeNFT(ctx context.Context, dir string, site *store.Site, p *store.Post, pp PublicPost, ops map[string]store.AppleTime) error {
+func (r *Renderer) writeNFT(ctx context.Context, dir string, site *store.Site, p *store.Post, pp PublicPost) error {
+	nftPath := filepath.Join(dir, "nft.json")
+	cidPath := filepath.Join(dir, "nft.json.cid.txt")
+	if _, err := os.Stat(nftPath); err == nil {
+		if _, err := os.Stat(cidPath); err == nil {
+			return nil // the CID keys the onchain tier; editing a post deletes this file so it is rebuilt
+		}
+	}
 	first := ""
 	for _, a := range p.Attachments {
 		if _, ok := p.CIDs[a]; ok {
@@ -463,19 +460,6 @@ func (r *Renderer) writeNFT(ctx context.Context, dir string, site *store.Site, p
 			animation = &u
 		}
 	}
-	nftPath := filepath.Join(dir, "nft.json")
-	cidPath := filepath.Join(dir, "nft.json.cid.txt")
-	opKey := p.ID + "-nft-" + shortHash(p.Title+"\x00"+p.Content+"\x00"+imageCID+"\x00"+deref(animation)+"\x00"+fmt.Sprint(p.Created.Unix()))
-	_, haveNFT := os.Stat(nftPath)
-	_, haveCID := os.Stat(cidPath)
-	if haveNFT == nil && haveCID == nil {
-		if hasOp(ops, opKey) {
-			return nil
-		}
-		if !hasOpPrefix(ops, p.ID+"-nft-") {
-			return r.Store.RecordOp(site.ID, opKey) // imported: adopt as is
-		}
-	}
 	attrs := []nftAttribute{
 		{"title", p.Title},
 		{"title_sha256", sha256hex(p.Title)},
@@ -503,10 +487,7 @@ func (r *Renderer) writeNFT(ctx context.Context, dir string, site *store.Site, p
 	if err != nil {
 		return err
 	}
-	if err := os.WriteFile(cidPath, []byte(cid), 0o644); err != nil {
-		return err
-	}
-	return r.Store.RecordOp(site.ID, opKey)
+	return os.WriteFile(cidPath, []byte(cid), 0o644)
 }
 
 func mimeOf(name string) string {
@@ -599,19 +580,6 @@ func copyFile(src, dst string) error {
 func sha256hex(s string) string {
 	sum := sha256.Sum256([]byte(s))
 	return hex.EncodeToString(sum[:])
-}
-
-func shortHash(s string) string { return sha256hex(s)[:16] }
-
-func hasOp(ops map[string]store.AppleTime, key string) bool { _, ok := ops[key]; return ok }
-
-func hasOpPrefix(ops map[string]store.AppleTime, prefix string) bool {
-	for k := range ops {
-		if strings.HasPrefix(k, prefix) {
-			return true
-		}
-	}
-	return false
 }
 
 func contains(list []string, s string) bool {

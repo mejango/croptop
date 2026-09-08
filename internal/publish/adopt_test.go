@@ -67,9 +67,8 @@ func TestRebuildSourceFromPublic(t *testing.T) {
 	if _, err := os.Stat(filepath.Join(rebuilt.PostDir(fixtureID, post), "Screenshot 2025-11-01 at 01.28.05.png")); err != nil {
 		t.Fatal("attachment not restored")
 	}
-	ops, _ := rebuilt.Ops(fixtureID)
-	if _, ok := ops[post+"-nft-adopted"]; !ok {
-		t.Fatal("nft op not seeded")
+	if p := byID[post]; p.Summary == nil || *p.Summary != "" {
+		t.Fatal("summary should rebuild as empty string")
 	}
 	if _, err := os.Stat(filepath.Join(rebuilt.SiteDir(fixtureID), "templateSettings.json")); err != nil {
 		t.Fatal("templateSettings.json not restored")
