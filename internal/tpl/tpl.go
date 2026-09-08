@@ -120,7 +120,7 @@ func (r *Resolver) Installed() ([]Info, error) {
 	out := []Info{def}
 	entries, _ := os.ReadDir(filepath.Join(r.DataDir, "templates"))
 	for _, e := range entries {
-		if !e.IsDir() {
+		if !e.IsDir() || strings.HasPrefix(e.Name(), "default-") {
 			continue
 		}
 		i := info(os.DirFS(r.InstalledDir(e.Name())))
@@ -264,6 +264,28 @@ func (r *Resolver) Use(siteID, cid string) error {
 	return r.Store.SaveSite(site)
 }
 
+// defaultSnapshot stores the built-in template under templates/default-<build>
+// so a fork of it has a fixed base to compare against when the binary's
+// default moves on. Returns the snapshot's key.
+func (r *Resolver) defaultSnapshot() (string, error) {
+	key := "default-" + itoa(info(r.Default).Build)
+	dir := r.InstalledDir(key)
+	if _, err := os.Stat(filepath.Join(dir, "template.json")); err == nil {
+		return key, nil
+	}
+	if err := os.MkdirAll(filepath.Dir(dir), 0o755); err != nil {
+		return "", err
+	}
+	tmp := dir + ".new"
+	os.RemoveAll(tmp)
+	if err := os.CopyFS(tmp, r.Default); err != nil {
+		return "", err
+	}
+	return key, os.Rename(tmp, dir)
+}
+
+func itoa(n int) string { return fmt.Sprintf("%d", n) }
+
 // Fork copies the site's current template into the site for editing.
 func (r *Resolver) Fork(siteID string) error {
 	site, err := r.Store.Site(siteID)
@@ -274,16 +296,22 @@ func (r *Resolver) Fork(siteID string) error {
 	if c.Forked {
 		return errors.New("already forked")
 	}
-	src, _, err := r.For(site)
+	src, source, err := r.For(site)
 	if err != nil {
 		return err
+	}
+	from := c.CID
+	if source == "default" {
+		if from, err = r.defaultSnapshot(); err != nil {
+			return err
+		}
 	}
 	dir := r.ForkDir(siteID)
 	os.RemoveAll(dir)
 	if err := os.CopyFS(dir, src); err != nil {
 		return err
 	}
-	c.Forked, c.ForkedFrom = true, c.CID
+	c.Forked, c.ForkedFrom = true, from
 	SetChoice(site, c)
 	return r.Store.SaveSite(site)
 }
@@ -389,11 +417,24 @@ func (r *Resolver) Upstream(ctx context.Context, site *store.Site) (UpstreamStat
 	}
 	base := r.Default
 	if c.ForkedFrom != "" {
-		base = os.DirFS(r.InstalledDir(c.ForkedFrom))
+		if _, err := os.Stat(filepath.Join(r.InstalledDir(c.ForkedFrom), "template.json")); err == nil {
+			base = os.DirFS(r.InstalledDir(c.ForkedFrom))
+		}
 	}
 	fork := os.DirFS(r.ForkDir(site.ID))
 	st.Edited = differing(base, fork)
 	if c.Upstream == "" {
+		// a fork of the built-in template: the current binary's default is upstream
+		if c.CID == "" {
+			cur, err := r.defaultSnapshot()
+			if err != nil {
+				return st, err
+			}
+			st.Upstream, st.Current = "built-in", cur
+			if cur != c.ForkedFrom {
+				st.Changed = differing(base, os.DirFS(r.InstalledDir(cur)))
+			}
+		}
 		return st, nil
 	}
 	cur, err := r.Install(ctx, c.Upstream)

@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"testing/fstest"
 
 	"github.com/mejango/croptop/internal/ipfs"
 	"github.com/mejango/croptop/internal/store"
@@ -62,6 +63,28 @@ func TestResolutionForkReset(t *testing.T) {
 	up, err := r.Upstream(context.Background(), site)
 	if err != nil || len(up.Edited) != 1 || up.Edited[0] != "assets/style.css" {
 		t.Fatalf("upstream %+v %v", up, err)
+	}
+	if up.Upstream != "built-in" || up.Current == "" || len(up.Changed) != 0 {
+		t.Fatalf("a fork of the built-in template should see the current default as upstream with no changes yet: %+v", up)
+	}
+	if c := ChoiceOf(site); !strings.HasPrefix(c.ForkedFrom, "default-") {
+		t.Fatalf("fork should record the default snapshot it came from: %+v", c)
+	}
+	// simulate a newer built-in template: the snapshot differs from the current default
+	newer := &Resolver{DataDir: r.DataDir, Store: st, Default: fstest.MapFS{
+		"template.json":        {Data: []byte(`{"name":"Croptop","version":"9","buildNumber":999,"settings":{}}`)},
+		"templates/index.html": {Data: []byte("new index")},
+		"assets/style.css":     {Data: []byte("new css")},
+	}}
+	up, err = newer.Upstream(context.Background(), site)
+	if err != nil || up.Current != "default-999" || len(up.Changed) == 0 {
+		t.Fatalf("newer default should show changed files: %+v %v", up, err)
+	}
+	if err := newer.TakeTheirs(context.Background(), site, "templates/index.html"); err != nil {
+		t.Fatal(err)
+	}
+	if b, _ := r.ReadFile(site, "templates/index.html"); string(b) != "new index" {
+		t.Fatalf("take theirs did not copy the upstream file: %q", b)
 	}
 	if err := r.Reset(fixtureID); err != nil {
 		t.Fatal(err)
