@@ -32,10 +32,19 @@ type CIDer interface {
 
 type Renderer struct {
 	Store     *store.Store
-	Templates fs.FS // template.json, templates/, assets/
-	CIDs      CIDer
-	FFmpeg    string // path to ffmpeg, "" when unavailable
-	Log       func(string)
+	Templates fs.FS // default template: template.json, templates/, assets/
+	// TemplateFor picks a site's template (fork, installed, or default). nil = Templates.
+	TemplateFor func(*store.Site) (fs.FS, error)
+	CIDs        CIDer
+	FFmpeg      string // path to ffmpeg, "" when unavailable
+	Log         func(string)
+}
+
+func (r *Renderer) templateFor(site *store.Site) (fs.FS, error) {
+	if r.TemplateFor != nil {
+		return r.TemplateFor(site)
+	}
+	return r.Templates, nil
 }
 
 func (r *Renderer) log(format string, a ...any) {
@@ -54,7 +63,11 @@ func (r *Renderer) Render(ctx context.Context, siteID string) error {
 	if err != nil {
 		return err
 	}
-	meta, err := LoadMeta(r.Templates)
+	tfs, err := r.templateFor(site)
+	if err != nil {
+		return err
+	}
+	meta, err := LoadMeta(tfs)
 	if err != nil {
 		return err
 	}
@@ -62,7 +75,7 @@ func (r *Renderer) Render(ctx context.Context, siteID string) error {
 	if err := os.MkdirAll(pub, 0o755); err != nil {
 		return err
 	}
-	if err := copyFS(r.Templates, "assets", filepath.Join(pub, "assets")); err != nil {
+	if err := copyFS(tfs, "assets", filepath.Join(pub, "assets")); err != nil {
 		return err
 	}
 	for _, f := range []string{"avatar.png", "favicon.ico"} {
@@ -82,8 +95,8 @@ func (r *Renderer) Render(ctx context.Context, siteID string) error {
 		return err
 	}
 
-	eng := newEngine(r.Templates)
-	base := r.baseContext(site, posts, meta, settings, pub)
+	eng := newEngine(tfs)
+	base := r.baseContext(site, posts, meta, settings, pub, tfs)
 
 	SortForIndex(posts)
 	articles := make([]map[string]any, 0, len(posts))
@@ -179,7 +192,7 @@ func (r *Renderer) RenderPost(ctx context.Context, siteID, postID string) error 
 	return r.Render(ctx, siteID)
 }
 
-func (r *Renderer) baseContext(site *store.Site, posts []*store.Post, meta *Meta, settings map[string]any, pub string) map[string]any {
+func (r *Renderer) baseContext(site *store.Site, posts []*store.Post, meta *Meta, settings map[string]any, pub string, tfs fs.FS) map[string]any {
 	planet := toMap(site.Public())
 	tagKeys := []string{}
 	for k := range site.Tags {
@@ -216,7 +229,7 @@ func (r *Renderer) baseContext(site *store.Site, posts []*store.Post, meta *Meta
 		}
 	}
 	styleHash := ""
-	if css, err := fs.ReadFile(r.Templates, "assets/style.css"); err == nil {
+	if css, err := fs.ReadFile(tfs, "assets/style.css"); err == nil {
 		sum := sha256.Sum256(css)
 		styleHash = hex.EncodeToString(sum[:])
 	}

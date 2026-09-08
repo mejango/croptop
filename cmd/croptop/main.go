@@ -25,6 +25,7 @@ import (
 	"github.com/mejango/croptop/internal/render"
 	"github.com/mejango/croptop/internal/server"
 	"github.com/mejango/croptop/internal/store"
+	"github.com/mejango/croptop/internal/tpl"
 	"github.com/mejango/croptop/templates"
 	"github.com/mejango/croptop/web"
 )
@@ -46,6 +47,7 @@ const usage = `croptop — publish Croptop sites to IPFS
   croptop unfollow <name>
   croptop following        list followed sites
   croptop status           sites, sequences, followed sites (via the running console)
+  croptop template list | install <cid or name> | publish <dir>
   croptop engine           print the active ipfs engine (kubo or embedded)
   croptop version
 
@@ -62,6 +64,7 @@ type app struct {
 	engine       ipfs.Engine
 	kubo         *ipfs.Node // set when engine is kubo
 	follow       *follow.Store
+	tpl          *tpl.Resolver
 	pub          *publish.Publisher
 	tmpl         fs.FS
 }
@@ -112,6 +115,21 @@ func run(args []string) error {
 	case "engine":
 		fmt.Println(a.cfg.EngineName())
 		return nil
+	case "template":
+		if len(rest) > 0 && rest[0] == "list" {
+			list, err := a.tpl.Installed()
+			if err != nil {
+				return err
+			}
+			for _, t := range list {
+				id := t.CID
+				if t.Default {
+					id = "(built in)"
+				}
+				fmt.Printf("%-12s %-8s build %-5d %s  used by %d site(s)\n", t.Name, t.Version, t.Build, id, len(t.Sites))
+			}
+			return nil
+		}
 	case "serve":
 		return a.serve(*listen, *noOpen || *role == "node")
 	case "status":
@@ -271,6 +289,33 @@ func run(args []string) error {
 			fmt.Printf("%s\t%s\t%s\tchanged %s\n", e.Title, e.IPNS, e.CID, e.Changed.Time().Format(time.RFC3339))
 		}
 		return nil
+	case "template":
+		if len(rest) < 1 {
+			return fmt.Errorf("usage: croptop template list | install <cid or name> | publish <dir>")
+		}
+		switch rest[0] {
+		case "install":
+			if len(rest) < 2 {
+				return fmt.Errorf("usage: croptop template install <cid or name>")
+			}
+			info, err := a.tpl.Install(ctx, rest[1])
+			if err != nil {
+				return err
+			}
+			fmt.Printf("installed %s %s as %s\n", info.Name, info.Version, info.CID)
+			return nil
+		case "publish":
+			if len(rest) < 2 {
+				return fmt.Errorf("usage: croptop template publish <dir>")
+			}
+			cid, err := a.tpl.Publish(ctx, rest[1])
+			if err != nil {
+				return err
+			}
+			fmt.Printf("published template %s\n  cid %s\n  install elsewhere with: croptop template install %s\n", rest[1], cid, cid)
+			return nil
+		}
+		return fmt.Errorf("unknown template command %q", rest[0])
 	case "ipfs-smoke":
 		info, err := a.engine.Info(ctx)
 		fmt.Printf("%s: %+v %v\n", a.cfg.EngineName(), info, err)
@@ -352,7 +397,8 @@ func (a *app) open(engine string) error {
 		a.engine = a.kubo
 	}
 	ffmpeg, _ := exec.LookPath("ffmpeg")
-	r := &render.Renderer{Store: a.store, Templates: a.tmpl, CIDs: a.engine, FFmpeg: ffmpeg, Log: println}
+	a.tpl = &tpl.Resolver{DataDir: a.dataDir, Store: a.store, Default: a.tmpl, Engine: a.engine, Log: println}
+	r := &render.Renderer{Store: a.store, Templates: a.tmpl, TemplateFor: a.tpl.TemplateFor, CIDs: a.engine, FFmpeg: ffmpeg, Log: println}
 	a.pub = &publish.Publisher{Store: a.store, Node: a.engine, Render: r, Log: println}
 	a.follow = &follow.Store{Root: a.dataDir, Engine: a.engine, Log: println}
 	return nil
@@ -445,7 +491,7 @@ func (a *app) serve(listen string, noOpen bool) error {
 	}()
 	ui, _ := fs.Sub(web.FS, ".")
 	srv := &server.Server{
-		Store: a.store, Pub: a.pub, Follow: a.follow, Node: a.engine, Cfg: a.cfg, UI: ui, Templates: a.tmpl,
+		Store: a.store, Pub: a.pub, Follow: a.follow, Tpl: a.tpl, Node: a.engine, Cfg: a.cfg, UI: ui, Templates: a.tmpl,
 		Version: version, DataDir: a.dataDir, Log: println,
 	}
 	url := "http://" + strings.Replace(a.cfg.Listen, "0.0.0.0", "127.0.0.1", 1)

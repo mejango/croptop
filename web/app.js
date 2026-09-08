@@ -211,6 +211,7 @@
       h("div", { class: "head" }, h("div", {}, h("h1", {}, site.name), h("p", {}, site.about)),
         h("div", { class: "actions" },
           h("a", { class: "btn quiet", href: `/${id}/`, target: "_blank" }, "Preview"),
+          h("a", { class: "btn quiet", href: `#/site/${id}/template` }, "Template"),
           h("a", { class: "btn quiet", href: `#/site/${id}/settings` }, "Settings"),
           h("button", { class: "btn hot", id: "publish", onclick: () => publish(site) }, "Publish"))),
       strip, grid);
@@ -421,6 +422,72 @@
     m.replaceChildren(h("div", { class: "head" }, h("div", {}, h("h1", {}, "Settings"), h("p", {}, site.name))), form, h("div", { style: "height:24px" }), keySection, h("div", { style: "height:24px" }), danger);
   };
 
+  views.template = async (id) => {
+    const site = siteById(id); if (!site) return views.home();
+    const m = $("#main");
+    const [info, installed] = await Promise.all([api("GET", `/v0/croptop/sites/${id}/template`), api("GET", "/v0/croptop/templates")]);
+    const forked = info.choice.forked;
+    const preview = h("iframe", { class: "preview", src: `/${id}/?t=${Date.now()}`, title: "Preview" });
+    const reload = () => { preview.src = `/${id}/?t=${Date.now()}`; };
+    const editor = h("textarea", { class: "code", spellcheck: "false", disabled: forked ? null : "" });
+    let current = "";
+    const fileList = h("div", { class: "filelist" });
+    const openFile = async (p) => {
+      current = p;
+      for (const a of fileList.querySelectorAll("a")) a.classList.toggle("current", a.dataset.p === p);
+      const r = await fetch(`/v0/croptop/sites/${id}/template/file?path=${encodeURIComponent(p)}`);
+      editor.value = await r.text();
+    };
+    for (const f of info.editable) fileList.append(h("a", { href: "#", "data-p": f, onclick: (e) => { e.preventDefault(); openFile(f); } }, f));
+    const save = h("button", { class: "btn hot", disabled: forked ? null : "", onclick: async () => {
+      if (!current) return;
+      save.disabled = true; save.textContent = "Saving…";
+      try {
+        const r = await fetch(`/v0/croptop/sites/${id}/template/file?path=${encodeURIComponent(current)}`, { method: "PUT", body: editor.value });
+        if (!r.ok) throw new Error((await r.json()).error);
+        toast("Saved and re-rendered"); reload();
+      } catch (err) { toast(err.message, true); }
+      save.disabled = false; save.textContent = "Save";
+    }}, "Save");
+    editor.addEventListener("keydown", (e) => { if ((e.metaKey || e.ctrlKey) && e.key === "s") { e.preventDefault(); save.click(); } });
+
+    const sourceText = info.source === "fork" ? "Forked copy, edits are yours" : info.source === "default" ? "Built-in Croptop template" : "Installed template " + info.choice.cid.slice(0, 16) + "…";
+    const actions = h("div", { class: "actions" });
+    if (!forked) {
+      actions.append(h("button", { class: "btn", onclick: async () => {
+        await api("POST", `/v0/croptop/sites/${id}/template/fork`); toast("Forked. Edit any file and save."); route();
+      }}, "Fork to edit"));
+    } else {
+      actions.append(h("button", { class: "btn quiet danger", onclick: async () => {
+        if (!confirm("Discard your edits and go back to the original template?")) return;
+        await api("POST", `/v0/croptop/sites/${id}/template/reset`); toast("Reset"); route();
+      }}, "Reset to original"));
+      if (info.choice.upstream) actions.append(h("button", { class: "btn quiet", onclick: async () => {
+        const st = await api("GET", `/v0/croptop/sites/${id}/template/upstream`);
+        if (!st.changed.length) return toast("Upstream has no newer files");
+        const take = st.changed.filter((p) => confirm(`Upstream changed ${p}. Take their version?` + (st.edited.includes(p) ? " You edited this file; your edits would be lost." : "")));
+        for (const p of take) await api("POST", `/v0/croptop/sites/${id}/template/upstream/take?path=${encodeURIComponent(p)}`);
+        toast(`Took ${take.length} file(s)`); route();
+      }}, "Update from upstream"));
+    }
+    const choose = h("select", { onchange: async (e) => {
+      await api("PUT", `/v0/croptop/sites/${id}/template`, { cid: e.target.value }); toast("Template changed"); route();
+    }}, ...installed.map((t) => h("option", { value: t.cid, selected: (info.choice.cid || "") === t.cid ? "" : null }, `${t.name} ${t.version}` + (t.default ? " (built in)" : ` ${t.cid.slice(0, 10)}…`))));
+    const installBox = h("input", { type: "text", placeholder: "Install by CID or ENS name" });
+    const installBtn = h("button", { class: "btn quiet", onclick: async () => {
+      installBtn.disabled = true;
+      try { const t = await api("POST", "/v0/croptop/templates", { name: installBox.value.trim() }); toast(`Installed ${t.name} ${t.version}`); route(); }
+      catch (err) { toast(err.message, true); installBtn.disabled = false; }
+    }}, "Install");
+
+    m.replaceChildren(
+      h("div", { class: "head" }, h("div", {}, h("h1", {}, "Template"), h("p", {}, `${site.name}. ${sourceText}.`)), actions),
+      h("div", { class: "row", style: "margin-bottom:14px" }, h("label", { class: "inline" }, "Using ", choose), installBox, installBtn),
+      forked ? null : h("p", { class: "help" }, "Fork to edit any file. The preview updates on every save. Reset brings the original back."),
+      h("div", { class: "tpl" }, fileList, h("div", {}, editor, h("div", { class: "row", style: "margin-top:8px" }, save, h("span", { class: "help" }, "Cmd/Ctrl+S saves"))), preview));
+    if (info.editable.length) openFile(info.editable.includes("assets/style.css") ? "assets/style.css" : info.editable[0]);
+  };
+
   /* ---------- router ---------- */
   const route = async () => {
     const parts = location.hash.replace(/^#\/?/, "").split("/").filter(Boolean);
@@ -434,6 +501,7 @@
       if (parts[0] === "site" && parts[1]) {
         if (parts[2] === "post" && parts[3]) return views.post(parts[1], parts[3]);
         if (parts[2] === "settings") return views.settings(parts[1]);
+        if (parts[2] === "template") return views.template(parts[1]);
         return views.site(parts[1]);
       }
       return views.home();

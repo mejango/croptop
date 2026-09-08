@@ -21,12 +21,14 @@ import (
 	"github.com/mejango/croptop/internal/publish"
 	"github.com/mejango/croptop/internal/render"
 	"github.com/mejango/croptop/internal/store"
+	"github.com/mejango/croptop/internal/tpl"
 )
 
 type Server struct {
 	Store     *store.Store
 	Pub       *publish.Publisher
 	Follow    *follow.Store
+	Tpl       *tpl.Resolver
 	Node      ipfs.Engine
 	Cfg       *config.Config
 	UI        fs.FS
@@ -45,6 +47,7 @@ func (s *Server) Handler() http.Handler {
 	s.routesAPI(mux)
 	s.routesCroptop(mux)
 	s.routesFollow(mux)
+	s.routesTemplate(mux)
 
 	// UI
 	mux.HandleFunc("GET /{$}", func(w http.ResponseWriter, r *http.Request) {
@@ -163,3 +166,13 @@ func (s *Server) render(ctx context.Context, siteID string) {
 }
 
 func (s *Server) meta() (*render.Meta, error) { return render.LoadMeta(s.Templates) }
+
+// metaFor is the template.json of the template the site actually uses.
+func (s *Server) metaFor(site *store.Site) (*render.Meta, error) {
+	if s.Tpl != nil {
+		if fsys, _, err := s.Tpl.For(site); err == nil {
+			return render.LoadMeta(fsys)
+		}
+	}
+	return s.meta()
+}

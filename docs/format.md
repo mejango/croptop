@@ -143,3 +143,39 @@ Records are published with lifetime 7200h and TTL 1m. Every publish reads
 the network's current record and uses `max(local, network) + 1` as the
 sequence. If the network's record points somewhere this client did not
 publish, the client stops and asks for a sync.
+
+## Template context (for template authors)
+
+Templates are Django-syntax HTML (Stencil in Planet, pongo2 here) under
+`templates/`. `index.html` renders the feed and tag pages, `blog.html` a
+post, `simple.html` a minimal post page. Every render receives:
+
+| key | value |
+|-----|-------|
+| `planet` | the site: `name`, `about`, `ipns`, `tags` (list of tag names), social usernames, `plausible*` |
+| `planet_ipns` | the IPNS name |
+| `articles` | list of article objects (feed order) |
+| `article` | the current post (post pages) with `created.timeIntervalSince1970` |
+| `article_id`, `article_type`, `article_title`, `article_summary` | post pages |
+| `content_html` | the post's markdown rendered to HTML |
+| `page_title`, `page_description`, `page_description_html` | for `<head>` |
+| `site_navigation` | list of `{id, title, slug, externalLink, weight}` for posts marked "show in navigation" |
+| `has_avatar`, `has_podcast` | booleans |
+| `og_image_url`, `social_image_url` | absolute image URLs for sharing |
+| `assets_prefix` | `./` on the feed, `../` on post pages |
+| `template_settings` | `template.json` settings definitions |
+| `user_settings` | the site's chosen values, defaults filled in |
+| `custom_code_head`, `custom_code_body_start`, `custom_code_body_end` | owner-provided HTML |
+| `build_timestamp` | Unix seconds, for cache busting |
+| `style_css_sha256` | hash of `assets/style.css` |
+| `current_item_type` | `index`, `blog`, or `tags` |
+| `tag_key`, `tag_value` | on tag pages |
+
+Filters: `escape`, `mdyydot` (`1.2.06`), `formatDateC` (RFC 3339 local),
+`md2html`, `rfc822`, `hhmmss`. `x.count > 0`, `x != nil`, `x == true`, and
+`dict['key']` from Stencil are rewritten before parsing.
+
+`template.json` fields: `name`, `version`, `buildNumber`,
+`generateNFTMetadata`, `generateTagPages`, `settings` (name, type,
+defaultValue, description, advanced). Settings reach the page through
+`templateSettings.json`, which the template's JavaScript fetches into `env`.

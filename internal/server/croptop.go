@@ -57,7 +57,7 @@ func (s *Server) routesCroptop(mux *http.ServeMux) {
 			writeErr(w, 500, err)
 			return
 		}
-		meta, err := s.meta()
+		meta, err := s.metaFor(site)
 		if err != nil {
 			writeErr(w, 500, err)
 			return

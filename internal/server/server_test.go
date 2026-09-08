@@ -20,6 +20,7 @@ import (
 	"github.com/mejango/croptop/internal/publish"
 	"github.com/mejango/croptop/internal/render"
 	"github.com/mejango/croptop/internal/store"
+	"github.com/mejango/croptop/internal/tpl"
 	"github.com/mejango/croptop/templates"
 )
 
@@ -33,11 +34,14 @@ func testServer(t *testing.T) (*Server, *httptest.Server) {
 	script, _ := filepath.Abs("../publish/testdata/fake-ipfs")
 	node := ipfs.NewNode(script, filepath.Join(root, "ipfs"))
 	st := &store.Store{Root: root}
-	r := &render.Renderer{Store: st, Templates: templates.FS, CIDs: node}
+	resolver := &tpl.Resolver{DataDir: root, Store: st, Default: templates.FS, Engine: node}
+	r := &render.Renderer{Store: st, Templates: templates.FS, TemplateFor: resolver.TemplateFor, CIDs: node}
 	pub := &publish.Publisher{Store: st, Node: node, Render: r, SkipPrewarm: true}
 	s := &Server{
-		Store: st, Pub: pub, Node: node, Follow: &follow.Store{Root: root, Engine: node}, Cfg: &config.Config{Listen: config.DefaultListen},
-		UI: fstest.MapFS{"index.html": {Data: []byte("<h1>ui</h1>")}}, Templates: templates.FS, Version: "test",
+		Store: st, Pub: pub, Node: node, Follow: &follow.Store{Root: root, Engine: node},
+		Tpl: resolver,
+		Cfg: &config.Config{Listen: config.DefaultListen},
+		UI:  fstest.MapFS{"index.html": {Data: []byte("<h1>ui</h1>")}}, Templates: templates.FS, Version: "test",
 	}
 	ts := httptest.NewServer(s.Handler())
 	t.Cleanup(ts.Close)
@@ -223,5 +227,39 @@ func TestFollowRoutes(t *testing.T) {
 	code, _ = do(t, "GET", ts.URL+"/f/k51followed/planet.json", nil, "")
 	if code != 404 {
 		t.Fatalf("tree should be gone: %d", code)
+	}
+}
+
+func TestTemplateForkEdit(t *testing.T) {
+	s, ts := testServer(t)
+	body, ctype := multipartBody(t, map[string]string{"name": "Tpl"}, nil)
+	_, site := do(t, "POST", ts.URL+"/v0/planets/my", body, ctype)
+	id := site["id"].(string)
+	code, info := do(t, "GET", ts.URL+"/v0/croptop/sites/"+id+"/template", nil, "")
+	if code != 200 || info["source"] != "default" {
+		t.Fatalf("template info %d %v", code, info)
+	}
+	if code, _ := do(t, "POST", ts.URL+"/v0/croptop/sites/"+id+"/template/fork", nil, ""); code != 200 {
+		t.Fatalf("fork %d", code)
+	}
+	css := "body{background:hotpink}"
+	code, _ = do(t, "PUT", ts.URL+"/v0/croptop/sites/"+id+"/template/file?path=assets/style.css", strings.NewReader(css), "text/plain")
+	if code != 200 {
+		t.Fatalf("save %d", code)
+	}
+	b, _ := os.ReadFile(filepath.Join(s.Store.PublicDir(id), "assets", "style.css"))
+	if string(b) != css {
+		t.Fatalf("rendered site does not use the fork: %q", b)
+	}
+	if code, _ := do(t, "POST", ts.URL+"/v0/croptop/sites/"+id+"/template/reset", nil, ""); code != 200 {
+		t.Fatalf("reset %d", code)
+	}
+	b, _ = os.ReadFile(filepath.Join(s.Store.PublicDir(id), "assets", "style.css"))
+	if string(b) == css {
+		t.Fatal("reset did not restore the default template")
+	}
+	code, list := do(t, "GET", ts.URL+"/v0/croptop/templates", nil, "")
+	if code != 200 {
+		t.Fatalf("templates %d %v", code, list)
 	}
 }
