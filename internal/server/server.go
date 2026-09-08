@@ -53,6 +53,15 @@ func (s *Server) Handler() http.Handler {
 			http.ServeFileFS(w, r, s.UI, f)
 		})
 	}
+	// the template's own web fonts, so the console looks like the site
+	mux.HandleFunc("GET /fonts/{file}", func(w http.ResponseWriter, r *http.Request) {
+		f := r.PathValue("file")
+		if !strings.HasSuffix(f, ".woff2") || strings.Contains(f, "/") {
+			http.NotFound(w, r)
+			return
+		}
+		http.ServeFileFS(w, r, s.Templates, "assets/"+f)
+	})
 	// public trees: /<site-uuid>/...
 	mux.HandleFunc("GET /{site}/{path...}", func(w http.ResponseWriter, r *http.Request) {
 		id := r.PathValue("site")

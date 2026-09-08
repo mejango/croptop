@@ -19,9 +19,9 @@ func (s *Server) routesCroptop(mux *http.ServeMux) {
 		defer cancel()
 		info, err := s.Node.Info(ctx)
 		writeJSON(w, 200, map[string]any{
-			"version": s.Version,
-			"dataDir": s.DataDir,
-			"listen":  s.Cfg.Listen,
+			"version":  s.Version,
+			"dataDir":  s.DataDir,
+			"listen":   s.Cfg.Listen,
 			"passcode": s.Cfg.HasPasscode(),
 			"ipfs": map[string]any{
 				"running": s.Node.Running() && err == nil, "peers": info.Peers, "peerID": info.PeerID,

@@ -90,9 +90,9 @@ func dateFilter(layout string) pongo2.FilterFunction {
 
 // Meta is template.json.
 type Meta struct {
-	Name                string                   `json:"name"`
-	GenerateNFTMetadata bool                     `json:"generateNFTMetadata"`
-	GenerateTagPages    bool                     `json:"generateTagPages"`
+	Name                string                 `json:"name"`
+	GenerateNFTMetadata bool                   `json:"generateNFTMetadata"`
+	GenerateTagPages    bool                   `json:"generateTagPages"`
 	Settings            map[string]MetaSetting `json:"settings"`
 }
 

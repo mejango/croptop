@@ -17,7 +17,7 @@ type Store struct {
 
 var ErrNotFound = errors.New("not found")
 
-func (s *Store) SitesDir() string          { return filepath.Join(s.Root, "sites") }
+func (s *Store) SitesDir() string           { return filepath.Join(s.Root, "sites") }
 func (s *Store) SiteDir(id string) string   { return filepath.Join(s.SitesDir(), id) }
 func (s *Store) PublicDir(id string) string { return filepath.Join(s.Root, "public", id) }
 func (s *Store) ArticlesDir(id string) string {

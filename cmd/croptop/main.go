@@ -1,68 +1,381 @@
+// croptop publishes Croptop sites to IPFS from Linux, macOS, and Windows.
 package main
 
 import (
+	"bufio"
 	"context"
+	"flag"
 	"fmt"
+	"io/fs"
 	"os"
+	"os/exec"
+	"os/signal"
 	"path/filepath"
+	"runtime"
+	"strings"
+	"syscall"
 	"time"
 
+	"github.com/mejango/croptop/internal/config"
 	"github.com/mejango/croptop/internal/ipfs"
+	"github.com/mejango/croptop/internal/publish"
+	"github.com/mejango/croptop/internal/render"
+	"github.com/mejango/croptop/internal/server"
+	"github.com/mejango/croptop/internal/store"
+	"github.com/mejango/croptop/templates"
+	"github.com/mejango/croptop/web"
 )
 
 var version = "dev"
 
+const usage = `croptop — publish Croptop sites to IPFS
+
+  croptop serve            run the console at http://127.0.0.1:8086 (default)
+  croptop import-planet    copy sites and keys from the Croptop Mac app
+  croptop adopt <name> --key site.pem
+                           take over a published site on this machine
+  croptop sync <site>      merge what another machine published, then publish
+  croptop publish <site>   render, add to IPFS, update the IPNS name
+  croptop key export <site>   print the site's private key (PEM)
+  croptop key import <site> <file.pem>
+  croptop passcode set     required before listening on a non-loopback address
+  croptop version
+
+Common flags: --data <dir> (default: ` + "%s" + `), --templates <dir>
+`
+
+type app struct {
+	dataDir      string
+	templatesDir string
+	cfg          *config.Config
+	store        *store.Store
+	node         *ipfs.Node
+	pub          *publish.Publisher
+	tmpl         fs.FS
+}
+
 func main() {
-	if len(os.Args) < 2 {
-		fmt.Fprintln(os.Stderr, "usage: croptop <command>")
-		os.Exit(2)
-	}
-	switch os.Args[1] {
-	case "ipfs-smoke":
-		if err := ipfsSmoke(); err != nil {
-			fmt.Fprintln(os.Stderr, err)
-			os.Exit(1)
-		}
-	case "version":
-		fmt.Println(version)
-	default:
-		fmt.Fprintln(os.Stderr, "unknown command", os.Args[1])
-		os.Exit(2)
+	if err := run(os.Args[1:]); err != nil {
+		fmt.Fprintln(os.Stderr, "error:", err)
+		os.Exit(1)
 	}
 }
 
-func ipfsSmoke() error {
-	data := ".data"
-	bin, err := ipfs.EnsureKubo(filepath.Join(data, "kubo"), func(s string) { fmt.Println(s) })
-	if err != nil {
+func run(args []string) error {
+	defaultData, _ := config.DefaultDir()
+	cmd := "serve"
+	if len(args) > 0 && !strings.HasPrefix(args[0], "-") {
+		cmd, args = args[0], args[1:]
+	}
+	fs := flag.NewFlagSet(cmd, flag.ContinueOnError)
+	fs.Usage = func() { fmt.Fprintf(os.Stderr, usage, defaultData); fs.PrintDefaults() }
+	a := &app{}
+	fs.StringVar(&a.dataDir, "data", defaultData, "data directory")
+	fs.StringVar(&a.templatesDir, "templates", "", "use a template directory instead of the embedded one")
+	listen := fs.String("listen", "", "address to listen on (default from config, 127.0.0.1:8086)")
+	noOpen := fs.Bool("no-open", false, "do not open the browser")
+	force := fs.Bool("force", false, "override safety checks")
+	keyFile := fs.String("key", "", "PEM key file (adopt)")
+	container := fs.String("container", "", "Planet container path (import-planet)")
+	if err := fs.Parse(flagsFirst(args)); err != nil {
+		return nil
+	}
+	rest := fs.Args()
+
+	switch cmd {
+	case "version":
+		fmt.Println("croptop", version, "kubo", ipfs.KuboVersion)
+		return nil
+	case "help", "-h", "--help":
+		fs.Usage()
+		return nil
+	}
+	if err := a.open(); err != nil {
 		return err
 	}
-	n := ipfs.NewNode(bin, filepath.Join(data, "ipfs"))
-	ctx := context.Background()
-	if err := n.Init(ctx); err != nil {
+
+	switch cmd {
+	case "serve":
+		return a.serve(*listen, *noOpen)
+	case "import-planet":
+		c := *container
+		if c == "" {
+			c = publish.DefaultPlanetContainer()
+		}
+		if c == "" {
+			return fmt.Errorf("--container is required on %s", runtime.GOOS)
+		}
+		ids, err := publish.ImportPlanet(a.store, a.keystore(), c, *force, println)
+		if err != nil {
+			return err
+		}
+		fmt.Printf("imported %d sites into %s\n", len(ids), a.dataDir)
+		return nil
+	case "passcode":
+		if len(rest) < 1 || rest[0] != "set" {
+			return fmt.Errorf("usage: croptop passcode set")
+		}
+		fmt.Print("New passcode: ")
+		line, _ := bufio.NewReader(os.Stdin).ReadString('\n')
+		line = strings.TrimSpace(line)
+		if len(line) < 4 {
+			return fmt.Errorf("passcode must be at least 4 characters")
+		}
+		a.cfg.SetPasscode(line)
+		if err := a.cfg.Save(a.dataDir); err != nil {
+			return err
+		}
+		fmt.Println("Passcode set. Sign in as user \"Croptop\". Start with --listen 0.0.0.0:8086 to reach it from other devices.")
+		return nil
+	case "key":
+		if len(rest) < 2 {
+			return fmt.Errorf("usage: croptop key export <site> | key import <site> <file.pem>")
+		}
+		site, err := a.findSite(rest[1])
+		if err != nil {
+			return err
+		}
+		switch rest[0] {
+		case "export":
+			pem, err := a.keystore().ExportPEM(site.ID)
+			if err != nil {
+				return fmt.Errorf("no key for %s on this machine", site.Name)
+			}
+			os.Stdout.Write(pem)
+			return nil
+		case "import":
+			if len(rest) < 3 {
+				return fmt.Errorf("usage: croptop key import <site> <file.pem>")
+			}
+			b, err := os.ReadFile(rest[2])
+			if err != nil {
+				return err
+			}
+			ks := a.keystore()
+			if err := ks.ImportPEM(site.ID, b); err != nil {
+				return err
+			}
+			if name, _ := ks.Name(site.ID); name != site.IPNS {
+				ks.Delete(site.ID)
+				return fmt.Errorf("that key belongs to %s, not %s", name, site.IPNS)
+			}
+			fmt.Println("key imported for", site.Name)
+			return nil
+		}
+		return fmt.Errorf("unknown key command %q", rest[0])
+	}
+
+	// the rest need kubo running
+	if err := a.startNode(context.Background()); err != nil {
 		return err
 	}
-	fmt.Printf("ports api=%d gateway=%d swarm=%d\n", n.APIPort, n.GatewayPort, n.SwarmPort)
-	if err := n.Start(ctx); err != nil {
+	defer a.node.Stop()
+	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer cancel()
+	switch cmd {
+	case "publish":
+		if len(rest) < 1 {
+			return fmt.Errorf("usage: croptop publish <site name or id>")
+		}
+		site, err := a.findSite(rest[0])
+		if err != nil {
+			return err
+		}
+		res, err := a.pub.Publish(ctx, site.ID, *force)
+		if err != nil {
+			return err
+		}
+		fmt.Printf("published %s\n  cid      %s\n  sequence %d\n  url      %s\n", site.Name, res.CID, res.Sequence, render.SiteURL(site))
+		return nil
+	case "sync":
+		if len(rest) < 1 {
+			return fmt.Errorf("usage: croptop sync <site name or id>")
+		}
+		site, err := a.findSite(rest[0])
+		if err != nil {
+			return err
+		}
+		res, err := a.pub.Sync(ctx, site.ID)
+		if err != nil {
+			return err
+		}
+		fmt.Printf("synced %s: %d new, %d updated; published at sequence %d\n", site.Name, res.Added, res.Updated, res.Result.Sequence)
+		return nil
+	case "adopt":
+		if len(rest) < 1 || *keyFile == "" {
+			return fmt.Errorf("usage: croptop adopt <ipns-name-or-ens> --key site.pem")
+		}
+		pem, err := os.ReadFile(*keyFile)
+		if err != nil {
+			return err
+		}
+		id, err := a.pub.Adopt(ctx, rest[0], pem)
+		if err != nil {
+			return err
+		}
+		if err := a.pub.Render.Render(ctx, id); err != nil {
+			return err
+		}
+		site, _ := a.store.Site(id)
+		fmt.Printf("adopted %s (%s) at sequence %d\n", site.Name, id, site.IPNSSequence)
+		return nil
+	case "ipfs-smoke":
+		info, err := a.node.Info(ctx)
+		fmt.Printf("%+v %v\n", info, err)
+		return nil
+	}
+	return fmt.Errorf("unknown command %q (try croptop help)", cmd)
+}
+
+// flagsFirst moves --flags ahead of positional arguments so that
+// `croptop key export MySite --data .data` works; Go's flag package stops
+// at the first positional otherwise.
+func flagsFirst(args []string) []string {
+	boolFlags := map[string]bool{"no-open": true, "force": true, "h": true, "help": true}
+	var flags, rest []string
+	for i := 0; i < len(args); i++ {
+		a := args[i]
+		if !strings.HasPrefix(a, "-") || a == "-" {
+			rest = append(rest, a)
+			continue
+		}
+		name := strings.TrimLeft(a, "-")
+		flags = append(flags, a)
+		if !strings.Contains(name, "=") && !boolFlags[name] && i+1 < len(args) {
+			i++
+			flags = append(flags, args[i])
+		}
+	}
+	return append(flags, rest...)
+}
+
+func (a *app) open() error {
+	var err error
+	if a.cfg, err = config.Load(a.dataDir); err != nil {
 		return err
 	}
-	defer n.Stop()
-	info, err := n.Info(ctx)
-	if err != nil {
+	if err := os.MkdirAll(a.dataDir, 0o755); err != nil {
 		return err
 	}
-	fmt.Printf("peer %s version %s peers %d\n", info.PeerID, info.Version, info.Peers)
-	if len(os.Args) > 2 {
-		rctx, cancel := context.WithTimeout(ctx, 60*time.Second)
-		defer cancel()
-		raw, err := n.Run(rctx, "name", "get", os.Args[2])
-		fmt.Printf("name get: %d bytes err=%v\n", len(raw), err)
-		rec, err := n.NetworkRecord(rctx, os.Args[2])
-		fmt.Printf("record %+v err=%v\n", rec, err)
-		f, _ := os.CreateTemp("", "rec")
-		f.Write(raw); f.Close()
-		out, err := n.Run(rctx, "name", "inspect", "--enc=json", f.Name())
-		fmt.Printf("inspect raw: %s err=%v\n", out, err)
+	a.store = &store.Store{Root: a.dataDir}
+	a.tmpl = templates.FS
+	if a.templatesDir != "" {
+		a.tmpl = os.DirFS(a.templatesDir)
+		if _, err := fs.Stat(a.tmpl, "template.json"); err != nil {
+			return fmt.Errorf("--templates %s: no template.json", a.templatesDir)
+		}
+	}
+	bin := a.cfg.KuboBin
+	if bin == "" {
+		bin = filepath.Join(a.dataDir, "kubo", "ipfs")
+		if runtime.GOOS == "windows" {
+			bin += ".exe"
+		}
+	}
+	a.node = ipfs.NewNode(bin, filepath.Join(a.dataDir, "ipfs"))
+	a.node.Log = func(s string) {
+		if os.Getenv("CROPTOP_DEBUG") != "" {
+			fmt.Fprintln(os.Stderr, s)
+		}
+	}
+	ffmpeg, _ := exec.LookPath("ffmpeg")
+	r := &render.Renderer{Store: a.store, Templates: a.tmpl, CIDs: a.node, FFmpeg: ffmpeg, Log: println}
+	a.pub = &publish.Publisher{Store: a.store, Node: a.node, Render: r, Log: println}
+	return nil
+}
+
+func (a *app) keystore() *ipfs.Keystore { return a.node.Keystore() }
+
+func (a *app) startNode(ctx context.Context) error {
+	if a.cfg.KuboBin == "" {
+		bin, err := ipfs.EnsureKubo(filepath.Join(a.dataDir, "kubo"), println)
+		if err != nil {
+			return fmt.Errorf("get kubo: %w", err)
+		}
+		a.node.Bin = bin
+	}
+	if err := a.node.Init(ctx); err != nil {
+		return fmt.Errorf("ipfs init: %w", err)
+	}
+	println("starting ipfs")
+	if err := a.node.Start(ctx); err != nil {
+		return fmt.Errorf("ipfs daemon: %w", err)
 	}
 	return nil
 }
+
+func (a *app) findSite(nameOrID string) (*store.Site, error) {
+	if s, err := a.store.Site(strings.ToUpper(nameOrID)); err == nil {
+		return s, nil
+	}
+	sites, err := a.store.Sites()
+	if err != nil {
+		return nil, err
+	}
+	for _, s := range sites {
+		if strings.EqualFold(s.Name, nameOrID) || (s.Domain != nil && strings.EqualFold(*s.Domain, nameOrID)) || s.IPNS == nameOrID {
+			return s, nil
+		}
+	}
+	var prefix []*store.Site
+	for _, s := range sites {
+		if strings.HasPrefix(strings.ToLower(s.Name), strings.ToLower(nameOrID)) {
+			prefix = append(prefix, s)
+		}
+	}
+	if len(prefix) == 1 {
+		return prefix[0], nil
+	}
+	return nil, fmt.Errorf("no site named %q; sites: %s", nameOrID, siteNames(sites))
+}
+
+func siteNames(sites []*store.Site) string {
+	var out []string
+	for _, s := range sites {
+		out = append(out, s.Name)
+	}
+	return strings.Join(out, ", ")
+}
+
+func (a *app) serve(listen string, noOpen bool) error {
+	if listen != "" {
+		a.cfg.Listen = listen
+	}
+	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer cancel()
+	if err := a.startNode(ctx); err != nil {
+		return err
+	}
+	defer a.node.Stop()
+	go a.pub.RunKeepalive(ctx, 10*time.Minute)
+	ui, _ := fs.Sub(web.FS, ".")
+	srv := &server.Server{
+		Store: a.store, Pub: a.pub, Node: a.node, Cfg: a.cfg, UI: ui, Templates: a.tmpl,
+		Version: version, DataDir: a.dataDir, Log: println,
+	}
+	url := "http://" + strings.Replace(a.cfg.Listen, "0.0.0.0", "127.0.0.1", 1)
+	println("console at " + url)
+	if !noOpen {
+		go func() { time.Sleep(300 * time.Millisecond); openBrowser(url) }()
+	}
+	go func() {
+		<-ctx.Done()
+		println("stopping")
+	}()
+	return srv.ListenAndServe(ctx, a.cfg.Listen)
+}
+
+func openBrowser(url string) {
+	var cmd *exec.Cmd
+	switch runtime.GOOS {
+	case "darwin":
+		cmd = exec.Command("open", url)
+	case "windows":
+		cmd = exec.Command("rundll32", "url.dll,FileProtocolHandler", url)
+	default:
+		cmd = exec.Command("xdg-open", url)
+	}
+	cmd.Start()
+}
+
+func println(s string) { fmt.Println(s) }

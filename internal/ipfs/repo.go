@@ -21,7 +21,7 @@ var peers = []map[string]any{
 	{"ID": "12D3KooWBJY6ZVV8Tk8UDDFMEqWoxn89Xc8wnpm8uBFSR3ijDkui", "Addrs": []string{ // Pinnable
 		"/ip4/167.71.172.216/tcp/4001", "/ip6/2604:a880:800:10::826:1/tcp/4001",
 		"/ip4/167.71.172.216/udp/4001/quic-v1", "/ip6/2604:a880:800:10::826:1/udp/4001/quic-v1"}},
-	{"ID": "12D3KooWJ6MTkNM8Bu8DzNiRm1GY3Wqh8U8Pp1zRWap6xY3MvsNw", "Addrs": []string{"/dnsaddr/node-1.ipfs.bit.site"}},       // bit.site
+	{"ID": "12D3KooWJ6MTkNM8Bu8DzNiRm1GY3Wqh8U8Pp1zRWap6xY3MvsNw", "Addrs": []string{"/dnsaddr/node-1.ipfs.bit.site"}},      // bit.site
 	{"ID": "12D3KooWQ85aSCFwFkByr5e3pUCQeuheVhobVxGSSs1DrRQHGv1t", "Addrs": []string{"/dnsaddr/node-1.ipfs.4everland.net"}}, // 4everland
 	{"ID": "12D3KooWGtYkBAaqJMJEmywMxaCiNP7LCEFUAFiLEBASe232c2VH", "Addrs": []string{"/dns4/bitswap.filebase.io/tcp/443/wss"}},
 }

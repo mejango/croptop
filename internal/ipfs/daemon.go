@@ -44,7 +44,7 @@ func (n *Node) Start(ctx context.Context) error {
 	if n.cmd != nil {
 		return nil
 	}
-	cmd := exec.Command(n.Bin, "daemon", "--enable-namesys-pubsub")
+	cmd := exec.Command(n.Bin, "daemon")
 	cmd.Env = n.env()
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
