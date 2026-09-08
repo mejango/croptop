@@ -142,3 +142,19 @@ publish). `croptop engine` prints which engine is active.
 
 Local HTTP gateway from the blockstore (Phase 3 uses it for followed
 sites), relay client, pinning of arbitrary CIDs, garbage collection.
+
+## Acceptance record (2026-09-08)
+
+- Embedded node read FOLLO's live record (sequence 30) from the DHT after
+  waiting for its routing table.
+- Adopted FOLLO through the embedded node (blocks came from the local kubo).
+- Published FOLLO at 31 (CLI) and 32 (console); the node's own read-back
+  returned 32; a fresh Linux arm64 node in Docker adopted at sequence 32;
+  eth.sucks served the new CID; kubo listed the embedded node as provider.
+- Kubo's `name get` and `routing get` on the same machine lagged one
+  publish behind and `name resolve --nocache` two behind, so kubo's own view
+  is not the freshness oracle; the fresh node and the read-back are.
+- Direct bitswap fetch from Docker to the NAT'd Mac node timed out and the
+  gateway fallback completed the adopt in six minutes. AutoRelay is on;
+  relay addresses appear within a minute of start.
+- Default engine flipped to embedded in v0.3.0.
