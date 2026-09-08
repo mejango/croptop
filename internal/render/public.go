@@ -7,25 +7,12 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/mejango/croptop/internal/gateway"
 	"github.com/mejango/croptop/internal/store"
 )
 
-// SiteURL is the public base URL Planet's Croptop build uses for absolute
-// links: the ENS domain on the eth.sucks gateway, else the IPNS name.
-func SiteURL(site *store.Site) string {
-	if site.Domain != nil {
-		d := strings.TrimSpace(*site.Domain)
-		switch {
-		case strings.HasSuffix(d, ".eth"):
-			return "https://" + d + ".sucks/"
-		case strings.HasSuffix(d, ".sol"):
-			return "https://" + d + ".build/"
-		case strings.HasSuffix(d, ".bit"):
-			return "https://" + d + ".site/"
-		}
-	}
-	return "https://" + site.IPNS + ".eth.sucks/"
-}
+// SiteURL is the site's canonical public base URL (see package gateway).
+func SiteURL(site *store.Site) string { return gateway.URL(site) }
 
 var heroExts = []string{".avif", ".jpeg", ".jpg", ".png", ".gif", ".webp"}
 

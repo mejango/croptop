@@ -13,6 +13,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -386,6 +387,46 @@ func (s *Server) modifyPost(w http.ResponseWriter, r *http.Request) {
 	if v, ok := formValue(r, "externalLink"); ok {
 		post.ExternalLink = &v
 	}
+	if v, ok := formValue(r, "pinned"); ok {
+		if v == "true" {
+			if post.Pinned == nil {
+				now := store.Now()
+				post.Pinned = &now
+			}
+		} else {
+			post.Pinned = nil
+			delete(post.Raw, "pinned")
+		}
+	}
+	if v, ok := formValue(r, "includeInNavigation"); ok {
+		b := v == "true"
+		post.IsIncludedInNavigation = &b
+	}
+	if v, ok := formValue(r, "navigationWeight"); ok {
+		if n, err := strconv.Atoi(strings.TrimSpace(v)); err == nil {
+			post.NavigationWeight = &n
+		}
+	}
+	heroChanged := false
+	if v, ok := formValue(r, "heroImage"); ok {
+		old := ""
+		if post.HeroImage != nil {
+			old = *post.HeroImage
+		}
+		v = strings.TrimSpace(v)
+		if v == "" {
+			post.HeroImage = nil
+			delete(post.Raw, "heroImage")
+		} else {
+			post.HeroImage = &v
+		}
+		heroChanged = v != old
+		if heroChanged {
+			post.HeroImageWidth, post.HeroImageHeight = nil, nil
+			delete(post.Raw, "heroImageWidth")
+			delete(post.Raw, "heroImageHeight")
+		}
+	}
 	if v, ok := formValue(r, "date"); ok && v != "" {
 		t, err := time.Parse(time.RFC3339, v)
 		if err != nil {
@@ -404,11 +445,13 @@ func (s *Server) modifyPost(w http.ResponseWriter, r *http.Request) {
 	}
 	now := store.Now()
 	post.Modified = &now
-	// generated files depend on title, content, and attachments; rebuild them
-	for _, f := range []string{"nft.json", "nft.json.cid.txt", "_cover.png"} {
-		os.Remove(filepath.Join(s.Store.PublicDir(site.ID), post.ID, f))
+	// generated files depend on title, content, attachments, and the hero; rebuild them
+	if _, ok := formValue(r, "title"); ok || heroChanged || r.MultipartForm != nil && len(r.MultipartForm.File) > 0 {
+		for _, f := range []string{"nft.json", "nft.json.cid.txt", "_cover.png"} {
+			os.Remove(filepath.Join(s.Store.PublicDir(site.ID), post.ID, f))
+		}
+		delete(post.CIDs, "_cover.png")
 	}
-	delete(post.CIDs, "_cover.png")
 	s.savePostAndRender(w, r, site.ID, post)
 }
 

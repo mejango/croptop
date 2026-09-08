@@ -4,10 +4,12 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"io"
 	"net/http"
 	"strings"
 	"time"
 
+	"github.com/mejango/croptop/internal/gateway"
 	"github.com/mejango/croptop/internal/render"
 	"github.com/mejango/croptop/internal/store"
 )
@@ -28,6 +30,14 @@ func (s *Server) routesCroptop(mux *http.ServeMux) {
 				"version": info.Version, "gateway": s.Node.GatewayURL(), "lastError": s.Node.LastStderr(),
 			},
 		})
+	})
+	mux.HandleFunc("POST /v0/croptop/markdown", func(w http.ResponseWriter, r *http.Request) {
+		b, _ := io.ReadAll(io.LimitReader(r.Body, 4<<20))
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		w.Write([]byte(render.Markdown(string(b))))
+	})
+	mux.HandleFunc("GET /v0/croptop/gateways", func(w http.ResponseWriter, r *http.Request) {
+		writeJSON(w, 200, gateway.Table)
 	})
 	mux.HandleFunc("GET /v0/croptop/template", func(w http.ResponseWriter, r *http.Request) {
 		meta, err := s.meta()
@@ -81,6 +91,7 @@ func (s *Server) routesCroptop(mux *http.ServeMux) {
 			Domain      *string
 			Tags        map[string]string
 			Archived    *bool
+			Gateway     *string
 			Custom      map[string]json.RawMessage // customCodeHead etc, passed through to Raw
 		}
 		if err := json.NewDecoder(r.Body).Decode(&in); err != nil {
@@ -102,6 +113,9 @@ func (s *Server) routesCroptop(mux *http.ServeMux) {
 		}
 		if in.Archived != nil {
 			site.Archived = in.Archived
+		}
+		if in.Gateway != nil {
+			gateway.Set(site, *in.Gateway)
 		}
 		if site.Raw == nil {
 			site.Raw = map[string]json.RawMessage{}

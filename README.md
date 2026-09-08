@@ -126,12 +126,21 @@ The console speaks Planet's REST API at `/v0` (see Planet's
 `Technotes/API.md`), so Planet's `pn` CLI and other clients work. The
 console's own routes live under `/v0/croptop/`.
 
+## Gateways
+
+Sites are reachable through any gateway that resolves ENS and IPNS names:
+eth.sucks, eth.shop, eth.limo, and more as they appear. Each site picks one
+as its canonical address in Settings; that one is written into the site's
+absolute links and RSS feed. The default is eth.sucks.
+
 ## Not in this version
 
 Aggregating other sites, Filebase/Pinnable/Cloudflare pinning, drafts,
-podcast RSS, HEIC images, video compression, full-text search, following
-other sites. Video thumbnails are generated only when `ffmpeg` is on your
-`PATH`.
+the podcast feed (`rss.xml` is generated, `podcast.xml` is not), HEIC
+images, video compression, full-text search, following other sites. Video
+thumbnails are generated only when `ffmpeg` is on your `PATH`.
+
+The published file layout is documented in `docs/format.md`.
 
 ## Developing
 

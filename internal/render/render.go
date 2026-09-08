@@ -110,6 +110,9 @@ func (r *Renderer) Render(ctx context.Context, siteID string) error {
 	if err := writeSwiftJSON(filepath.Join(pub, "planet.json"), planetMap); err != nil {
 		return err
 	}
+	if err := r.writeRSS(site, pub, base["planet"].(map[string]any), articles); err != nil {
+		return fmt.Errorf("rss: %w", err)
+	}
 
 	// index and tag pages
 	base["articles"] = articles

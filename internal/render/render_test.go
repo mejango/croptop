@@ -3,6 +3,7 @@ package render
 import (
 	"context"
 	"encoding/json"
+	"encoding/xml"
 	"image/png"
 	"os"
 	"path/filepath"
@@ -225,5 +226,44 @@ func TestPagesRenderButStayOutOfFeed(t *testing.T) {
 		if _, err := os.Stat(filepath.Join(s.PublicDir(fixtureID), dir, "index.html")); err != nil {
 			t.Fatalf("page not rendered at %s", dir)
 		}
+	}
+}
+
+func TestRSSMatchesPlanetShape(t *testing.T) {
+	r, s := fixtureRenderer(t)
+	if err := r.Render(context.Background(), fixtureID); err != nil {
+		t.Fatal(err)
+	}
+	b, err := os.ReadFile(filepath.Join(s.PublicDir(fixtureID), "rss.xml"))
+	if err != nil {
+		t.Fatal("rss.xml missing")
+	}
+	var feed struct {
+		Channel struct {
+			Title string `xml:"title"`
+			Link  string `xml:"link"`
+			Items []struct {
+				Link        string `xml:"link"`
+				PubDate     string `xml:"pubDate"`
+				Description string `xml:"description"`
+			} `xml:"item"`
+		} `xml:"channel"`
+	}
+	if err := xml.Unmarshal(b, &feed); err != nil {
+		t.Fatalf("rss.xml is not valid XML: %v\n%s", err, b[:400])
+	}
+	if feed.Channel.Title != "CocoPay 🥥" || len(feed.Channel.Items) != 18 {
+		t.Fatalf("title %q items %d", feed.Channel.Title, len(feed.Channel.Items))
+	}
+	site, _ := s.Site(fixtureID)
+	if feed.Channel.Link != RootPrefix(site)+"/" || feed.Channel.Link != "https://cocopay.eth.shop/" { // Planet uses a non-.eth domain as written
+		t.Fatalf("channel link %s", feed.Channel.Link)
+	}
+	it := feed.Channel.Items[0]
+	if !strings.HasPrefix(it.Link, feed.Channel.Link) || !strings.Contains(it.PubDate, "2025") {
+		t.Fatalf("item %+v", it)
+	}
+	if !strings.Contains(it.Description, `src="https://`) {
+		t.Fatalf("image not absolute: %s", it.Description)
 	}
 }

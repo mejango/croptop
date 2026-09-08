@@ -161,3 +161,41 @@ func TestAuth(t *testing.T) {
 func pngBytes() []byte {
 	return []byte("\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR\x00\x00\x00\x02\x00\x00\x00\x02\x08\x02\x00\x00\x00\xfd\xd4\x9as\x00\x00\x00\x12IDATx\x9cc\xfc\xcf\xc0\xc0\xc0\xc0\xc4\xc0\xc0\xc0\x00\x00\x0b\x08\x01\x03\xb0\xb1\x8d\xa4\x00\x00\x00\x00IEND\xaeB`\x82")
 }
+
+func TestPostControls(t *testing.T) {
+	s, ts := testServer(t)
+	body, ctype := multipartBody(t, map[string]string{"name": "Ctl"}, nil)
+	_, site := do(t, "POST", ts.URL+"/v0/planets/my", body, ctype)
+	id := site["id"].(string)
+	body, ctype = multipartBody(t, map[string]string{"title": "A", "content": "x"}, map[string][]byte{"b.png": pngBytes(), "a.png": pngBytes()})
+	_, post := do(t, "POST", ts.URL+"/v0/planets/my/"+id+"/articles", body, ctype)
+	pid := post["id"].(string)
+	if post["heroImageWidth"] == nil {
+		t.Fatalf("hero dims not computed: %v", post)
+	}
+	body, ctype = multipartBody(t, map[string]string{"pinned": "true", "includeInNavigation": "true", "navigationWeight": "3", "heroImage": "b.png"}, nil)
+	code, upd := do(t, "POST", ts.URL+"/v0/planets/my/"+id+"/articles/"+pid, body, ctype)
+	if code != 200 || upd["pinned"] == nil || upd["isIncludedInNavigation"] != true || upd["navigationWeight"] != float64(3) || upd["heroImage"] != "b.png" {
+		t.Fatalf("controls not saved: %d %v", code, upd)
+	}
+	var pj struct {
+		Articles []map[string]any `json:"articles"`
+	}
+	b, _ := os.ReadFile(filepath.Join(s.Store.PublicDir(id), "planet.json"))
+	json.Unmarshal(b, &pj)
+	if hf, _ := pj.Articles[0]["heroImageFilename"].(string); hf != "b.png" {
+		t.Fatalf("published hero %q", hf)
+	}
+	body, ctype = multipartBody(t, map[string]string{"pinned": "false", "heroImage": ""}, nil)
+	_, upd = do(t, "POST", ts.URL+"/v0/planets/my/"+id+"/articles/"+pid, body, ctype)
+	if upd["pinned"] != nil || upd["heroImage"] != nil {
+		t.Fatalf("controls not cleared: %v", upd)
+	}
+	code, m := do(t, "POST", ts.URL+"/v0/croptop/markdown", strings.NewReader("**b**"), "text/plain")
+	if code != 200 || !strings.Contains(m["_raw"].(string), "<strong>b</strong>") {
+		t.Fatalf("markdown preview: %d %v", code, m)
+	}
+	if _, err := os.Stat(filepath.Join(s.Store.PublicDir(id), "rss.xml")); err != nil {
+		t.Fatal("rss.xml not written for a new site")
+	}
+}

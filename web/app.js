@@ -114,7 +114,8 @@
 
   const stateStrip = (site) => {
     const cls = site.publishedElsewhere ? "elsewhere" : site.lastPublishedCID ? "live" : "never";
-    const url = site.domain && site.domain.endsWith(".eth") ? `https://${site.domain}.sucks/` : `https://${site.ipns}.eth.sucks/`;
+    const tld = site.croptopGateway || "sucks";
+    const url = site.domain && site.domain.endsWith(".eth") ? `https://${site.domain}.${tld}/` : `https://${site.ipns}.eth.${tld}/`;
     const strip = h("div", { class: "state " + cls }, h("span", { class: "dot" }));
     if (site.publishedElsewhere) {
       strip.append(h("span", { class: "grow" }, "Another machine published this site more recently. Sync pulls its posts in and makes this machine the publisher again."),
@@ -173,6 +174,15 @@
     const isNew = pid === "new";
     const post = isNew ? { title: "", content: "", tags: {}, attachments: [] } : await api("GET", `/v0/planets/my/${id}/articles/${pid}`);
     const files = h("div", { class: "files" });
+    const queued = new DataTransfer(); // files dropped on a new post, uploaded on create
+    const imageNames = () => (post.attachments || []).filter((a) => /\.(png|jpe?g|gif|webp|avif)$/i.test(a)).concat([...queued.files].map((f) => f.name).filter((n) => /\.(png|jpe?g|gif|webp|avif)$/i.test(n)));
+    let heroSelect;
+    const refreshHero = () => {
+      if (!heroSelect) return;
+      const cur = heroSelect.value;
+      heroSelect.replaceChildren(h("option", { value: "" }, "Automatic (first image)"), ...imageNames().map((n) => h("option", { value: n }, n)));
+      heroSelect.value = imageNames().includes(cur) ? cur : (post.heroImage || "");
+    };
     const listFiles = () => {
       files.replaceChildren();
       for (const a of post.attachments || []) {
@@ -180,32 +190,97 @@
         files.append(h("span", { class: "file" }, a, h("button", { type: "button", title: "Remove", onclick: async () => {
           if (!confirm(`Remove ${a}?`)) return;
           await api("DELETE", `/v0/planets/my/${id}/articles/${pid}/attachments/${encodeURIComponent(a)}`);
-          post.attachments = post.attachments.filter((x) => x !== a); listFiles();
+          post.attachments = post.attachments.filter((x) => x !== a); listFiles(); refreshHero();
         }}, "×")));
       }
+      for (const f of queued.files) files.append(h("span", { class: "file queued" }, f.name));
+      refreshHero();
     };
-    listFiles();
     const created = when(post.created) || new Date();
     const local = new Date(created.getTime() - created.getTimezoneOffset() * 60000).toISOString().slice(0, 16);
-    const form = h("form", { class: "sheet", onsubmit: async (e) => {
+
+    const content = h("textarea", { name: "content" }, post.content);
+    const preview = h("div", { class: "md-preview" });
+    let previewTimer;
+    const renderPreview = () => {
+      clearTimeout(previewTimer);
+      previewTimer = setTimeout(async () => {
+        const r = await fetch("/v0/croptop/markdown", { method: "POST", body: content.value });
+        preview.innerHTML = await r.text();
+        for (const img of preview.querySelectorAll("img")) {
+          const src = img.getAttribute("src") || "";
+          if (!/^(https?:|data:|blob:)/.test(src)) {
+            const q = [...queued.files].find((f) => f.name === src);
+            img.src = q ? URL.createObjectURL(q) : `/${id}/${pid}/${encodeURIComponent(src)}`;
+          }
+        }
+      }, 250);
+    };
+    content.addEventListener("input", renderPreview);
+    const insertAtCursor = (text) => {
+      const [a, b] = [content.selectionStart, content.selectionEnd];
+      content.value = content.value.slice(0, a) + text + content.value.slice(b);
+      content.selectionStart = content.selectionEnd = a + text.length;
+      content.dispatchEvent(new Event("input"));
+    };
+    const addFiles = async (fileList) => {
+      for (const f of fileList) {
+        const isImg = /^image\//.test(f.type);
+        if (isNew) {
+          queued.items.add(f);
+        } else {
+          const fd = new FormData(); fd.append("attachments", f);
+          const updated = await api("POST", `/v0/planets/my/${id}/articles/${pid}/attachments`, fd, true);
+          post.attachments = updated.attachments;
+        }
+        if (isImg) insertAtCursor(`\n![](${f.name})\n`);
+      }
+      listFiles();
+      if (!isNew) toast("Attachment added");
+    };
+    for (const ev of ["dragenter", "dragover"]) content.addEventListener(ev, (e) => { e.preventDefault(); content.classList.add("drop"); });
+    content.addEventListener("dragleave", () => content.classList.remove("drop"));
+    content.addEventListener("drop", (e) => { e.preventDefault(); content.classList.remove("drop"); if (e.dataTransfer.files.length) addFiles(e.dataTransfer.files); });
+    content.addEventListener("paste", (e) => {
+      const imgs = [...(e.clipboardData.files || [])].filter((f) => /^image\//.test(f.type));
+      if (imgs.length) { e.preventDefault(); addFiles(imgs.map((f, i) => new File([f], f.name && f.name !== "image.png" ? f.name : `pasted-${Date.now()}-${i}.png`, { type: f.type }))); }
+    });
+    const fileInput = h("input", { type: "file", name: "attachments", multiple: "", onchange: (e) => { addFiles(e.target.files); e.target.value = ""; } });
+
+    heroSelect = h("select", { name: "heroImage" });
+    listFiles();
+
+    const form = h("form", { class: "sheet wide", onsubmit: async (e) => {
       e.preventDefault();
       const fd = new FormData();
       fd.set("title", $("[name=title]", form).value);
-      fd.set("content", $("[name=content]", form).value);
+      fd.set("content", content.value);
       fd.set("tags", $("[name=tags]", form).value);
       fd.set("date", new Date($("[name=date]", form).value).toISOString());
+      fd.set("pinned", $("[name=pinned]", form).checked ? "true" : "false");
+      fd.set("includeInNavigation", $("[name=includeInNavigation]", form).checked ? "true" : "false");
+      fd.set("navigationWeight", $("[name=navigationWeight]", form).value || "1");
+      fd.set("heroImage", heroSelect.value);
       if (!isNew) { fd.set("slug", $("[name=slug]", form).value); fd.set("externalLink", $("[name=externalLink]", form).value); }
-      for (const f of $("[name=attachments]", form).files) fd.append("attachments", f);
+      for (const f of queued.files) fd.append("attachments", f);
       const btn = $("button[type=submit]", form); btn.disabled = true; btn.textContent = "Saving…";
       try {
         const url = isNew ? `/v0/planets/my/${id}/articles` : `/v0/planets/my/${id}/articles/${pid}?attachmentMode=append`;
-        await api("POST", url, fd, true);
+        const saved = await api("POST", url, fd, true);
+        if (isNew && heroSelect.value) { const fd2 = new FormData(); fd2.set("heroImage", heroSelect.value); await api("POST", `/v0/planets/my/${id}/articles/${saved.id}`, fd2, true); }
         toast("Saved. Publish the site to put it on IPFS."); location.hash = `#/site/${id}`;
       } catch (err) { toast(err.message, true); btn.disabled = false; btn.textContent = "Save post"; }
     }},
       h("label", {}, "Title", h("input", { type: "text", name: "title", value: post.title, autofocus: "" })),
-      h("label", {}, "Content", h("textarea", { name: "content" }, post.content), h("span", { class: "help" }, "Markdown. Reference attachments by file name, like ![](photo.jpg).")),
-      h("label", {}, "Attachments", files, h("input", { type: "file", name: "attachments", multiple: "" }), h("span", { class: "help" }, "Images, video, or audio. The first image becomes the cover and the NFT image. Posts without media get a generated cover.")),
+      h("div", { class: "editor" },
+        h("label", {}, "Content", content, h("span", { class: "help" }, "Markdown or HTML. Drop or paste images here; the first image becomes the cover and the NFT image.")),
+        h("div", {}, h("span", { class: "help" }, "Preview"), preview)),
+      h("label", {}, "Attachments", files, fileInput, h("span", { class: "help" }, "Images, video, or audio. Posts without media get a generated cover.")),
+      h("div", { class: "row" },
+        h("label", { class: "inline" }, h("input", { type: "checkbox", name: "pinned", checked: post.pinned ? "" : null }), " Pin to the top"),
+        h("label", { class: "inline" }, h("input", { type: "checkbox", name: "includeInNavigation", checked: post.isIncludedInNavigation ? "" : null }), " Show in navigation"),
+        h("label", { class: "inline" }, "weight ", h("input", { type: "number", name: "navigationWeight", value: post.navigationWeight ?? 1, min: "0", style: "width:5em" }))),
+      h("label", {}, "Cover image", heroSelect, h("span", { class: "help" }, "Changing the cover rebuilds the post's NFT metadata and its CID.")),
       h("label", {}, "Tags", h("input", { type: "text", name: "tags", value: Object.keys(post.tags || {}).join(", ") }), h("span", { class: "help" }, "Comma separated. Each tag gets its own page.")),
       h("label", {}, "Date", h("input", { type: "datetime-local", name: "date", value: local })),
       isNew ? null : h("details", {}, h("summary", {}, "More"),
@@ -220,12 +295,13 @@
           await api("DELETE", `/v0/planets/my/${id}/articles/${pid}`); toast("Post deleted"); location.hash = `#/site/${id}`;
         }}, "Delete")));
     m.replaceChildren(h("div", { class: "head" }, h("div", {}, h("h1", {}, isNew ? "New post" : "Edit post"), h("p", {}, site.name))), form);
+    renderPreview();
   };
 
   views.settings = async (id) => {
     const site = siteById(id); if (!site) return views.home();
     const m = $("#main");
-    const [tmpl, settings] = await Promise.all([template(), api("GET", `/v0/croptop/sites/${id}/settings`)]);
+    const [tmpl, settings, gateways] = await Promise.all([template(), api("GET", `/v0/croptop/sites/${id}/settings`), api("GET", "/v0/croptop/gateways")]);
     const basic = h("fieldset", {}, h("legend", {}, "Collection"));
     const advanced = h("fieldset", {}, h("legend", {}, "Advanced"));
     const keys = Object.keys(tmpl.settings || {}).sort((a, b) => a.localeCompare(b));
@@ -240,6 +316,7 @@
         const tags = {}; for (const t of $("[name=tags]", form).value.split(",").map((x) => x.trim()).filter(Boolean)) tags[t] = t;
         await api("PUT", `/v0/croptop/sites/${id}`, {
           name: $("[name=name]", form).value, about: $("[name=about]", form).value, domain: $("[name=domain]", form).value, tags,
+          gateway: $("[name=gateway]", form).value,
           custom: { customCodeHead: $("[name=customCodeHead]", form).value, customCodeHeadEnabled: !!$("[name=customCodeHead]", form).value.trim(),
                     customCodeBodyEnd: $("[name=customCodeBodyEnd]", form).value, customCodeBodyEndEnabled: !!$("[name=customCodeBodyEnd]", form).value.trim(),
                     doNotIndex: $("[name=doNotIndex]", form).checked },
@@ -255,6 +332,7 @@
         h("label", {}, "Name", h("input", { type: "text", name: "name", value: site.name })),
         h("label", {}, "About", h("input", { type: "text", name: "about", value: site.about })),
         h("label", {}, "ENS domain", h("input", { type: "text", name: "domain", value: site.domain || "", placeholder: "yoursite.eth" }), h("span", { class: "help" }, "Point the domain's content hash at ", h("code", {}, "ipns://" + site.ipns), " once, then every publish updates it.")),
+        h("label", {}, "Gateway", h("select", { name: "gateway" }, ...gateways.map((g) => h("option", { value: g.Key, selected: (site.croptopGateway || "sucks") === g.Key ? "" : null }, g.Name))), h("span", { class: "help" }, "Written into the site's absolute links. Any gateway can read the site; this one is the canonical address.")),
         h("label", {}, "Tags", h("input", { type: "text", name: "tags", value: Object.keys(site.tags || {}).join(", ") }), h("span", { class: "help" }, "Tags offered in the site's filter bar.")),
         h("label", {}, "Avatar", h("input", { type: "file", name: "avatar", accept: "image/*" })),
         h("label", { class: "row" }, h("input", { type: "checkbox", name: "doNotIndex", checked: site.doNotIndex ? "" : null, style: "width:auto" }), " Ask search engines not to index")),
