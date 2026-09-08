@@ -241,11 +241,12 @@
       heroSelect.replaceChildren(h("option", { value: "" }, "Automatic (first image)"), ...imageNames().map((n) => h("option", { value: n }, n)));
       heroSelect.value = imageNames().includes(cur) ? cur : (post.heroImage || "");
     };
+    const isWidgetFile = (n) => /\.(m?js|css|json)$/i.test(n);
     const listFiles = () => {
       files.replaceChildren();
       for (const a of post.attachments || []) {
         if (a.startsWith("_")) continue;
-        files.append(h("span", { class: "file" }, a, h("button", { type: "button", title: "Remove", onclick: async () => {
+        files.append(h("span", { class: "file" + (isWidgetFile(a) ? " widget" : "") }, isWidgetFile(a) ? h("b", {}, "widget ") : null, a, h("button", { type: "button", title: "Remove", onclick: async () => {
           if (!confirm(`Remove ${a}?`)) return;
           await api("DELETE", `/v0/planets/my/${id}/articles/${pid}/attachments/${encodeURIComponent(a)}`);
           post.attachments = post.attachments.filter((x) => x !== a); listFiles(); refreshHero();
@@ -263,6 +264,12 @@
     const renderPreview = () => {
       clearTimeout(previewTimer);
       previewTimer = setTimeout(async () => {
+        if (!isNew && /<script[\s>]/i.test(content.value)) {
+          // scripts only run on the real post page: show the rendered post as saved
+          preview.replaceChildren(h("p", { class: "help" }, "This post runs a script. The preview shows the last saved version of the real page; save to update it."),
+            h("iframe", { class: "post-frame", src: `/${id}/${pid}/?t=${Date.now()}`, sandbox: "allow-scripts allow-same-origin", title: "Post" }));
+          return;
+        }
         const r = await fetch("/v0/croptop/markdown", { method: "POST", body: content.value });
         preview.innerHTML = await r.text();
         for (const img of preview.querySelectorAll("img")) {
@@ -304,6 +311,13 @@
       if (imgs.length) { e.preventDefault(); addFiles(imgs.map((f, i) => new File([f], f.name && f.name !== "image.png" ? f.name : `pasted-${Date.now()}-${i}.png`, { type: f.type }))); }
     });
     const fileInput = h("input", { type: "file", name: "attachments", multiple: "", onchange: (e) => { addFiles(e.target.files); e.target.value = ""; } });
+    const snippets = {
+      "Script from attachment": () => { const js = (post.attachments || []).concat([...queued.files].map((f) => f.name)).find((n) => /\.m?js$/i.test(n)); return js ? `\n<script type="module" src="${js}"></script>\n` : `\n<script type="module" src="widget.js"></script>\n`; },
+      "Countdown": () => `\n<p>Opens in <span id="countdown" data-until="${new Date(Date.now() + 7 * 86400000).toISOString()}"></span>.</p>\n<script type="module">\nconst el = document.getElementById("countdown"); const t = new Date(el.dataset.until);\nconst tick = () => { const s = Math.max(0, Math.floor((t - Date.now()) / 1000)); el.textContent = \`\${Math.floor(s/86400)}d \${Math.floor(s%86400/3600)}h \${Math.floor(s%3600/60)}m \${s%60}s\`; };\ntick(); setInterval(tick, 1000);\n</script>\n`,
+      "Collectors count": () => `\n<p id="collectors">Loading…</p>\n<script type="module">\ncroptop.ready(async () => { const el = document.getElementById("collectors"); const chain = croptop.chains.byKey("ethereumMainnet"); const address = croptop.chains.collectionAddress(chain);\n  if (!address) { el.textContent = "No collection on Ethereum yet."; return; }\n  const total = await croptop.wallet.call(chain.id, address, ["function totalSupply() view returns (uint256)"], "totalSupply"); el.textContent = \`\${total} collected so far\`; });\n</script>\n`,
+      "Poll": () => `\n<div id="poll"><button data-opt="Yes"></button> <button data-opt="No"></button></div>\n<script type="module">\nconst box = document.getElementById("poll"), key = "poll:" + croptop.postId;\nconst render = () => { const v = JSON.parse(localStorage.getItem(key) || "{}"); box.querySelectorAll("button").forEach((b) => { b.textContent = \`\${b.dataset.opt} (\${v[b.dataset.opt] || 0})\`; }); };\nbox.querySelectorAll("button").forEach((b) => b.addEventListener("click", () => { const v = JSON.parse(localStorage.getItem(key) || "{}"); v[b.dataset.opt] = (v[b.dataset.opt] || 0) + 1; localStorage.setItem(key, JSON.stringify(v)); render(); }));\nrender();\n</script>\n`,
+    };
+    const palette = h("div", { class: "row palette" }, h("span", { class: "help" }, "Widgets:"), ...Object.entries(snippets).map(([name, fn]) => h("button", { type: "button", class: "btn quiet small", onclick: () => insertAtCursor(fn()) }, name)), h("a", { class: "help", href: "https://github.com/mejango/croptop/blob/main/docs/widgets.md", target: "_blank" }, "how widgets work"));
 
     heroSelect = h("select", { name: "heroImage" });
     listFiles();
@@ -331,8 +345,9 @@
     }},
       h("label", {}, "Title", h("input", { type: "text", name: "title", value: post.title, autofocus: "" })),
       h("div", { class: "editor" },
-        h("label", {}, "Content", content, h("span", { class: "help" }, "Markdown or HTML. Drop or paste images here; the first image becomes the cover and the NFT image.")),
+        h("label", {}, "Content", content, h("span", { class: "help" }, "Markdown or HTML. Drop or paste images here; the first image becomes the cover and the NFT image. Attach a script and reference it to add a widget.")),
         h("div", {}, h("span", { class: "help" }, "Preview"), preview)),
+      palette,
       h("label", {}, "Attachments", files, fileInput, h("span", { class: "help" }, "Images, video, or audio. Posts without media get a generated cover.")),
       h("div", { class: "row" },
         h("label", { class: "inline" }, h("input", { type: "checkbox", name: "pinned", checked: post.pinned ? "" : null }), " Pin to the top"),

@@ -263,3 +263,27 @@ func TestTemplateForkEdit(t *testing.T) {
 		t.Fatalf("templates %d %v", code, list)
 	}
 }
+
+func TestWidgetPostRenders(t *testing.T) {
+	s, ts := testServer(t)
+	body, ctype := multipartBody(t, map[string]string{"name": "W"}, nil)
+	_, site := do(t, "POST", ts.URL+"/v0/planets/my", body, ctype)
+	id := site["id"].(string)
+	content := "<div id=\"x\"></div>\n<script type=\"module\" src=\"widget.js\"></script>"
+	body, ctype = multipartBody(t, map[string]string{"title": "Widget", "content": content}, map[string][]byte{"widget.js": []byte("document.getElementById('x').textContent='hi'")})
+	code, post := do(t, "POST", ts.URL+"/v0/planets/my/"+id+"/articles", body, ctype)
+	if code != 200 {
+		t.Fatalf("create %d %v", code, post)
+	}
+	pid := post["id"].(string)
+	if _, err := os.Stat(filepath.Join(s.Store.PublicDir(id), pid, "widget.js")); err != nil {
+		t.Fatal("widget.js not in the published post folder")
+	}
+	page, _ := os.ReadFile(filepath.Join(s.Store.PublicDir(id), pid, "index.html"))
+	if !strings.Contains(string(page), `src="widget.js"`) {
+		t.Fatal("script tag not rendered into the post page")
+	}
+	if !strings.Contains(string(page), "assets/scripts/croptop.js") {
+		t.Fatal("runtime not included by the template")
+	}
+}
