@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"time"
 
 	"github.com/mejango/croptop/internal/ipfs"
 )
@@ -51,5 +52,17 @@ func ipfsSmoke() error {
 		return err
 	}
 	fmt.Printf("peer %s version %s peers %d\n", info.PeerID, info.Version, info.Peers)
+	if len(os.Args) > 2 {
+		rctx, cancel := context.WithTimeout(ctx, 60*time.Second)
+		defer cancel()
+		raw, err := n.Run(rctx, "name", "get", os.Args[2])
+		fmt.Printf("name get: %d bytes err=%v\n", len(raw), err)
+		rec, err := n.NetworkRecord(rctx, os.Args[2])
+		fmt.Printf("record %+v err=%v\n", rec, err)
+		f, _ := os.CreateTemp("", "rec")
+		f.Write(raw); f.Close()
+		out, err := n.Run(rctx, "name", "inspect", "--enc=json", f.Name())
+		fmt.Printf("inspect raw: %s err=%v\n", out, err)
+	}
 	return nil
 }

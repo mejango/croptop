@@ -1,0 +1,10 @@
+#!/bin/sh
+# Stand-in for kubo in tests: logs calls, answers like the real thing.
+echo "$@" >> "$FAKE_LOG"
+case "$1 $2" in
+  "add "*) echo bafyFAKE ;;
+  "name get") printf 'record' ;;
+  "name inspect") echo '{"Entry":{"Value":"/ipfs/bafyOLD","Sequence":7,"Validity":"2030-01-01T00:00:00Z"}}' ;;
+  "name publish") echo '{"Name":"k51","Value":"/ipfs/bafyFAKE"}' ;;
+  *) echo "fake-ipfs: unhandled $*" >&2; exit 1 ;;
+esac

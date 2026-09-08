@@ -30,6 +30,9 @@ type Post struct {
 	Modified        *AppleTime
 	Pinned          *AppleTime
 
+	IsIncludedInNavigation *bool
+	NavigationWeight       *int
+
 	Raw doc
 }
 
@@ -54,6 +57,9 @@ type postJSON struct {
 	AudioFilename   *string           `json:"audioFilename"`
 	Modified        *AppleTime        `json:"modified"`
 	Pinned          *AppleTime        `json:"pinned"`
+
+	IsIncludedInNavigation *bool `json:"isIncludedInNavigation"`
+	NavigationWeight       *int  `json:"navigationWeight"`
 }
 
 func (p *Post) UnmarshalJSON(b []byte) error {
@@ -71,7 +77,8 @@ func (p *Post) UnmarshalJSON(b []byte) error {
 		Summary: j.Summary, ContentRendered: j.ContentRendered, HeroImage: j.HeroImage,
 		HeroImageWidth: j.HeroImageWidth, HeroImageHeight: j.HeroImageHeight, ExternalLink: j.ExternalLink,
 		VideoFilename: j.VideoFilename, AudioFilename: j.AudioFilename, Modified: j.Modified,
-		Pinned: j.Pinned, Raw: raw,
+		Pinned: j.Pinned, IsIncludedInNavigation: j.IsIncludedInNavigation,
+		NavigationWeight: j.NavigationWeight, Raw: raw,
 	}
 	return nil
 }
@@ -101,6 +108,8 @@ func (p Post) MarshalJSON() ([]byte, error) {
 	d.putIfNotNil("audioFilename", p.AudioFilename)
 	d.putIfNotNil("modified", p.Modified)
 	d.putIfNotNil("pinned", p.Pinned)
+	d.putIfNotNil("isIncludedInNavigation", p.IsIncludedInNavigation)
+	d.putIfNotNil("navigationWeight", p.NavigationWeight)
 	return json.Marshal(d)
 }
 
