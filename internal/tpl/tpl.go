@@ -339,7 +339,7 @@ func (r *Resolver) Files(site *store.Site) ([]string, error) {
 	}
 	var out []string
 	fs.WalkDir(fsys, ".", func(p string, d fs.DirEntry, err error) error {
-		if err != nil || d.IsDir() || strings.HasPrefix(p, ".") || strings.HasPrefix(p, "dev/") || strings.HasPrefix(p, "hooks/") {
+		if err != nil || d.IsDir() || !templateFile(p) {
 			return nil
 		}
 		out = append(out, p)
@@ -464,12 +464,19 @@ func (r *Resolver) TakeTheirs(ctx context.Context, site *store.Site, p string) e
 	return r.WriteFile(site, p, b)
 }
 
+// templateFile reports whether a path is part of what a template ships:
+// template.json, templates/, assets/. Dev files, hooks, and dotfiles in a
+// checkout are not compared.
+func templateFile(p string) bool {
+	return p == "template.json" || strings.HasPrefix(p, "templates/") || strings.HasPrefix(p, "assets/")
+}
+
 func differing(a, b fs.FS) []string {
 	seen := map[string]bool{}
 	var out []string
 	walk := func(fsys fs.FS, other fs.FS) {
 		fs.WalkDir(fsys, ".", func(p string, d fs.DirEntry, err error) error {
-			if err != nil || d.IsDir() || seen[p] {
+			if err != nil || d.IsDir() || seen[p] || !templateFile(p) {
 				return nil
 			}
 			seen[p] = true

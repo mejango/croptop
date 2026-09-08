@@ -149,3 +149,12 @@ func TestPublishInstallRoundTrip(t *testing.T) {
 		t.Fatalf("installed %+v", list)
 	}
 }
+
+func TestDifferingIgnoresNonTemplateFiles(t *testing.T) {
+	a := fstest.MapFS{"template.json": {Data: []byte("{}")}, "assets/style.css": {Data: []byte("a")}, "dev/serve.py": {Data: []byte("x")}, ".gitignore": {Data: []byte("x")}}
+	b := fstest.MapFS{"template.json": {Data: []byte("{}")}, "assets/style.css": {Data: []byte("b")}, "dev/serve.py": {Data: []byte("y")}, "README.md": {Data: []byte("r")}}
+	got := differing(a, b)
+	if len(got) != 1 || got[0] != "assets/style.css" {
+		t.Fatalf("differing %v", got)
+	}
+}
