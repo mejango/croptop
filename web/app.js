@@ -51,7 +51,7 @@
     n.replaceChildren();
     if (!state.status) { n.append("Console offline"); return; }
     const ipfs = state.status.ipfs;
-    n.append(h("b", { class: ipfs.running ? "" : "off" }, ipfs.running ? "IPFS on" : "IPFS off"), ` · ${ipfs.peers} peers`, h("br"), `croptop ${state.status.version}`);
+    n.append(h("b", { class: ipfs.running ? "" : "off" }, ipfs.running ? "IPFS on" : "IPFS off"), `, ${ipfs.peers} peers`, h("br"), `croptop ${state.status.version}`);
   };
   const template = async () => state.template || (state.template = await api("GET", "/v0/croptop/template"));
 
@@ -120,7 +120,7 @@
       strip.append(h("span", { class: "grow" }, "Another machine published this site more recently. Sync pulls its posts in and makes this machine the publisher again."),
         h("button", { class: "btn", onclick: () => sync(site) }, "Sync"));
     } else if (site.lastPublishedCID) {
-      strip.append(h("span", { class: "grow" }, "Live ", h("a", { href: url, target: "_blank", rel: "noopener" }, url.replace("https://", "")), (site.ipnsSequence ? ` · sequence ${site.ipnsSequence}` : "") + ` · published ${ago(when(site.lastPublished))}`));
+      strip.append(h("span", { class: "grow" }, "Live ", h("a", { href: url, target: "_blank", rel: "noopener" }, url.replace("https://", "")), (site.ipnsSequence ? `, sequence ${site.ipnsSequence}` : "") + `, published ${ago(when(site.lastPublished))}`));
     } else {
       strip.append(h("span", { class: "grow" }, "Not published yet. Publishing renders the site, adds it to IPFS, and points ", h("code", {}, site.ipns.slice(0, 16) + "…"), " at it."));
     }
