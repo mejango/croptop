@@ -33,7 +33,17 @@ func WriteCover(path, text string) error {
 	if err != nil {
 		return err
 	}
-	face, err := opentype.NewFace(f, &opentype.FaceOptions{Size: coverFontPx, DPI: 72, Hinting: font.HintingFull})
+	// short text gets big type, long text wraps small, like a title card
+	px, lineH := coverFontPx, coverLineH
+	switch n := len([]rune(strings.TrimSpace(text))); {
+	case n <= 12:
+		px, lineH = 40, 56
+	case n <= 40:
+		px, lineH = 24, 36
+	case n <= 120:
+		px, lineH = 18, 28
+	}
+	face, err := opentype.NewFace(f, &opentype.FaceOptions{Size: float64(px), DPI: 72, Hinting: font.HintingFull})
 	if err != nil {
 		return err
 	}
@@ -44,14 +54,14 @@ func WriteCover(path, text string) error {
 	d := &font.Drawer{Dst: img, Src: image.NewUniform(color.White), Face: face}
 
 	maxWidth := coverSize - 2*coverInset
-	y := coverInset + coverFontPx
+	y := coverInset + px
 	for _, line := range wrap(d, text, maxWidth) {
 		if y > coverSize-coverInset {
 			break
 		}
 		d.Dot = fixed.P(coverInset, y)
 		d.DrawString(line)
-		y += coverLineH
+		y += lineH
 	}
 	out, err := os.Create(path)
 	if err != nil {
