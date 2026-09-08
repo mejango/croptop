@@ -480,11 +480,12 @@
       catch (err) { toast(err.message, true); installBtn.disabled = false; }
     }}, "Install");
 
-    m.replaceChildren(
+    m.replaceChildren(...[
       h("div", { class: "head" }, h("div", {}, h("h1", {}, "Template"), h("p", {}, `${site.name}. ${sourceText}.`)), actions),
       h("div", { class: "row", style: "margin-bottom:14px" }, h("label", { class: "inline" }, "Using ", choose), installBox, installBtn),
       forked ? null : h("p", { class: "help" }, "Fork to edit any file. The preview updates on every save. Reset brings the original back."),
-      h("div", { class: "tpl" }, fileList, h("div", {}, editor, h("div", { class: "row", style: "margin-top:8px" }, save, h("span", { class: "help" }, "Cmd/Ctrl+S saves"))), preview));
+      h("div", { class: "tpl" }, fileList, h("div", {}, editor, h("div", { class: "row", style: "margin-top:8px" }, save, h("span", { class: "help" }, "Cmd/Ctrl+S saves"))), preview),
+    ].filter(Boolean));
     if (info.editable.length) openFile(info.editable.includes("assets/style.css") ? "assets/style.css" : info.editable[0]);
   };
 
