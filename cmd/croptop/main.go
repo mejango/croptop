@@ -115,6 +115,9 @@ func run(args []string) error {
 	case "serve":
 		return a.serve(*listen, *noOpen || *role == "node")
 	case "status":
+		if *listen != "" {
+			a.cfg.Listen = *listen
+		}
 		return a.status()
 	case "import-planet":
 		c := *container

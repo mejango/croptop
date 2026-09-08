@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
+	"os"
 	"strings"
 	"time"
 
@@ -93,6 +94,18 @@ func (s *Server) routesFollow(mux *http.ServeMux) {
 		info, _ := s.Node.Info(ctx)
 		if peers == nil {
 			peers = []string{}
+		}
+		// the DHT does not list this node among providers of its own content
+		if _, err := os.Stat(s.Store.PublicDir(site.ID)); err == nil && info.PeerID != "" {
+			found := false
+			for _, p := range peers {
+				if p == info.PeerID {
+					found = true
+				}
+			}
+			if !found {
+				peers = append([]string{info.PeerID}, peers...)
+			}
 		}
 		writeJSON(w, 200, map[string]any{"cid": *site.LastPublishedCID, "count": len(peers), "peers": peers, "self": info.PeerID})
 	})
