@@ -1,0 +1,26 @@
+{
+  "articleType" : 0,
+  "attachments" : [
+    "Screenshot 2025-10-31 at 23.53.28.png"
+  ],
+  "cids" : {
+    "Screenshot 2025-10-31 at 23.53.28.png" : "Qmds9dbSZYE1tTA6mUE2AxUgLaBvvN5cNi8eukyH5FzVR8"
+  },
+  "content" : "<img width=\"441\" alt=\"Screenshot 2025-10-31 at 23.53.28\" src=\"Screenshot 2025-10-31 at 23.53.28.png\">\n\n\n",
+  "contentRendered" : "<img width=\"441\" alt=\"Screenshot 2025-10-31 at 23.53.28\" src=\"Screenshot 2025-10-31 at 23.53.28.png\">\n",
+  "created" : 783658415.182382,
+  "heroImage" : "Screenshot 2025-10-31 at 23.53.28.png",
+  "heroImageHeight" : 380,
+  "heroImageWidth" : 882,
+  "id" : "43BDA42B-93D1-4C87-AAF0-21EDD76AE3A3",
+  "isIncludedInNavigation" : false,
+  "link" : "/43BDA42B-93D1-4C87-AAF0-21EDD76AE3A3/",
+  "navigationWeight" : 1,
+  "pinned" : 783752261.469706,
+  "starType" : 0,
+  "summary" : "",
+  "tags" : {
+    "logo" : "logo"
+  },
+  "title" : ""
+}

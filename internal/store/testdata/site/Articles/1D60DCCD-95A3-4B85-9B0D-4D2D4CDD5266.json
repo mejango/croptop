@@ -1,0 +1,25 @@
+{
+  "articleType" : 0,
+  "attachments" : [
+    "Screenshot 2025-11-01 at 01.29.57.png"
+  ],
+  "cids" : {
+    "Screenshot 2025-11-01 at 01.29.57.png" : "QmSH7xiJ2Qpgeaj8dzPN5rwaeE1YftRx9uqQnprr6DwXcp"
+  },
+  "content" : "<img width=\"957\" alt=\"Screenshot 2025-11-01 at 01.29.57\" src=\"Screenshot 2025-11-01 at 01.29.57.png\">\n\n\n",
+  "contentRendered" : "<img width=\"957\" alt=\"Screenshot 2025-11-01 at 01.29.57\" src=\"Screenshot 2025-11-01 at 01.29.57.png\">\n",
+  "created" : 783663300,
+  "heroImage" : "Screenshot 2025-11-01 at 01.29.57.png",
+  "heroImageHeight" : 1070,
+  "heroImageWidth" : 1914,
+  "id" : "1D60DCCD-95A3-4B85-9B0D-4D2D4CDD5266",
+  "isIncludedInNavigation" : false,
+  "link" : "/1D60DCCD-95A3-4B85-9B0D-4D2D4CDD5266/",
+  "navigationWeight" : 1,
+  "starType" : 0,
+  "summary" : "",
+  "tags" : {
+    "mockups" : "mockups"
+  },
+  "title" : "Invoice | bottom #1"
+}

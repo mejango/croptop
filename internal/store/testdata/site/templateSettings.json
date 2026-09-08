@@ -1,0 +1,21 @@
+{
+  "arbitrumMainnetCollectionAddress" : "",
+  "arbitrumMainnetRPC" : "https:\/\/arbitrum.llamarpc.com",
+  "arbitrumSepoliaCollectionAddress" : "",
+  "arbitrumSepoliaRPC" : "https:\/\/arbitrum-sepolia.gateway.tenderly.co",
+  "baseMainnetCollectionAddress" : "",
+  "baseMainnetRPC" : "https:\/\/base.llamarpc.com",
+  "baseSepoliaCollectionAddress" : "",
+  "baseSepoliaRPC" : "https:\/\/sepolia.base.org",
+  "collectionCategory" : "0",
+  "curatorAddress" : "",
+  "ethereumMainnetCollectionAddress" : "0x929B6c04fE40fb265Cd0AbB7928826DC965E540D",
+  "ethereumMainnetRPC" : "https:\/\/eth.llamarpc.com",
+  "ethereumSepoliaCollectionAddress" : "0x929B6c04fE40fb265Cd0AbB7928826DC965E540D",
+  "ethereumSepoliaRPC" : "https:\/\/ethereum-sepolia-rpc.publicnode.com",
+  "highlightColor" : "#EC8245",
+  "optimismMainnetCollectionAddress" : "",
+  "optimismMainnetRPC" : "https:\/\/optimism.llamarpc.com",
+  "optimismSepoliaCollectionAddress" : "",
+  "optimismSepoliaRPC" : "https:\/\/sepolia.optimism.io"
+}

@@ -1,0 +1,25 @@
+{
+  "articleType" : 0,
+  "attachments" : [
+    "Screenshot 2025-11-01 at 01.44.36.png"
+  ],
+  "cids" : {
+    "Screenshot 2025-11-01 at 01.44.36.png" : "QmaekCFZggq9BpVi2Ff1HHi3xfucX74UVwfeR5GqgBB44M"
+  },
+  "content" : "<img width=\"956\" alt=\"Screenshot 2025-11-01 at 01.44.36\" src=\"Screenshot 2025-11-01 at 01.44.36.png\">",
+  "contentRendered" : "<img width=\"956\" alt=\"Screenshot 2025-11-01 at 01.44.36\" src=\"Screenshot 2025-11-01 at 01.44.36.png\">\n",
+  "created" : 783663987.93331,
+  "heroImage" : "Screenshot 2025-11-01 at 01.44.36.png",
+  "heroImageHeight" : 1074,
+  "heroImageWidth" : 1912,
+  "id" : "960A47F4-36AF-48DE-94BD-FC7C3244C220",
+  "isIncludedInNavigation" : false,
+  "link" : "/960A47F4-36AF-48DE-94BD-FC7C3244C220/",
+  "navigationWeight" : 1,
+  "starType" : 0,
+  "summary" : "",
+  "tags" : {
+    "mockups" : "mockups"
+  },
+  "title" : "My balances | top #1"
+}

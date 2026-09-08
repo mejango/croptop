@@ -1,0 +1,25 @@
+{
+  "articleType" : 0,
+  "attachments" : [
+    "Screenshot 2025-11-01 at 01.27.30.png"
+  ],
+  "cids" : {
+    "Screenshot 2025-11-01 at 01.27.30.png" : "QmRXSqwTA8cmy2PPdVmHBTZH3HQpeSG9VNFPXpp5NByDLx"
+  },
+  "content" : "<img width=\"956\" alt=\"Screenshot 2025-11-01 at 01.27.30\" src=\"Screenshot 2025-11-01 at 01.27.30.png\">\n\n\n",
+  "contentRendered" : "<img width=\"956\" alt=\"Screenshot 2025-11-01 at 01.27.30\" src=\"Screenshot 2025-11-01 at 01.27.30.png\">\n",
+  "created" : 783663780,
+  "heroImage" : "Screenshot 2025-11-01 at 01.27.30.png",
+  "heroImageHeight" : 1072,
+  "heroImageWidth" : 1912,
+  "id" : "6B27BCB4-38D5-45EA-BEC4-CCF6F0F216DA",
+  "isIncludedInNavigation" : false,
+  "link" : "/6B27BCB4-38D5-45EA-BEC4-CCF6F0F216DA/",
+  "navigationWeight" : 1,
+  "starType" : 0,
+  "summary" : "",
+  "tags" : {
+    "mockups" : "mockups"
+  },
+  "title" : "Token | bottom #1"
+}
