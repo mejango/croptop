@@ -13,6 +13,7 @@ require (
 	github.com/libp2p/go-doh-resolver v0.6.0
 	github.com/libp2p/go-libp2p v0.49.0
 	github.com/libp2p/go-libp2p-kad-dht v0.42.1
+	github.com/libp2p/go-libp2p-pubsub v0.17.0
 	github.com/multiformats/go-multiaddr v0.16.1
 	github.com/multiformats/go-multicodec v0.10.0
 	github.com/yuin/goldmark v1.8.6

@@ -26,9 +26,11 @@ import (
 	ipld "github.com/ipfs/go-ipld-format"
 	"github.com/libp2p/go-libp2p"
 	dht "github.com/libp2p/go-libp2p-kad-dht"
+	pubsub "github.com/libp2p/go-libp2p-pubsub"
 	"github.com/libp2p/go-libp2p/core/crypto"
 	"github.com/libp2p/go-libp2p/core/host"
 	"github.com/libp2p/go-libp2p/core/peer"
+	drouting "github.com/libp2p/go-libp2p/p2p/discovery/routing"
 	"github.com/libp2p/go-libp2p/p2p/host/autorelay"
 	"github.com/libp2p/go-libp2p/p2p/net/connmgr"
 	"github.com/multiformats/go-multiaddr"
@@ -53,6 +55,8 @@ type Embedded struct {
 
 	host   host.Host
 	dht    *dht.IpfsDHT
+	ps     *pubsub.PubSub
+	topics map[string]*pubsub.Topic
 	ds     datastore.Batching
 	blocks datastore.Batching
 	mds    datastore.Batching
@@ -171,6 +175,18 @@ func (e *Embedded) Start(ctx context.Context) error {
 
 	runCtx, cancel := context.WithCancel(context.Background())
 	e.cancel = cancel
+	if !e.Offline {
+		// IPNS over pubsub: gateways that resolve names this way only see updates
+		// as pubsub messages, so publish there as well as in the DHT. Peers on a
+		// record's topic are found through DHT rendezvous, as kubo does.
+		ps, err := pubsub.NewGossipSub(runCtx, h, pubsub.WithDiscovery(drouting.NewRoutingDiscovery(d)))
+		if err != nil {
+			e.Log("pubsub: " + err.Error())
+		} else {
+			e.ps = ps
+			e.topics = map[string]*pubsub.Topic{}
+		}
+	}
 	net := bsnet.NewFromIpfsHost(h)
 	e.bswap = bitswap.New(runCtx, net, d, e.bstore)
 	e.bserv = blockservice.New(e.bstore, e.bswap)
@@ -206,17 +222,17 @@ func (e *Embedded) Start(ctx context.Context) error {
 	e.running = true
 	e.Log(fmt.Sprintf("embedded ipfs node %s on port %d", h.ID(), e.port))
 	if !e.Offline {
-		e.waitForRoutingTable(ctx, 45*time.Second)
+		e.waitForRoutingTable(ctx, 4, 45*time.Second)
 	}
 	return nil
 }
 
 // waitForRoutingTable blocks until the DHT knows some peers, so the first
 // IPNS query does not come back "not found" from an empty table.
-func (e *Embedded) waitForRoutingTable(ctx context.Context, max time.Duration) {
+func (e *Embedded) waitForRoutingTable(ctx context.Context, min int, max time.Duration) {
 	deadline := time.Now().Add(max)
 	for time.Now().Before(deadline) {
-		if n := e.dht.RoutingTable().Size(); n >= 4 {
+		if n := e.dht.RoutingTable().Size(); n >= min {
 			e.Log(fmt.Sprintf("dht routing table has %d peers", n))
 			return
 		}

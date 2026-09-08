@@ -1,9 +1,12 @@
 package ipfs
 
 import (
+	"bytes"
 	"context"
+	"encoding/base64"
 	"errors"
 	"fmt"
+	"net/http"
 	"strings"
 	"time"
 
@@ -20,6 +23,9 @@ const (
 	ipnsLifetime = 7200 * time.Hour
 	ipnsTTL      = time.Minute
 	ensDoH       = "https://dns.eth.limo/dns-query"
+	// delegatedIPNS is the public routing v1 endpoint kubo also publishes to; many
+	// gateway resolvers read it and it clears their caches faster than the DHT.
+	delegatedIPNS = "https://delegated-ipfs.dev/routing/v1/ipns/"
 )
 
 // siteKey loads a site's ed25519 key from the shared keystore as a libp2p key.
@@ -62,7 +68,7 @@ func (e *Embedded) NamePublish(ctx context.Context, key, c string, seq uint64) e
 	}
 	rkey := string(name.RoutingKey())
 	if !e.Offline {
-		e.waitForRoutingTable(ctx, 20*time.Second)
+		e.waitForRoutingTable(ctx, 20, 60*time.Second)
 	}
 	start := time.Now()
 	closest, _ := e.dht.GetClosestPeers(ctx, rkey)
@@ -71,6 +77,10 @@ func (e *Embedded) NamePublish(ctx context.Context, key, c string, seq uint64) e
 		return fmt.Errorf("ipns put: %w", err)
 	}
 	e.Log(fmt.Sprintf("ipns put done in %s", time.Since(start).Round(time.Millisecond)))
+	if !e.Offline {
+		e.putDelegated(ctx, name, b)
+		e.putPubsub(ctx, name, b)
+	}
 	if !e.Offline {
 		// read our own record back from the network as a check
 		if rec, err := e.NetworkRecord(ctx, name.String()); err == nil {
@@ -99,7 +109,7 @@ func (e *Embedded) NetworkRecord(ctx context.Context, nameStr string) (*Record, 
 		return nil, err
 	}
 	if !e.Offline {
-		e.waitForRoutingTable(ctx, 20*time.Second)
+		e.waitForRoutingTable(ctx, 4, 20*time.Second)
 	}
 	sctx, cancel := context.WithTimeout(ctx, 25*time.Second)
 	defer cancel()
@@ -178,4 +188,53 @@ func parseDNSLink(txts []string) (string, bool) {
 		}
 	}
 	return "", false
+}
+
+// putDelegated sends the signed record to the delegated routing endpoint (IPIP-379). Best effort.
+func (e *Embedded) putDelegated(ctx context.Context, name ipns.Name, rec []byte) {
+	ctx, cancel := context.WithTimeout(ctx, 20*time.Second)
+	defer cancel()
+	req, err := http.NewRequestWithContext(ctx, http.MethodPut, delegatedIPNS+name.String(), bytes.NewReader(rec))
+	if err != nil {
+		return
+	}
+	req.Header.Set("Content-Type", "application/vnd.ipfs.ipns-record")
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		e.Log("ipns delegated put: " + err.Error())
+		return
+	}
+	resp.Body.Close()
+	e.Log(fmt.Sprintf("ipns delegated put: %s", resp.Status))
+}
+
+// putPubsub publishes the record on the IPNS pubsub topic kubo uses
+// ("/record/" + base64url of the routing key). Best effort: it waits a little
+// for the DHT rendezvous to surface subscribers, then sends once.
+func (e *Embedded) putPubsub(ctx context.Context, name ipns.Name, rec []byte) {
+	if e.ps == nil {
+		return
+	}
+	topicName := "/record/" + base64.RawURLEncoding.EncodeToString(name.RoutingKey())
+	e.mu.Lock()
+	t, ok := e.topics[topicName]
+	if !ok {
+		var err error
+		if t, err = e.ps.Join(topicName); err != nil {
+			e.mu.Unlock()
+			e.Log("ipns pubsub join: " + err.Error())
+			return
+		}
+		e.topics[topicName] = t
+	}
+	e.mu.Unlock()
+	deadline := time.Now().Add(45 * time.Second)
+	for len(t.ListPeers()) == 0 && time.Now().Before(deadline) && ctx.Err() == nil {
+		time.Sleep(time.Second)
+	}
+	if err := t.Publish(ctx, rec); err != nil {
+		e.Log("ipns pubsub publish: " + err.Error())
+		return
+	}
+	e.Log(fmt.Sprintf("ipns pubsub: sent to %d topic peers", len(t.ListPeers())))
 }
