@@ -175,6 +175,13 @@ func (e *Embedded) Start(ctx context.Context) error {
 	e.dag = merkledag.NewDAGService(e.bserv)
 
 	if !e.Offline {
+		for _, ai := range dht.GetDefaultBootstrapPeerAddrInfos() {
+			go func(ai peer.AddrInfo) {
+				c, cancel := context.WithTimeout(runCtx, 30*time.Second)
+				defer cancel()
+				h.Connect(c, ai)
+			}(ai)
+		}
 		if err := d.Bootstrap(runCtx); err != nil {
 			e.Log("dht bootstrap: " + err.Error())
 		}
@@ -182,7 +189,28 @@ func (e *Embedded) Start(ctx context.Context) error {
 	}
 	e.running = true
 	e.Log(fmt.Sprintf("embedded ipfs node %s on port %d", h.ID(), e.port))
+	if !e.Offline {
+		e.waitForRoutingTable(ctx, 45*time.Second)
+	}
 	return nil
+}
+
+// waitForRoutingTable blocks until the DHT knows some peers, so the first
+// IPNS query does not come back "not found" from an empty table.
+func (e *Embedded) waitForRoutingTable(ctx context.Context, max time.Duration) {
+	deadline := time.Now().Add(max)
+	for time.Now().Before(deadline) {
+		if n := e.dht.RoutingTable().Size(); n >= 4 {
+			e.Log(fmt.Sprintf("dht routing table has %d peers", n))
+			return
+		}
+		select {
+		case <-ctx.Done():
+			return
+		case <-time.After(500 * time.Millisecond):
+		}
+	}
+	e.Log(fmt.Sprintf("dht routing table still small (%d peers) after %s", e.dht.RoutingTable().Size(), max))
 }
 
 // peer keeps connections to the content providers Planet peers with, and

@@ -82,6 +82,9 @@ func (e *Embedded) NetworkRecord(ctx context.Context, nameStr string) (*Record, 
 	if err != nil {
 		return nil, err
 	}
+	if !e.Offline {
+		e.waitForRoutingTable(ctx, 20*time.Second)
+	}
 	sctx, cancel := context.WithTimeout(ctx, 25*time.Second)
 	defer cancel()
 	ch, err := e.dht.SearchValue(sctx, string(name.RoutingKey()))
