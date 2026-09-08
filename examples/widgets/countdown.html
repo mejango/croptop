@@ -1,0 +1,14 @@
+<p>Every campaign runs against a clock. This one counts down to the 2026 US midterm election, November 3.</p>
+<div id="cd" style="display:grid;grid-template-columns:repeat(4,1fr);gap:8px;text-align:center;border:1px solid var(--foreground-secondary-color);padding:16px">
+  <div><div id="cd-d" style="font-size:40px">0</div><div style="font-size:12px;opacity:.6">days</div></div>
+  <div><div id="cd-h" style="font-size:40px">0</div><div style="font-size:12px;opacity:.6">hours</div></div>
+  <div><div id="cd-m" style="font-size:40px">0</div><div style="font-size:12px;opacity:.6">minutes</div></div>
+  <div><div id="cd-s" style="font-size:40px">0</div><div style="font-size:12px;opacity:.6">seconds</div></div>
+</div>
+<p style="font-size:13px;opacity:.6">How: eight lines inline. Change the date and it counts down to anything.</p>
+<script type="module">
+const target = new Date("2026-11-03T12:00:00-05:00");
+const tick = () => { let s = Math.max(0, Math.floor((target - Date.now()) / 1000));
+  for (const [id, div] of [["cd-d", 86400], ["cd-h", 3600], ["cd-m", 60], ["cd-s", 1]]) { document.getElementById(id).textContent = Math.floor(s / div); s %= div; } };
+tick(); setInterval(tick, 1000);
+</script>

@@ -44,6 +44,9 @@ Widgets run with the same power as the template's own JavaScript, in the
 reader's browser, on a static page. That is the existing trust model of
 raw HTML in posts.
 
+Six finished examples, live on [follo.eth.sucks](https://follo.eth.sucks), are
+in [`examples/widgets/`](../examples/widgets/).
+
 ## Three complete widgets
 
 ### Countdown
