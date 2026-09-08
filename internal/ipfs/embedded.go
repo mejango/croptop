@@ -29,6 +29,7 @@ import (
 	"github.com/libp2p/go-libp2p/core/crypto"
 	"github.com/libp2p/go-libp2p/core/host"
 	"github.com/libp2p/go-libp2p/core/peer"
+	"github.com/libp2p/go-libp2p/p2p/host/autorelay"
 	"github.com/libp2p/go-libp2p/p2p/net/connmgr"
 	"github.com/multiformats/go-multiaddr"
 )
@@ -142,7 +143,8 @@ func (e *Embedded) Start(ctx context.Context) error {
 		libp2p.ConnectionManager(cm),
 	}
 	if !e.Offline {
-		opts = append(opts, libp2p.NATPortMap(), libp2p.EnableHolePunching(), libp2p.EnableNATService())
+		opts = append(opts, libp2p.NATPortMap(), libp2p.EnableHolePunching(), libp2p.EnableNATService(),
+			libp2p.EnableAutoRelayWithPeerSource(e.relaySource, autorelay.WithMinInterval(30*time.Second)))
 	}
 	h, err := libp2p.New(opts...)
 	if err != nil {
@@ -186,6 +188,20 @@ func (e *Embedded) Start(ctx context.Context) error {
 			e.Log("dht bootstrap: " + err.Error())
 		}
 		go e.peer(runCtx)
+		go func() {
+			for _, wait := range []time.Duration{30 * time.Second, 2 * time.Minute} {
+				select {
+				case <-runCtx.Done():
+					return
+				case <-time.After(wait):
+				}
+				var addrs []string
+				for _, a := range h.Addrs() {
+					addrs = append(addrs, a.String())
+				}
+				e.Log(fmt.Sprintf("addresses: %s", strings.Join(addrs, " ")))
+			}
+		}()
 	}
 	e.running = true
 	e.Log(fmt.Sprintf("embedded ipfs node %s on port %d", h.ID(), e.port))
@@ -211,6 +227,34 @@ func (e *Embedded) waitForRoutingTable(ctx context.Context, max time.Duration) {
 		}
 	}
 	e.Log(fmt.Sprintf("dht routing table still small (%d peers) after %s", e.dht.RoutingTable().Size(), max))
+}
+
+// relaySource offers connected peers that run the circuit relay v2 hop
+// protocol, so a node behind NAT gets a relayed address and hole punching.
+func (e *Embedded) relaySource(ctx context.Context, num int) <-chan peer.AddrInfo {
+	out := make(chan peer.AddrInfo)
+	go func() {
+		defer close(out)
+		if e.host == nil {
+			return
+		}
+		for _, p := range e.host.Network().Peers() {
+			if num <= 0 {
+				return
+			}
+			ok, err := e.host.Peerstore().SupportsProtocols(p, "/libp2p/circuit/relay/0.2.0/hop")
+			if err != nil || len(ok) == 0 {
+				continue
+			}
+			select {
+			case out <- e.host.Peerstore().PeerInfo(p):
+				num--
+			case <-ctx.Done():
+				return
+			}
+		}
+	}()
+	return out
 }
 
 // peer keeps connections to the content providers Planet peers with, and

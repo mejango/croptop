@@ -60,8 +60,24 @@ func (e *Embedded) NamePublish(ctx context.Context, key, c string, seq uint64) e
 	if err != nil {
 		return err
 	}
-	if err := e.dht.PutValue(ctx, string(name.RoutingKey()), b); err != nil {
+	rkey := string(name.RoutingKey())
+	if !e.Offline {
+		e.waitForRoutingTable(ctx, 20*time.Second)
+	}
+	start := time.Now()
+	closest, _ := e.dht.GetClosestPeers(ctx, rkey)
+	e.Log(fmt.Sprintf("ipns put: %d closest peers found in %s", len(closest), time.Since(start).Round(time.Millisecond)))
+	if err := e.dht.PutValue(ctx, rkey, b); err != nil {
 		return fmt.Errorf("ipns put: %w", err)
+	}
+	e.Log(fmt.Sprintf("ipns put done in %s", time.Since(start).Round(time.Millisecond)))
+	if !e.Offline {
+		// read our own record back from the network as a check
+		if rec, err := e.NetworkRecord(ctx, name.String()); err == nil {
+			e.Log(fmt.Sprintf("ipns readback: network now has sequence %d -> %s", rec.Sequence, rec.Value))
+		} else {
+			e.Log("ipns readback: " + err.Error())
+		}
 	}
 	go func() {
 		pctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
