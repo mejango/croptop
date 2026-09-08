@@ -33,3 +33,26 @@ func TestURL(t *testing.T) {
 		t.Fatalf("urls: %v", urls)
 	}
 }
+
+func TestLimoHasNoNameResolution(t *testing.T) {
+	site := &store.Site{IPNS: "k51abc"}
+	Set(site, "limo")
+	if got := URL(site); got != "https://k51abc.eth.sucks/" {
+		t.Fatalf("ipns on limo must fall back: %s", got)
+	}
+	d := "x.eth"
+	site.Domain = &d
+	if got := URL(site); got != "https://x.eth.limo/" {
+		t.Fatalf("eth domain on limo: %s", got)
+	}
+	if got := CIDURL(site, "bafyX"); got != "https://bafyX.eth.sucks/" {
+		t.Fatalf("cid url: %s", got)
+	}
+	if got := CIDURL(site, "QmX"); got != "https://dweb.link/ipfs/QmX/" {
+		t.Fatalf("cidv0 url: %s", got)
+	}
+	urls := FetchURLs("k51abc", "bafyX")
+	if urls[0] != "https://bafyX.eth.sucks/" || urls[len(urls)-1] != "https://dweb.link/ipns/k51abc/" {
+		t.Fatalf("fetch urls: %v", urls)
+	}
+}

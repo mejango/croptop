@@ -40,7 +40,7 @@ func (p *Publisher) Adopt(ctx context.Context, nameOrENS string, pemBytes []byte
 	}
 	defer os.RemoveAll(tmp)
 	p.log("fetching %s", cid)
-	if err := p.Node.Get(ctx, "/ipfs/"+cid, filepath.Join(tmp, "site")); err != nil {
+	if err := p.fetchSite(ctx, name, cid, filepath.Join(tmp, "site")); err != nil {
 		return "", err
 	}
 	pubDir := filepath.Join(tmp, "site")

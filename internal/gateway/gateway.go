@@ -10,16 +10,17 @@ import (
 )
 
 type Gateway struct {
-	Key  string // stored in the site as croptopGateway
-	Name string // shown in the console
-	TLD  string // appended to an .eth name: yoursite.eth -> yoursite.eth.<TLD>
+	Key   string // stored in the site as croptopGateway
+	Name  string // shown in the console
+	TLD   string // appended to an .eth name: yoursite.eth -> yoursite.eth.<TLD>
+	Names bool   // resolves raw IPNS names and CIDs as subdomains (<k51…>.eth.<TLD>, <cid>.eth.<TLD>)
 }
 
 // Table order is the fallback order. Add a gateway here and nowhere else.
 var Table = []Gateway{
-	{Key: "sucks", Name: "eth.sucks", TLD: "sucks"},
-	{Key: "shop", Name: "eth.shop", TLD: "shop"},
-	{Key: "limo", Name: "eth.limo", TLD: "limo"},
+	{Key: "sucks", Name: "eth.sucks", TLD: "sucks", Names: true},
+	{Key: "shop", Name: "eth.shop", TLD: "shop", Names: true},
+	{Key: "limo", Name: "eth.limo", TLD: "limo", Names: false}, // .eth domains only
 }
 
 const Default = "sucks"
@@ -73,7 +74,49 @@ func urlOn(site *store.Site, g Gateway) string {
 			return "https://" + d + ".site/"
 		}
 	}
-	return "https://" + site.IPNS + ".eth." + g.TLD + "/"
+	return "https://" + site.IPNS + ".eth." + namesGateway(g).TLD + "/"
+}
+
+// namesGateway returns g when it resolves raw names, else the first that does.
+func namesGateway(g Gateway) Gateway {
+	if g.Names {
+		return g
+	}
+	for _, t := range Table {
+		if t.Names {
+			return t
+		}
+	}
+	return g
+}
+
+// CIDURL is the address of one exact version of a site. CIDv0 has no
+// subdomain form, so it goes through dweb.link like Planet does.
+func CIDURL(site *store.Site, cid string) string {
+	if strings.HasPrefix(cid, "Qm") {
+		return "https://dweb.link/ipfs/" + cid + "/"
+	}
+	return "https://" + cid + ".eth." + namesGateway(Of(site)).TLD + "/"
+}
+
+// FetchURLs lists HTTP bases to read a site's current version from, most
+// exact first: the CID on every name-resolving gateway, then the IPNS name.
+func FetchURLs(ipns, cid string) []string {
+	var out []string
+	if cid != "" && !strings.HasPrefix(cid, "Qm") {
+		for _, g := range Table {
+			if g.Names {
+				out = append(out, "https://"+cid+".eth."+g.TLD+"/")
+			}
+		}
+		out = append(out, "https://dweb.link/ipfs/"+cid+"/")
+	}
+	for _, g := range Table {
+		if g.Names {
+			out = append(out, "https://"+ipns+".eth."+g.TLD+"/")
+		}
+	}
+	return append(out, "https://dweb.link/ipns/"+ipns+"/")
 }
 
 // URLs lists the site's URL on every gateway, canonical first.

@@ -36,7 +36,7 @@ func (p *Publisher) Sync(ctx context.Context, siteID string) (SyncResult, error)
 		}
 		defer os.RemoveAll(tmp)
 		p.log("fetching %s", cid)
-		if err := p.Node.Get(ctx, "/ipfs/"+cid, filepath.Join(tmp, "site")); err != nil {
+		if err := p.fetchSite(ctx, site.IPNS, cid, filepath.Join(tmp, "site")); err != nil {
 			return SyncResult{}, err
 		}
 		remote := &store.Store{Root: filepath.Join(tmp, "store")}

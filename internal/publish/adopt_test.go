@@ -2,6 +2,8 @@ package publish
 
 import (
 	"context"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"testing"
@@ -97,5 +99,42 @@ func TestMergePosts(t *testing.T) {
 	}
 	if titles["a"] != "a-remote" || titles["b"] != "b-local" || titles["c"] != "c-local-only" || titles["d"] != "d-remote-only" {
 		t.Fatalf("bad merge: %v", titles)
+	}
+}
+
+// A gateway-served tree must be enough to rebuild a site (the HTTP fallback
+// adopt and sync use when no IPFS peer provides the version).
+func TestFetchTreeHTTP(t *testing.T) {
+	root := t.TempDir()
+	if err := os.CopyFS(filepath.Join(root, "sites", fixtureID), os.DirFS("../store/testdata/site")); err != nil {
+		t.Fatal(err)
+	}
+	st := &store.Store{Root: root}
+	const post = "0AC3B2B6-90BE-4D1B-B14F-3A549D7A9953"
+	os.MkdirAll(st.PostDir(fixtureID, post), 0o755)
+	os.WriteFile(filepath.Join(st.PostDir(fixtureID, post), "Screenshot 2025-11-01 at 01.28.05.png"), []byte("png"), 0o644)
+	r := &render.Renderer{Store: st, Templates: templates.FS, CIDs: fakeCIDs{}}
+	if err := r.Render(context.Background(), fixtureID); err != nil {
+		t.Fatal(err)
+	}
+	srv := httptest.NewServer(http.FileServer(http.Dir(st.PublicDir(fixtureID))))
+	defer srv.Close()
+	dest := filepath.Join(t.TempDir(), "site")
+	if err := fetchTreeHTTP(context.Background(), srv.URL+"/", dest); err != nil {
+		t.Fatal(err)
+	}
+	rebuilt := &store.Store{Root: t.TempDir()}
+	if err := rebuildSource(rebuilt, fixtureID, dest); err != nil {
+		t.Fatal(err)
+	}
+	posts, _ := rebuilt.Posts(fixtureID)
+	if len(posts) != 18 {
+		t.Fatalf("%d posts", len(posts))
+	}
+	if _, err := os.Stat(filepath.Join(rebuilt.PostDir(fixtureID, post), "Screenshot 2025-11-01 at 01.28.05.png")); err != nil {
+		t.Fatal("attachment not fetched over http")
+	}
+	if _, err := os.Stat(filepath.Join(dest, post, "nft.json.cid.txt")); err != nil {
+		t.Fatal("nft cid not fetched over http")
 	}
 }

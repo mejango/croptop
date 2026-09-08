@@ -86,6 +86,8 @@ func (p *Publisher) Publish(ctx context.Context, siteID string, force bool) (Res
 	if err := p.Store.SaveSite(site); err != nil {
 		return Result{}, err
 	}
+	p.log("asking gateways to fetch the new version")
+	p.prewarm(ctx, site, cid)
 	return Result{CID: cid, Sequence: seq}, nil
 }
 
@@ -98,10 +100,6 @@ func (p *Publisher) Keepalive(ctx context.Context, siteID string) error {
 	}
 	if site.LastPublishedCID == nil || !p.Node.Keystore().Has(site.ID) {
 		return nil
-	}
-	if site.PublishedElsewhere && site.IPNSSequence > 0 {
-		// flagged after we had published: leave the name alone until the user syncs,
-		// but keep checking whether the other machine went quiet and the record is ours again
 	}
 	nctx, cancel := context.WithTimeout(ctx, networkTimeout)
 	rec, err := p.Node.NetworkRecord(nctx, site.IPNS)
