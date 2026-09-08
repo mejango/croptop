@@ -7,6 +7,7 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"time"
 )
 
 // Port ranges match the Mac app so both can coexist on one machine.
@@ -33,13 +34,23 @@ var resolvers = map[string]string{
 	"fc.":  "https://dweb-dns.v2ex.pro/dns-query",
 }
 
+// freePort finds a port nothing is listening on. A bind test alone is not
+// enough: kubo listens with SO_REUSEPORT, so on macOS a second bind to a
+// port another kubo (for example the Mac app's) already uses succeeds. A
+// successful connect is the reliable "busy" signal.
 func freePort(low, high int) (int, error) {
 	for p := low; p <= high; p++ {
-		l, err := net.Listen("tcp", fmt.Sprintf("127.0.0.1:%d", p))
-		if err == nil {
-			l.Close()
-			return p, nil
+		addr := fmt.Sprintf("127.0.0.1:%d", p)
+		if c, err := net.DialTimeout("tcp", addr, 200*time.Millisecond); err == nil {
+			c.Close()
+			continue // something answers: busy
 		}
+		l, err := net.Listen("tcp", addr)
+		if err != nil {
+			continue
+		}
+		l.Close()
+		return p, nil
 	}
 	return 0, fmt.Errorf("no free port in %d-%d", low, high)
 }

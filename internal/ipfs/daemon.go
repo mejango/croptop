@@ -3,9 +3,11 @@ package ipfs
 import (
 	"bufio"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
+	"net/http"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -185,4 +187,44 @@ func (r *ring) String() string {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	return strings.Join(r.lines, "\n")
+}
+
+// ConnectLocalNodes peers with other kubo nodes on this machine, found by
+// probing the API ports Planet and Croptop use. Blocks then move locally
+// instead of through the DHT: import-planet and adopt on the same Mac as
+// the Croptop app are instant, and two Croptop data dirs can see each other.
+func (n *Node) ConnectLocalNodes(ctx context.Context) int {
+	connected := 0
+	for p := apiPortLow; p <= apiPortHigh; p++ {
+		if p == n.APIPort {
+			continue
+		}
+		c, cancel := context.WithTimeout(ctx, 2*time.Second)
+		req, _ := http.NewRequestWithContext(c, "POST", fmt.Sprintf("http://127.0.0.1:%d/api/v0/id", p), nil)
+		resp, err := http.DefaultClient.Do(req)
+		cancel()
+		if err != nil {
+			continue
+		}
+		var id struct {
+			ID        string   `json:"ID"`
+			Addresses []string `json:"Addresses"`
+		}
+		json.NewDecoder(resp.Body).Decode(&id)
+		resp.Body.Close()
+		for _, a := range id.Addresses {
+			if !strings.HasPrefix(a, "/ip4/127.0.0.1/tcp/") {
+				continue
+			}
+			c, cancel := context.WithTimeout(ctx, 10*time.Second)
+			_, err := n.Run(c, "swarm", "connect", a)
+			cancel()
+			if err == nil {
+				n.Log("peered with local kubo " + id.ID)
+				connected++
+			}
+			break
+		}
+	}
+	return connected
 }

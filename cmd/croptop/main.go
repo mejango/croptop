@@ -301,6 +301,9 @@ func (a *app) startNode(ctx context.Context) error {
 	if err := a.node.Start(ctx); err != nil {
 		return fmt.Errorf("ipfs daemon: %w", err)
 	}
+	if n := a.node.ConnectLocalNodes(ctx); n > 0 {
+		println(fmt.Sprintf("peered with %d local ipfs node(s)", n))
+	}
 	return nil
 }
 
