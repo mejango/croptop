@@ -127,3 +127,20 @@ func (n *Node) Provide(ctx context.Context, cid string) error {
 	_, err := n.Run(ctx, "pin", "add", "--recursive", cid)
 	return err
 }
+
+// FindProviders asks the DHT who announces the CID (20 s budget).
+func (n *Node) FindProviders(ctx context.Context, cid string) ([]string, error) {
+	fctx, cancel := context.WithTimeout(ctx, 20*time.Second)
+	defer cancel()
+	out, err := n.Run(fctx, "routing", "findprovs", "-n", "20", cid)
+	var ids []string
+	for _, line := range strings.Split(strings.TrimSpace(string(out)), "\n") {
+		if line = strings.TrimSpace(line); line != "" {
+			ids = append(ids, line)
+		}
+	}
+	if len(ids) == 0 && err != nil && fctx.Err() == nil {
+		return nil, err
+	}
+	return ids, nil
+}

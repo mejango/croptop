@@ -391,3 +391,21 @@ func (e *Embedded) Provide(ctx context.Context, c string) error {
 	defer cancel()
 	return e.dht.Provide(pctx, id, true)
 }
+
+// FindProviders lists peers announcing the CID, up to 20 within 20 seconds.
+func (e *Embedded) FindProviders(ctx context.Context, c string) ([]string, error) {
+	if e.dht == nil {
+		return nil, fmt.Errorf("node not started")
+	}
+	id, err := cid.Decode(c)
+	if err != nil {
+		return nil, err
+	}
+	fctx, cancel := context.WithTimeout(ctx, 20*time.Second)
+	defer cancel()
+	var ids []string
+	for p := range e.dht.FindProvidersAsync(fctx, id, 20) {
+		ids = append(ids, p.ID.String())
+	}
+	return ids, nil
+}

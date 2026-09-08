@@ -89,6 +89,29 @@ other machine, newest edit per post wins, then publishes from here.
 Keep a copy of the key somewhere safe. It is the only thing IPFS cannot
 give back.
 
+## Following other sites
+
+```
+croptop follow yoursite.eth        or an IPNS name, or Follow a site in the console
+```
+
+Your node fetches the site, keeps it, serves it at `/f/<ipns>/`, checks
+for a new version every six hours, and re-announces it to the network every
+twelve. A site stays online because its readers host it. Each of your own
+sites shows how many nodes are hosting it.
+
+## An always-on node
+
+```
+croptop passcode set
+croptop serve --role node --listen 0.0.0.0:8086
+```
+
+runs headless on a Raspberry Pi or a small server: it keeps your IPNS
+records alive, re-provides your sites and the ones you follow, and takes
+edits from the console opened from a laptop or phone. `croptop status`
+prints what it is doing.
+
 ## From a phone or another computer
 
 Set a passcode, then listen on all interfaces:

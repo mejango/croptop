@@ -68,7 +68,7 @@ func fakePublisher(t *testing.T) (*Publisher, *store.Store, string) {
 		t.Fatal(err)
 	}
 	r := &render.Renderer{Store: s, Templates: templates.FS, CIDs: node}
-	return &Publisher{Store: s, Node: node, Render: r}, s, log
+	return &Publisher{Store: s, Node: node, Render: r, SkipPrewarm: true}, s, log
 }
 
 func TestPublishUsesNetworkSequence(t *testing.T) {

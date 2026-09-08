@@ -16,6 +16,7 @@ import (
 	"sync"
 
 	"github.com/mejango/croptop/internal/config"
+	"github.com/mejango/croptop/internal/follow"
 	"github.com/mejango/croptop/internal/ipfs"
 	"github.com/mejango/croptop/internal/publish"
 	"github.com/mejango/croptop/internal/render"
@@ -25,6 +26,7 @@ import (
 type Server struct {
 	Store     *store.Store
 	Pub       *publish.Publisher
+	Follow    *follow.Store
 	Node      ipfs.Engine
 	Cfg       *config.Config
 	UI        fs.FS
@@ -42,6 +44,7 @@ func (s *Server) Handler() http.Handler {
 	mux := http.NewServeMux()
 	s.routesAPI(mux)
 	s.routesCroptop(mux)
+	s.routesFollow(mux)
 
 	// UI
 	mux.HandleFunc("GET /{$}", func(w http.ResponseWriter, r *http.Request) {
@@ -105,7 +108,7 @@ func (s *Server) auth(next http.Handler) http.Handler {
 
 func isPublicPath(p string) bool {
 	seg := strings.SplitN(strings.TrimPrefix(p, "/"), "/", 2)[0]
-	if uuidRe.MatchString(seg) {
+	if uuidRe.MatchString(seg) || strings.HasPrefix(p, "/f/") {
 		return true
 	}
 	return strings.HasPrefix(p, "/v0/planets/my/") && strings.HasSuffix(p, "/public")

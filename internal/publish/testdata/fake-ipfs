@@ -6,5 +6,10 @@ case "$1 $2" in
   "name get") printf 'record' ;;
   "name inspect") echo '{"Entry":{"Value":"/ipfs/bafyOLD","Sequence":7,"Validity":"2030-01-01T00:00:00Z"}}' ;;
   "name publish") echo '{"Name":"k51","Value":"/ipfs/bafyFAKE"}' ;;
+  "get "*) # ipfs get -o <dest> <path>: write a minimal site tree
+    dest=""; prev=""; for a in "$@"; do [ "$prev" = "-o" ] && dest="$a"; prev="$a"; done
+    mkdir -p "$dest" && printf '{"id":"FAKE","name":"Followed","articles":[]}' > "$dest/planet.json" ;;
+  "routing findprovs") echo 12D3KooWFAKEPEER ;;
+  "pin add") echo "pinned $4" ;;
   *) echo "fake-ipfs: unhandled $*" >&2; exit 1 ;;
 esac

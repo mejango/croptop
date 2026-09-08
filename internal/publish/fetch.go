@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/mejango/croptop/internal/gateway"
+	"github.com/mejango/croptop/internal/ipfs"
 	"github.com/mejango/croptop/internal/render"
 	"github.com/mejango/croptop/internal/store"
 )
@@ -29,8 +30,16 @@ const (
 // gateway list. HTTP is what keeps adopt and sync working when the only
 // IPFS provider of the new version has gone offline.
 func (p *Publisher) fetchSite(ctx context.Context, ipns, cid, dest string) error {
+	return FetchSite(ctx, p.Node, ipns, cid, dest, p.log)
+}
+
+// FetchSite is the shared fetch used by adopt, sync, and follow.
+func FetchSite(ctx context.Context, node ipfs.Engine, ipns, cid, dest string, logf func(string, ...any)) error {
+	if logf == nil {
+		logf = func(string, ...any) {}
+	}
 	ictx, cancel := context.WithTimeout(ctx, ipfsFetchTimeout)
-	err := p.Node.Get(ictx, "/ipfs/"+cid, dest)
+	err := node.Get(ictx, "/ipfs/"+cid, dest)
 	cancel()
 	if err == nil {
 		if _, statErr := os.Stat(filepath.Join(dest, "planet.json")); statErr == nil {
@@ -38,7 +47,7 @@ func (p *Publisher) fetchSite(ctx context.Context, ipns, cid, dest string) error
 		}
 		err = errors.New("fetched tree has no planet.json")
 	}
-	p.log("ipfs fetch failed (%v); trying gateways", err)
+	logf("ipfs fetch failed (%v); trying gateways", err)
 	os.RemoveAll(dest)
 	var last error
 	for _, base := range gateway.FetchURLs(ipns, cid) {
@@ -46,10 +55,10 @@ func (p *Publisher) fetchSite(ctx context.Context, ipns, cid, dest string) error
 		last = fetchTreeHTTP(hctx, base, dest)
 		cancel()
 		if last == nil {
-			p.log("fetched from %s", base)
+			logf("fetched from %s", base)
 			return nil
 		}
-		p.log("%s: %v", base, last)
+		logf("%s: %v", base, last)
 		os.RemoveAll(dest)
 	}
 	return fmt.Errorf("could not fetch %s from IPFS or any gateway: %w", cid, last)

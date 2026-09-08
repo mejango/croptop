@@ -24,6 +24,8 @@ type Publisher struct {
 	Node   ipfs.Engine
 	Render *render.Renderer
 	Log    func(string)
+	// SkipPrewarm disables the gateway warm-up after publishing (tests).
+	SkipPrewarm bool
 }
 
 func (p *Publisher) log(format string, a ...any) {
@@ -86,8 +88,10 @@ func (p *Publisher) Publish(ctx context.Context, siteID string, force bool) (Res
 	if err := p.Store.SaveSite(site); err != nil {
 		return Result{}, err
 	}
-	p.log("asking gateways to fetch the new version")
-	p.prewarm(ctx, site, cid)
+	if !p.SkipPrewarm {
+		p.log("asking gateways to fetch the new version")
+		p.prewarm(ctx, site, cid)
+	}
 	return Result{CID: cid, Sequence: seq}, nil
 }
 
@@ -158,4 +162,18 @@ func deref(s *string) string {
 		return ""
 	}
 	return *s
+}
+
+// ProvideAll re-announces every owned site's last published root. DHT
+// provider records expire after 48 hours, so serve loops call this often.
+func (p *Publisher) ProvideAll(ctx context.Context) {
+	sites, _ := p.Store.Sites()
+	for _, s := range sites {
+		if s.LastPublishedCID == nil {
+			continue
+		}
+		if err := p.Node.Provide(ctx, *s.LastPublishedCID); err != nil {
+			p.log("provide %s: %v", s.Name, err)
+		}
+	}
 }

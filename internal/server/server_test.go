@@ -15,6 +15,7 @@ import (
 	"testing/fstest"
 
 	"github.com/mejango/croptop/internal/config"
+	"github.com/mejango/croptop/internal/follow"
 	"github.com/mejango/croptop/internal/ipfs"
 	"github.com/mejango/croptop/internal/publish"
 	"github.com/mejango/croptop/internal/render"
@@ -33,9 +34,9 @@ func testServer(t *testing.T) (*Server, *httptest.Server) {
 	node := ipfs.NewNode(script, filepath.Join(root, "ipfs"))
 	st := &store.Store{Root: root}
 	r := &render.Renderer{Store: st, Templates: templates.FS, CIDs: node}
-	pub := &publish.Publisher{Store: st, Node: node, Render: r}
+	pub := &publish.Publisher{Store: st, Node: node, Render: r, SkipPrewarm: true}
 	s := &Server{
-		Store: st, Pub: pub, Node: node, Cfg: &config.Config{Listen: config.DefaultListen},
+		Store: st, Pub: pub, Node: node, Follow: &follow.Store{Root: root, Engine: node}, Cfg: &config.Config{Listen: config.DefaultListen},
 		UI: fstest.MapFS{"index.html": {Data: []byte("<h1>ui</h1>")}}, Templates: templates.FS, Version: "test",
 	}
 	ts := httptest.NewServer(s.Handler())
@@ -197,5 +198,30 @@ func TestPostControls(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(s.Store.PublicDir(id), "rss.xml")); err != nil {
 		t.Fatal("rss.xml not written for a new site")
+	}
+}
+
+func TestFollowRoutes(t *testing.T) {
+	_, ts := testServer(t)
+	// the fake ipfs answers "name get" with bafyOLD and "get" writes a tree
+	code, e := do(t, "POST", ts.URL+"/v0/croptop/following", strings.NewReader(`{"name":"k51followed"}`), "application/json")
+	if code != 200 || e["ipns"] != "k51followed" || e["cid"] != "bafyOLD" {
+		t.Fatalf("follow %d %v", code, e)
+	}
+	code, _ = do(t, "GET", ts.URL+"/f/k51followed/planet.json", nil, "")
+	if code != 200 {
+		t.Fatalf("followed tree not served: %d", code)
+	}
+	code, list := do(t, "GET", ts.URL+"/v0/croptop/following", nil, "")
+	if code != 200 || list["_raw"] == nil && len(list) == 0 {
+		t.Fatalf("list %d %v", code, list)
+	}
+	code, _ = do(t, "DELETE", ts.URL+"/v0/croptop/following/k51followed", nil, "")
+	if code != 200 {
+		t.Fatalf("unfollow %d", code)
+	}
+	code, _ = do(t, "GET", ts.URL+"/f/k51followed/planet.json", nil, "")
+	if code != 404 {
+		t.Fatalf("tree should be gone: %d", code)
 	}
 }

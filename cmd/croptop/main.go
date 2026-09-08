@@ -4,9 +4,11 @@ package main
 import (
 	"bufio"
 	"context"
+	"encoding/json"
 	"flag"
 	"fmt"
 	"io/fs"
+	"net/http"
 	"os"
 	"os/exec"
 	"os/signal"
@@ -17,6 +19,7 @@ import (
 	"time"
 
 	"github.com/mejango/croptop/internal/config"
+	"github.com/mejango/croptop/internal/follow"
 	"github.com/mejango/croptop/internal/ipfs"
 	"github.com/mejango/croptop/internal/publish"
 	"github.com/mejango/croptop/internal/render"
@@ -39,8 +42,14 @@ const usage = `croptop — publish Croptop sites to IPFS
   croptop key export <site>   print the site's private key (PEM)
   croptop key import <site> <file.pem>
   croptop passcode set     required before listening on a non-loopback address
+  croptop follow <name>    keep, serve, and re-provide someone else's site
+  croptop unfollow <name>
+  croptop following        list followed sites
+  croptop status           sites, sequences, followed sites (via the running console)
   croptop engine           print the active ipfs engine (kubo or embedded)
   croptop version
+
+Flags for serve: --listen <addr>, --role node (headless: no browser, log only)
 
 Common flags: --data <dir> (default: ` + "%s" + `), --templates <dir>
 `
@@ -52,6 +61,7 @@ type app struct {
 	store        *store.Store
 	engine       ipfs.Engine
 	kubo         *ipfs.Node // set when engine is kubo
+	follow       *follow.Store
 	pub          *publish.Publisher
 	tmpl         fs.FS
 }
@@ -80,6 +90,7 @@ func run(args []string) error {
 	keyFile := fs.String("key", "", "PEM key file (adopt)")
 	container := fs.String("container", "", "Planet container path (import-planet)")
 	engineFlag := fs.String("engine", "", "ipfs engine: kubo (downloaded sidecar) or embedded (built in); remembered in config")
+	role := fs.String("role", "console", "console (opens the browser) or node (headless)")
 	if err := fs.Parse(flagsFirst(args)); err != nil {
 		return nil
 	}
@@ -102,7 +113,9 @@ func run(args []string) error {
 		fmt.Println(a.cfg.EngineName())
 		return nil
 	case "serve":
-		return a.serve(*listen, *noOpen)
+		return a.serve(*listen, *noOpen || *role == "node")
+	case "status":
+		return a.status()
 	case "import-planet":
 		c := *container
 		if c == "" {
@@ -225,6 +238,36 @@ func run(args []string) error {
 		site, _ := a.store.Site(id)
 		fmt.Printf("adopted %s (%s) at sequence %d\n", site.Name, id, site.IPNSSequence)
 		return nil
+	case "follow":
+		if len(rest) < 1 {
+			return fmt.Errorf("usage: croptop follow <ipns name or ENS name>")
+		}
+		e, err := a.follow.Follow(ctx, rest[0])
+		if err != nil {
+			return err
+		}
+		fmt.Printf("following %s (%s) at %s\n", e.Title, e.IPNS, e.CID)
+		return nil
+	case "unfollow":
+		if len(rest) < 1 {
+			return fmt.Errorf("usage: croptop unfollow <name or ipns>")
+		}
+		list, _ := a.follow.List()
+		for _, e := range list {
+			if e.IPNS == rest[0] || strings.EqualFold(e.Name, rest[0]) || strings.EqualFold(e.Title, rest[0]) {
+				return a.follow.Unfollow(e.IPNS)
+			}
+		}
+		return fmt.Errorf("not following %q", rest[0])
+	case "following":
+		list, err := a.follow.List()
+		if err != nil {
+			return err
+		}
+		for _, e := range list {
+			fmt.Printf("%s\t%s\t%s\tchanged %s\n", e.Title, e.IPNS, e.CID, e.Changed.Time().Format(time.RFC3339))
+		}
+		return nil
 	case "ipfs-smoke":
 		info, err := a.engine.Info(ctx)
 		fmt.Printf("%s: %+v %v\n", a.cfg.EngineName(), info, err)
@@ -308,6 +351,7 @@ func (a *app) open(engine string) error {
 	ffmpeg, _ := exec.LookPath("ffmpeg")
 	r := &render.Renderer{Store: a.store, Templates: a.tmpl, CIDs: a.engine, FFmpeg: ffmpeg, Log: println}
 	a.pub = &publish.Publisher{Store: a.store, Node: a.engine, Render: r, Log: println}
+	a.follow = &follow.Store{Root: a.dataDir, Engine: a.engine, Log: println}
 	return nil
 }
 
@@ -382,9 +426,23 @@ func (a *app) serve(listen string, noOpen bool) error {
 	}
 	defer a.engine.Stop()
 	go a.pub.RunKeepalive(ctx, 10*time.Minute)
+	go a.follow.Run(ctx, 6*time.Hour)
+	go func() { // DHT provider records expire after 48h
+		t := time.NewTicker(12 * time.Hour)
+		defer t.Stop()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-t.C:
+				a.pub.ProvideAll(ctx)
+				a.follow.ProvideAll(ctx)
+			}
+		}
+	}()
 	ui, _ := fs.Sub(web.FS, ".")
 	srv := &server.Server{
-		Store: a.store, Pub: a.pub, Node: a.engine, Cfg: a.cfg, UI: ui, Templates: a.tmpl,
+		Store: a.store, Pub: a.pub, Follow: a.follow, Node: a.engine, Cfg: a.cfg, UI: ui, Templates: a.tmpl,
 		Version: version, DataDir: a.dataDir, Log: println,
 	}
 	url := "http://" + strings.Replace(a.cfg.Listen, "0.0.0.0", "127.0.0.1", 1)
@@ -397,6 +455,62 @@ func (a *app) serve(listen string, noOpen bool) error {
 		println("stopping")
 	}()
 	return srv.ListenAndServe(ctx, a.cfg.Listen)
+}
+
+// status reads the running console's API and prints a summary.
+func (a *app) status() error {
+	base := "http://" + strings.Replace(a.cfg.Listen, "0.0.0.0", "127.0.0.1", 1)
+	get := func(path string, v any) error {
+		resp, err := http.Get(base + path)
+		if err != nil {
+			return fmt.Errorf("console not reachable at %s (is `croptop serve` running?): %w", base, err)
+		}
+		defer resp.Body.Close()
+		if resp.StatusCode == 401 {
+			return fmt.Errorf("the console has a passcode; set PN_API_PASSCODE or check from the browser")
+		}
+		return json.NewDecoder(resp.Body).Decode(v)
+	}
+	var st struct {
+		Version string `json:"version"`
+		IPFS    struct {
+			Running bool   `json:"running"`
+			Peers   int    `json:"peers"`
+			PeerID  string `json:"peerID"`
+			Version string `json:"version"`
+		} `json:"ipfs"`
+	}
+	if err := get("/v0/croptop/status", &st); err != nil {
+		return err
+	}
+	fmt.Printf("croptop %s, ipfs %s, %d peers, id %s\n", st.Version, st.IPFS.Version, st.IPFS.Peers, st.IPFS.PeerID)
+	var sites []map[string]any
+	if err := get("/v0/planets/my", &sites); err != nil {
+		return err
+	}
+	fmt.Println("sites:")
+	for _, s := range sites {
+		seq, _ := s["ipnsSequence"].(float64)
+		state := "live"
+		if s["publishedElsewhere"] == true {
+			state = "published elsewhere"
+		}
+		if s["lastPublishedCID"] == nil {
+			state = "never published"
+		}
+		fmt.Printf("  %-24s seq %-4.0f %s\n", s["name"], seq, state)
+	}
+	var following []map[string]any
+	if err := get("/v0/croptop/following", &following); err != nil {
+		return err
+	}
+	if len(following) > 0 {
+		fmt.Println("following:")
+		for _, f := range following {
+			fmt.Printf("  %-24s %s\n", f["title"], f["cid"])
+		}
+	}
+	return nil
 }
 
 func openBrowser(url string) {

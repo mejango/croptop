@@ -33,6 +33,7 @@ h2 { font-size: 18px; }
 #sites a { padding: 8px 10px; border-left: 4px solid transparent; }
 #sites a.current { border-left-color: var(--hot); background: #fff0fa; }
 #sites a small { display: block; color: var(--muted); font-size: 13px; }
+#sites .rail-head { font-family: var(--pixel); font-size: 12px; color: var(--muted); margin: 14px 10px 4px; }
 .rail-actions { display: flex; flex-direction: column; gap: 6px; margin-top: auto; }
 .rail-actions a { padding: 6px 10px; border: 2px solid var(--ink); text-align: center; }
 .node { font-size: 13px; color: var(--muted); }
@@ -62,6 +63,7 @@ h2 { font-size: 18px; }
 .state.never .dot { background: var(--hot); }
 .state a { text-decoration: underline; }
 .state .grow { flex: 1; }
+.state .hosts { color: var(--muted); font-size: 14px; white-space: nowrap; }
 
 /* post grid mirrors the site's own tiles */
 .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); gap: 14px; }

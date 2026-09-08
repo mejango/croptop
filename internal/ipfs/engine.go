@@ -28,6 +28,8 @@ type Engine interface {
 	Provide(ctx context.Context, cid string) error
 	// ConnectLocalNodes peers with other IPFS nodes on this machine.
 	ConnectLocalNodes(ctx context.Context) int
+	// FindProviders lists peer IDs currently announcing a CID.
+	FindProviders(ctx context.Context, cid string) ([]string, error)
 }
 
 var _ Engine = (*Node)(nil)

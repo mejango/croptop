@@ -42,9 +42,12 @@
     return data;
   };
 
-  const state = { sites: [], status: null, template: null };
+  const state = { sites: [], following: [], status: null, template: null };
 
-  const loadSites = async () => { state.sites = await api("GET", "/v0/planets/my?all=true"); renderRail(); };
+  const loadSites = async () => {
+    [state.sites, state.following] = await Promise.all([api("GET", "/v0/planets/my?all=true"), api("GET", "/v0/croptop/following").catch(() => [])]);
+    renderRail();
+  };
   const loadStatus = async () => {
     try { state.status = await api("GET", "/v0/croptop/status"); } catch (e) { state.status = null; }
     const n = $("#node");
@@ -62,6 +65,13 @@
     for (const s of state.sites) {
       if (s.archived) continue;
       box.append(h("a", { href: "#/site/" + s.id, class: s.id === cur ? "current" : "" }, s.name, h("small", {}, s.publishedElsewhere ? "published elsewhere" : s.domain || s.ipns.slice(0, 12) + "…")));
+    }
+    if (state.following.length) {
+      box.append(h("div", { class: "rail-head" }, "Following"));
+      const curF = location.hash.startsWith("#/f/") ? location.hash.split("/")[2] : "";
+      for (const f of state.following) {
+        box.append(h("a", { href: "#/f/" + f.ipns, class: f.ipns === curF ? "current" : "" }, f.title || f.name, h("small", {}, f.error ? "check failed" : f.name !== f.ipns ? f.name : f.ipns.slice(0, 12) + "…")));
+      }
     }
   };
 
@@ -108,6 +118,43 @@
       h("label", {}, "Site key (PEM)", h("textarea", { name: "pem", class: "pem", required: "", placeholder: "-----BEGIN PRIVATE KEY-----" }), h("span", { class: "help" }, "From the other machine: site settings, then Export key.")),
       h("div", { class: "row" }, h("button", { class: "btn hot", type: "submit" }, "Adopt site")), log);
     m.replaceChildren(h("div", { class: "head" }, h("div", {}, h("h1", {}, "Adopt a site"), h("p", {}, "Everything a site needs is on IPFS except its key. Paste the key and this machine takes over publishing; the previous one will notice and stop."))), form);
+  };
+
+  views.follow = async () => {
+    const m = $("#main");
+    const log = h("pre", { class: "log", hidden: "" });
+    const form = h("form", { class: "sheet", onsubmit: async (e) => {
+      e.preventDefault();
+      const btn = $("button[type=submit]", form); btn.disabled = true;
+      log.hidden = false; log.textContent = "Fetching the site. This can take a minute.";
+      try {
+        const f = await api("POST", "/v0/croptop/following", { name: $("[name=name]", form).value.trim() });
+        await loadSites(); location.hash = "#/f/" + f.ipns; toast("Following " + (f.title || f.name));
+      } catch (err) { log.textContent = err.message; btn.disabled = false; }
+    }},
+      h("label", {}, "IPNS name or ENS domain", h("input", { type: "text", name: "name", required: "", placeholder: "k51… or theirsite.eth", autofocus: "" })),
+      h("div", { class: "row" }, h("button", { class: "btn hot", type: "submit" }, "Follow site")), log);
+    m.replaceChildren(h("div", { class: "head" }, h("div", {}, h("h1", {}, "Follow a site"), h("p", {}, "Your node keeps a copy, serves it here, and helps host it on the network. It checks for new versions every six hours."))), form);
+  };
+
+  views.followed = async (ipns) => {
+    const f = state.following.find((x) => x.ipns === ipns); if (!f) return views.home();
+    const m = $("#main");
+    const refresh = h("button", { class: "btn quiet", onclick: async () => {
+      refresh.disabled = true; refresh.textContent = "Checking…";
+      try { const r = await api("POST", `/v0/croptop/following/${ipns}/refresh`); toast(r.changed ? "Updated to the newest version" : "Already current"); await loadSites(); route(); }
+      catch (err) { toast(err.message, true); refresh.disabled = false; refresh.textContent = "Check now"; }
+    }}, "Check now");
+    m.replaceChildren(
+      h("div", { class: "head" }, h("div", {}, h("h1", {}, f.title || f.name), h("p", {}, f.name !== f.ipns ? f.name : "")),
+        h("div", { class: "actions" }, h("a", { class: "btn quiet", href: `/f/${ipns}/`, target: "_blank" }, "Open"), refresh,
+          h("button", { class: "btn quiet danger", onclick: async () => {
+            if (!confirm(`Stop following ${f.title || f.name}? Your copy is removed.`)) return;
+            await api("DELETE", `/v0/croptop/following/${ipns}`); await loadSites(); toast("Unfollowed"); location.hash = "#/";
+          }}, "Unfollow"))),
+      h("div", { class: "state " + (f.error ? "elsewhere" : "live") }, h("span", { class: "dot" }),
+        h("span", { class: "grow" }, f.error ? `Last check failed: ${f.error}` : `Hosting version `, f.error ? null : h("code", {}, f.cid.slice(0, 20) + "…"), f.error ? "" : `, changed ${ago(when(f.changed))}, checked ${ago(when(f.checked))}`)),
+      h("iframe", { class: "preview", src: `/f/${ipns}/`, title: f.title || f.name }));
   };
 
   const siteById = (id) => state.sites.find((s) => s.id === id);
@@ -159,13 +206,23 @@
       if (p.videoFilename) cov.append(h("span", {}, "video")); else if (p.audioFilename) cov.append(h("span", {}, "audio"));
       grid.append(h("a", { class: "tile", href: `#/site/${id}/post/${p.id}` }, cov, h("div", { class: "meta" }, p.title || "Untitled", h("small", {}, when(p.created).toLocaleDateString()))));
     }
+    const strip = stateStrip(site);
     m.replaceChildren(
       h("div", { class: "head" }, h("div", {}, h("h1", {}, site.name), h("p", {}, site.about)),
         h("div", { class: "actions" },
           h("a", { class: "btn quiet", href: `/${id}/`, target: "_blank" }, "Preview"),
           h("a", { class: "btn quiet", href: `#/site/${id}/settings` }, "Settings"),
           h("button", { class: "btn hot", id: "publish", onclick: () => publish(site) }, "Publish"))),
-      stateStrip(site), grid);
+      strip, grid);
+    if (site.lastPublishedCID) {
+      const hosts = h("span", { class: "hosts", title: "Nodes currently announcing this version" }, "looking for hosts…");
+      strip.append(hosts);
+      api("GET", `/v0/croptop/sites/${id}/hosts`).then((r) => {
+        const others = r.peers.filter((p) => p !== r.self).length;
+        hosts.textContent = r.count === 0 ? "no hosts found yet" : `hosted by ${r.count} node${r.count === 1 ? "" : "s"}` + (r.peers.includes(r.self) ? (others ? ", you and " + others + " other" + (others === 1 ? "" : "s") : ", just you") : "");
+        hosts.title = r.peers.join("\n");
+      }).catch(() => { hosts.textContent = ""; });
+    }
   };
 
   views.post = async (id, pid) => {
@@ -372,6 +429,8 @@
       if (!parts.length) return views.home();
       if (parts[0] === "new") return views.new();
       if (parts[0] === "adopt") return views.adopt();
+      if (parts[0] === "follow") return views.follow();
+      if (parts[0] === "f" && parts[1]) return views.followed(parts[1]);
       if (parts[0] === "site" && parts[1]) {
         if (parts[2] === "post" && parts[3]) return views.post(parts[1], parts[3]);
         if (parts[2] === "settings") return views.settings(parts[1]);
