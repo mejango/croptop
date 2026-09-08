@@ -200,3 +200,30 @@ func TestShims(t *testing.T) {
 		t.Fatalf("\ngot  %s\nwant %s", got, want)
 	}
 }
+
+func TestPagesRenderButStayOutOfFeed(t *testing.T) {
+	r, s := fixtureRenderer(t)
+	slug := "about"
+	page := &store.Post{ID: "AAAAAAAA-0000-4000-8000-000000000001", Title: "About", Content: "hi", Created: store.Now(), ArticleType: 1, Link: "/about/", Slug: &slug, Attachments: []string{}}
+	if err := s.SavePost(fixtureID, page); err != nil {
+		t.Fatal(err)
+	}
+	if err := r.Render(context.Background(), fixtureID); err != nil {
+		t.Fatal(err)
+	}
+	var pj struct {
+		Articles []map[string]any `json:"articles"`
+	}
+	b, _ := os.ReadFile(filepath.Join(s.PublicDir(fixtureID), "planet.json"))
+	json.Unmarshal(b, &pj)
+	for _, a := range pj.Articles {
+		if a["id"] == page.ID {
+			t.Fatal("page leaked into planet.json articles")
+		}
+	}
+	for _, dir := range []string{page.ID, "about"} {
+		if _, err := os.Stat(filepath.Join(s.PublicDir(fixtureID), dir, "index.html")); err != nil {
+			t.Fatalf("page not rendered at %s", dir)
+		}
+	}
+}

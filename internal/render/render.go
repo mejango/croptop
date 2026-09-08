@@ -87,20 +87,21 @@ func (r *Renderer) Render(ctx context.Context, siteID string) error {
 
 	SortForIndex(posts)
 	articles := make([]map[string]any, 0, len(posts))
+	pubPosts := make([]PublicPost, 0, len(posts))
 	for _, p := range posts {
 		pp, err := r.renderPost(ctx, eng, site, p, meta, base)
 		if err != nil {
 			return fmt.Errorf("post %s: %w", p.ID, err)
 		}
+		if p.ArticleType == 1 {
+			continue // pages are rendered and linked from the navigation, but Planet keeps them out of the feed
+		}
 		articles = append(articles, contextArticle(pp))
+		pubPosts = append(pubPosts, pp)
 	}
 
 	// planet.json with articles inline
 	planet := site.Public()
-	pubPosts := make([]PublicPost, 0, len(posts))
-	for _, p := range posts {
-		pubPosts = append(pubPosts, NewPublicPost(site, p))
-	}
 	planetMap := map[string]any{}
 	for k, v := range planet {
 		planetMap[k] = v
