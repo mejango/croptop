@@ -279,11 +279,13 @@ func TestWidgetPostRenders(t *testing.T) {
 	if _, err := os.Stat(filepath.Join(s.Store.PublicDir(id), pid, "widget.js")); err != nil {
 		t.Fatal("widget.js not in the published post folder")
 	}
-	page, _ := os.ReadFile(filepath.Join(s.Store.PublicDir(id), pid, "index.html"))
-	if !strings.Contains(string(page), `src="widget.js"`) {
-		t.Fatal("script tag not rendered into the post page")
+	// the template renders content client-side from article.json
+	art, _ := os.ReadFile(filepath.Join(s.Store.PublicDir(id), pid, "article.json"))
+	if !strings.Contains(string(art), `src=\"widget.js\"`) {
+		t.Fatalf("script tag not in article.json content: %s", art)
 	}
-	if !strings.Contains(string(page), "assets/scripts/croptop.js") {
-		t.Fatal("runtime not included by the template")
+	page, _ := os.ReadFile(filepath.Join(s.Store.PublicDir(id), pid, "index.html"))
+	if !strings.Contains(string(page), "assets/scripts/croptop.js") || !strings.Contains(string(page), `name="croptop-post" content="`+pid+`"`) {
+		t.Fatal("runtime or post meta not included by the template")
 	}
 }
