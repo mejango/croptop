@@ -194,8 +194,8 @@ func TestCoverImage(t *testing.T) {
 }
 
 func TestShims(t *testing.T) {
-	in := `{% if item.externalLink.count > 0 %}{% if x != nil %}{% if y == true %}{{ user_settings['maintenanceMessage'] }}{% include './post-page.html' %}{% extends 'base.html' %}`
-	want := `{% if item.externalLink|length > 0 %}{% if x %}{% if y %}{{ user_settings.maintenanceMessage }}{% include "./post-page.html" %}{% extends "base.html" %}`
+	in := `{% if item.externalLink.count > 0 %}{% if x != nil %}{% if y == true %}{{ user_settings['maintenanceMessage'] }}{% if user_settings['maintenanceMessage'].count > 0 %}{% include './post-page.html' %}{% extends 'base.html' %}`
+	want := `{% if item.externalLink|length > 0 %}{% if x %}{% if y %}{{ user_settings.maintenanceMessage }}{% if user_settings.maintenanceMessage|length > 0 %}{% include "./post-page.html" %}{% extends "base.html" %}`
 	if got := applyShims(in); got != want {
 		t.Fatalf("\ngot  %s\nwant %s", got, want)
 	}

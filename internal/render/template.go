@@ -26,10 +26,10 @@ var shims = []struct {
 	re   *regexp.Regexp
 	repl string
 }{
+	{regexp.MustCompile(`(\w+)\['([\w-]+)'\]`), `$1.$2`}, // first, so dict['k'].count is seen as a dotted path
 	{regexp.MustCompile(`([\w.]+)\.count\s*>\s*0`), `$1|length > 0`},
 	{regexp.MustCompile(`\s*!=\s*nil`), ``},
 	{regexp.MustCompile(`\s*==\s*true`), ``},
-	{regexp.MustCompile(`(\w+)\['([\w-]+)'\]`), `$1.$2`},
 	{regexp.MustCompile(`({%\s*(?:include|extends)\s+)'([^']*)'`), `$1"$2"`},
 }
 
