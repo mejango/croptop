@@ -26,6 +26,10 @@ type Publisher struct {
 	Log    func(string)
 	// SkipPrewarm disables the gateway warm-up after publishing (tests).
 	SkipPrewarm bool
+	// Wait runs the push and gateway warm-up before Publish returns instead
+	// of in the background; the command line sets it so the process does
+	// not exit with the upload half done.
+	Wait bool
 }
 
 func (p *Publisher) log(format string, a ...any) {
@@ -90,7 +94,7 @@ func (p *Publisher) Publish(ctx context.Context, siteID string, force bool) (Res
 	}
 	if !p.SkipPrewarm {
 		p.log("asking gateways to fetch the new version")
-		go func() {
+		after := func() {
 			if HostOf(site) != "" {
 				pctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
 				if err := p.Push(pctx, site, cid, seq); err != nil {
@@ -102,7 +106,12 @@ func (p *Publisher) Publish(ctx context.Context, siteID string, force bool) (Res
 			}
 			p.prewarm(context.Background(), site, cid)
 			p.prewarmAll(site, cid)
-		}()
+		}
+		if p.Wait {
+			after()
+		} else {
+			go after()
+		}
 	}
 	return Result{CID: cid, Sequence: seq}, nil
 }

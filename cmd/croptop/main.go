@@ -60,6 +60,7 @@ Common flags: --data <dir> (default: ` + "%s" + `), --templates <dir>
 `
 
 type app struct {
+	pubWait      bool // command-line publish waits for the push and warm-up
 	dataDir      string
 	templatesDir string
 	cfg          *config.Config
@@ -223,6 +224,7 @@ func run(args []string) error {
 	defer cancel()
 	switch cmd {
 	case "publish":
+		a.pubWait = true
 		if len(rest) < 1 {
 			return fmt.Errorf("usage: croptop publish <site name or id>")
 		}
@@ -408,7 +410,7 @@ func (a *app) open(engine string) error {
 	ffmpeg, _ := exec.LookPath("ffmpeg")
 	a.tpl = &tpl.Resolver{DataDir: a.dataDir, Store: a.store, Default: a.tmpl, Engine: a.engine, Log: println}
 	r := &render.Renderer{Store: a.store, Templates: a.tmpl, TemplateFor: a.tpl.TemplateFor, CIDs: a.engine, FFmpeg: ffmpeg, Log: println}
-	a.pub = &publish.Publisher{Store: a.store, Node: a.engine, Render: r, Log: println}
+	a.pub = &publish.Publisher{Store: a.store, Node: a.engine, Render: r, Log: println, Wait: a.pubWait}
 	a.follow = &follow.Store{Root: a.dataDir, Engine: a.engine, Log: println}
 	return nil
 }
