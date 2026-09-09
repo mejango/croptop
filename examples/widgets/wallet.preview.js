@@ -11,7 +11,9 @@ export default function (el, { size }) {
   const type = () => {
     const target = "0x" + Array.from({ length: 40 }, () => hex[Math.random() * 16 | 0]).join("");
     let i = 0; const short = (s) => s.slice(0, 6) + "…" + s.slice(-4);
-    const step = () => { if (!el.isConnected) return; i += 2; addr.textContent = i >= 42 ? short(target) : target.slice(0, i); if (i < 42) setTimeout(step, 28); else setTimeout(type, 3200); };
+    // narrow tiles cannot fit a full address mid-typing, so type the short form there
+    const shown = el.clientWidth < 300 ? short(target) : target, len = shown.length;
+    const step = () => { if (!el.isConnected) return; i += 2; addr.textContent = i >= len ? short(target) : shown.slice(0, i); if (i < len) setTimeout(step, 28); else setTimeout(type, 3200); };
     step();
   };
   type();
