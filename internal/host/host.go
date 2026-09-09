@@ -49,6 +49,9 @@ type Host struct {
 	DataDir string
 	Engine  *ipfs.Embedded
 	Log     func(string)
+	// Root is the site the bare domain serves where no claimed name matches:
+	// an ENS name (croptop.eth), an IPNS name, or a CID. Empty shows the directory.
+	Root string
 
 	mu    sync.Mutex
 	reg   registry
@@ -169,7 +172,9 @@ func (h *Host) serveBare(w http.ResponseWriter, r *http.Request) {
 	switch {
 	case strings.HasPrefix(p, "/v0/host/"):
 		h.serveAPI(w, r)
-	case p == "/":
+	case p == "/" && h.Root == "":
+		h.serveDirectory(w, r)
+	case p == "/directory" && h.Root != "":
 		h.serveDirectory(w, r)
 	default:
 		name, rest, _ := strings.Cut(strings.TrimPrefix(p, "/"), "/")
@@ -178,6 +183,15 @@ func (h *Host) serveBare(w http.ResponseWriter, r *http.Request) {
 		e := h.reg.Keys[ipns]
 		h.mu.Unlock()
 		if e == nil || e.CID == "" {
+			if h.Root != "" { // not a claimed name: the root site owns the path
+				c, err := h.resolveRoot(r.Context())
+				if err != nil || c == "" {
+					http.Error(w, "could not resolve "+html.EscapeString(h.Root)+": "+errText(err), 502)
+					return
+				}
+				h.serveCID(w, r, c, p, "")
+				return
+			}
 			http.Error(w, "no site named "+html.EscapeString(name)+" here", 404)
 			return
 		}
@@ -206,6 +220,19 @@ func (h *Host) serveLabel(w http.ResponseWriter, r *http.Request, label string) 
 		return
 	}
 	h.serveCID(w, r, c, r.URL.Path, "")
+}
+
+// resolveRoot turns Root (ENS name, IPNS name, or CID) into a CID.
+func (h *Host) resolveRoot(ctx context.Context) (string, error) {
+	r := strings.ToLower(strings.TrimSpace(h.Root))
+	switch {
+	case strings.HasPrefix(r, "bafy") || strings.HasPrefix(r, "qm"):
+		return r, nil
+	case strings.HasPrefix(r, "k51") || strings.HasPrefix(r, "k2k4"):
+		return h.resolveKey(ctx, r)
+	default:
+		return h.resolveENS(ctx, r)
+	}
 }
 
 func errText(err error) string {

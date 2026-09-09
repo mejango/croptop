@@ -10,7 +10,8 @@ for one domain. crop.top runs it. Anyone can run one for their own domain.
 | `yoursite.crop.top` | the ENS site `yoursite.eth`, resolved through DNSLink and IPNS |
 | `crop.top/yoursite/` | a free name claimed from the console |
 | `k51….crop.top`, `bafy….crop.top` | any IPNS name or CID |
-| `crop.top/` | a directory of claimed names |
+| `crop.top/` | the `--root` site (croptop.eth), or the directory of claimed names |
+| `crop.top/directory` | the directory when a root site is set |
 
 Sites that push to the host are served from the host's own blocks the moment a
 publish finishes; everything else is fetched from the network on first request.
@@ -20,8 +21,13 @@ so a site stays fresh and reachable while its owner's computer is closed.
 ## Server
 
 ```sh
-croptop host --domain crop.top --listen 127.0.0.1:8090 --data /var/lib/croptop
+croptop host --domain crop.top --listen 127.0.0.1:8090 --data /var/lib/croptop --root croptop.eth
 ```
+
+`--root` names the site the bare domain shows: crop.top itself is the ENS site
+`croptop.eth`, and claimed names sit beside it at `crop.top/<name>/`. Without
+`--root`, the bare domain shows the directory of claimed names; with it, the
+directory is at `/directory`.
 
 Run it under systemd or any supervisor. It uses the embedded engine, so no kubo
 is needed. It needs an open swarm port (4001 to 4009, whichever is free, TCP and

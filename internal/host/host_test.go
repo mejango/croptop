@@ -127,6 +127,18 @@ func TestClaimPushServe(t *testing.T) {
 	if r, _ := http.DefaultClient.Do(preq); r.StatusCode != 409 {
 		t.Fatalf("stale push: want 409, got %s", r.Status)
 	}
+	// with a root site, unclaimed bare paths come from it and the directory moves
+	h.Root = root
+	if code, b := get("crop.test", "/planet.json"); code != 200 || !strings.Contains(b, "Probe") {
+		t.Fatalf("root site: %d %s", code, b)
+	}
+	if code, b := get("crop.test", "/probe/planet.json"); code != 200 || !strings.Contains(b, "Probe") {
+		t.Fatalf("claimed name still wins: %d %s", code, b)
+	}
+	if code, b := get("crop.test", "/directory"); code != 200 || !strings.Contains(b, `href="/probe/"`) {
+		t.Fatalf("directory at /directory: %d %s", code, b)
+	}
+	h.Root = ""
 	// registry survives a restart
 	h2 := &Host{Domain: "crop.test", DataDir: h.DataDir, Engine: h.Engine}
 	if err := h2.Start(); err != nil {

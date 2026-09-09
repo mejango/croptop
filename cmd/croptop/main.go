@@ -53,7 +53,7 @@ const usage = `croptop — publish Croptop sites to IPFS
   croptop version
 
 Flags for serve: --listen <addr>, --role node (headless: no browser, log only)
-  croptop host --domain crop.top --listen 127.0.0.1:8090
+  croptop host --domain crop.top --listen 127.0.0.1:8090 [--root croptop.eth]
                            run a gateway and pin host for a domain (see docs/host.md)
 
 Common flags: --data <dir> (default: ` + "%s" + `), --templates <dir>
@@ -98,6 +98,7 @@ func run(args []string) error {
 	engineFlag := fs.String("engine", "", "ipfs engine: kubo (downloaded sidecar) or embedded (built in); remembered in config")
 	role := fs.String("role", "console", "console (opens the browser) or node (headless)")
 	domain := fs.String("domain", "crop.top", "domain this host serves (host)")
+	root := fs.String("root", "", "site the bare domain serves: an ENS name, IPNS name, or CID (host)")
 	if err := fs.Parse(flagsFirst(args)); err != nil {
 		return nil
 	}
@@ -137,7 +138,7 @@ func run(args []string) error {
 	case "serve":
 		return a.serve(*listen, *noOpen || *role == "node")
 	case "host":
-		return a.host(*domain, *listen)
+		return a.host(*domain, *listen, *root)
 	case "status":
 		if *listen != "" {
 			a.cfg.Listen = *listen
@@ -513,7 +514,7 @@ func (a *app) serve(listen string, noOpen bool) error {
 }
 
 // host runs the crop.top role: gateway, pin host, and name registry for a domain.
-func (a *app) host(domain, listen string) error {
+func (a *app) host(domain, listen, root string) error {
 	if listen == "" {
 		listen = "127.0.0.1:8090"
 	}
@@ -530,7 +531,7 @@ func (a *app) host(domain, listen string) error {
 		return err
 	}
 	defer a.engine.Stop()
-	h := &host.Host{Domain: strings.ToLower(domain), DataDir: a.dataDir, Engine: e, Log: println}
+	h := &host.Host{Domain: strings.ToLower(domain), DataDir: a.dataDir, Engine: e, Log: println, Root: root}
 	if err := h.Start(); err != nil {
 		return err
 	}
