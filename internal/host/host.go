@@ -1,0 +1,467 @@
+// Package host is the crop.top role: a gateway for ENS, IPNS, and claimed names,
+// a pin host that sites push to on publish, and a registry of free names.
+package host
+
+import (
+	"context"
+	"encoding/base64"
+	"encoding/json"
+	"fmt"
+	"html"
+	"net/http"
+	"os"
+	"path/filepath"
+	"regexp"
+	"sort"
+	"strconv"
+	"strings"
+	"sync"
+	"time"
+
+	"github.com/ipfs/boxo/gateway"
+
+	"github.com/mejango/croptop/internal/ipfs"
+)
+
+const (
+	maxPush      = 512 << 20
+	skew         = 10 * time.Minute
+	resolveCache = time.Minute
+)
+
+// Entry is what the host knows about one site key.
+type Entry struct {
+	IPNS     string    `json:"ipns"`
+	CID      string    `json:"cid"`
+	Sequence uint64    `json:"sequence"`
+	Record   []byte    `json:"record,omitempty"` // the site's signed IPNS record
+	Name     string    `json:"name,omitempty"`   // claimed free name, if any
+	Updated  time.Time `json:"updated"`
+}
+
+type registry struct {
+	Names map[string]string `json:"names"` // name -> ipns
+	Keys  map[string]*Entry `json:"keys"`  // ipns -> entry
+}
+
+type Host struct {
+	Domain  string
+	DataDir string
+	Engine  *ipfs.Embedded
+	Log     func(string)
+
+	mu    sync.Mutex
+	reg   registry
+	gw    http.Handler
+	cache map[string]cached
+}
+
+type cached struct {
+	cid string
+	at  time.Time
+}
+
+var nameRe = regexp.MustCompile(`^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$`)
+
+// Reserved names the directory and API need, plus the usual suspects.
+var reserved = map[string]bool{"www": true, "api": true, "v0": true, "ipfs": true, "ipns": true, "push": true, "host": true, "admin": true, "mail": true, "static": true, "assets": true, "docs": true, "app": true}
+
+func (h *Host) log(f string, a ...any) {
+	if h.Log != nil {
+		h.Log(fmt.Sprintf(f, a...))
+	}
+}
+
+func (h *Host) file() string { return filepath.Join(h.DataDir, "host", "registry.json") }
+
+// Start loads the registry and builds the gateway handler. The engine must be running.
+func (h *Host) Start() error {
+	h.reg = registry{Names: map[string]string{}, Keys: map[string]*Entry{}}
+	if b, err := os.ReadFile(h.file()); err == nil {
+		if err := json.Unmarshal(b, &h.reg); err != nil {
+			return fmt.Errorf("registry: %w", err)
+		}
+	}
+	if h.reg.Names == nil {
+		h.reg.Names = map[string]string{}
+	}
+	if h.reg.Keys == nil {
+		h.reg.Keys = map[string]*Entry{}
+	}
+	backend, err := gateway.NewBlocksBackend(h.Engine.BlockService())
+	if err != nil {
+		return err
+	}
+	h.gw = gateway.NewHandler(gateway.Config{DeserializedResponses: true, NoDNSLink: true}, backend)
+	h.cache = map[string]cached{}
+	return nil
+}
+
+func (h *Host) save() error {
+	if err := os.MkdirAll(filepath.Dir(h.file()), 0o755); err != nil {
+		return err
+	}
+	b, _ := json.MarshalIndent(h.reg, "", "  ")
+	return os.WriteFile(h.file(), b, 0o644)
+}
+
+// Run re-announces every pushed record and root until ctx ends: the host is
+// the keepalive for sites whose laptops are closed.
+func (h *Host) Run(ctx context.Context) {
+	t := time.NewTicker(30 * time.Minute)
+	defer t.Stop()
+	for {
+		h.reannounce(ctx)
+		select {
+		case <-ctx.Done():
+			return
+		case <-t.C:
+		}
+	}
+}
+
+func (h *Host) reannounce(ctx context.Context) {
+	h.mu.Lock()
+	entries := make([]*Entry, 0, len(h.reg.Keys))
+	for _, e := range h.reg.Keys {
+		entries = append(entries, e)
+	}
+	h.mu.Unlock()
+	for _, e := range entries {
+		if ctx.Err() != nil {
+			return
+		}
+		if len(e.Record) > 0 {
+			if err := h.Engine.PutRecord(ctx, e.IPNS, e.Record); err != nil {
+				h.log("reannounce %s: %v", e.IPNS, err)
+			}
+		}
+		if e.CID != "" {
+			h.Engine.Provide(ctx, e.CID)
+		}
+	}
+}
+
+// ServeHTTP routes by Host header: the bare domain carries the API, the
+// directory, and claimed names as paths; subdomains are ENS, IPNS, or CIDs.
+func hostnameOf(r *http.Request) string {
+	hostname := strings.ToLower(r.Host)
+	if i := strings.LastIndex(hostname, ":"); i > 0 && !strings.Contains(hostname[i:], "]") {
+		hostname = hostname[:i]
+	}
+	return hostname
+}
+
+func (h *Host) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	hostname := hostnameOf(r)
+	switch {
+	case hostname == h.Domain || hostname == "localhost" || hostname == "127.0.0.1":
+		h.serveBare(w, r)
+	case strings.HasSuffix(hostname, "."+h.Domain):
+		h.serveLabel(w, r, strings.TrimSuffix(hostname, "."+h.Domain))
+	default:
+		http.Error(w, "unknown host", 404)
+	}
+}
+
+func (h *Host) serveBare(w http.ResponseWriter, r *http.Request) {
+	p := r.URL.Path
+	switch {
+	case strings.HasPrefix(p, "/v0/host/"):
+		h.serveAPI(w, r)
+	case p == "/":
+		h.serveDirectory(w, r)
+	default:
+		name, rest, _ := strings.Cut(strings.TrimPrefix(p, "/"), "/")
+		h.mu.Lock()
+		ipns := h.reg.Names[name]
+		e := h.reg.Keys[ipns]
+		h.mu.Unlock()
+		if e == nil || e.CID == "" {
+			http.Error(w, "no site named "+html.EscapeString(name)+" here", 404)
+			return
+		}
+		if rest == "" && !strings.HasSuffix(p, "/") {
+			http.Redirect(w, r, "/"+name+"/", 301)
+			return
+		}
+		h.serveCID(w, r, e.CID, "/"+rest, "/"+name)
+	}
+}
+
+func (h *Host) serveLabel(w http.ResponseWriter, r *http.Request, label string) {
+	label = strings.ToLower(label)
+	var c string
+	var err error
+	switch {
+	case strings.HasPrefix(label, "bafy") || strings.HasPrefix(label, "qm"):
+		c = label
+	case strings.HasPrefix(label, "k51") || strings.HasPrefix(label, "k2k4"):
+		c, err = h.resolveKey(r.Context(), label)
+	default:
+		c, err = h.resolveENS(r.Context(), label+".eth")
+	}
+	if err != nil || c == "" {
+		http.Error(w, "could not resolve "+html.EscapeString(label)+": "+errText(err), 502)
+		return
+	}
+	h.serveCID(w, r, c, r.URL.Path, "")
+}
+
+func errText(err error) string {
+	if err == nil {
+		return "no content"
+	}
+	return err.Error()
+}
+
+// resolveKey prefers the record a site pushed; otherwise asks the network.
+func (h *Host) resolveKey(ctx context.Context, ipnsName string) (string, error) {
+	h.mu.Lock()
+	e := h.reg.Keys[ipnsName]
+	h.mu.Unlock()
+	if e != nil && e.CID != "" {
+		return e.CID, nil
+	}
+	return h.resolveCached(ctx, "/ipns/"+ipnsName)
+}
+
+// resolveENS follows DNSLink for name.eth, then the IPNS name it points at.
+func (h *Host) resolveENS(ctx context.Context, ens string) (string, error) {
+	target, err := h.resolveCached(ctx, "/ipns/"+ens)
+	if err != nil {
+		return "", err
+	}
+	switch {
+	case strings.HasPrefix(target, "/ipfs/"):
+		return strings.TrimPrefix(target, "/ipfs/"), nil
+	case strings.HasPrefix(target, "/ipns/"):
+		return h.resolveKey(ctx, strings.TrimPrefix(target, "/ipns/"))
+	}
+	return "", fmt.Errorf("unexpected dnslink %q", target)
+}
+
+// resolveCached resolves one step with the engine and remembers it briefly.
+func (h *Host) resolveCached(ctx context.Context, p string) (string, error) {
+	h.mu.Lock()
+	c, ok := h.cache[p]
+	h.mu.Unlock()
+	if ok && time.Since(c.at) < resolveCache {
+		return c.cid, nil
+	}
+	rctx, cancel := context.WithTimeout(ctx, 40*time.Second)
+	defer cancel()
+	v, err := h.Engine.Resolve(rctx, p)
+	if err != nil {
+		if ok { // stale beats nothing
+			return c.cid, nil
+		}
+		return "", err
+	}
+	v = strings.TrimSuffix(v, "/")
+	if strings.HasPrefix(p, "/ipns/k") {
+		v = strings.TrimPrefix(v, "/ipfs/")
+	}
+	h.mu.Lock()
+	h.cache[p] = cached{cid: v, at: time.Now()}
+	h.mu.Unlock()
+	return v, nil
+}
+
+// serveCID hands /ipfs/<cid><path> to the boxo gateway and hides the prefix
+// from redirects it emits, so the site sees only its own base.
+func (h *Host) serveCID(w http.ResponseWriter, r *http.Request, c, p, base string) {
+	r2 := r.Clone(r.Context())
+	r2.URL.Path = "/ipfs/" + c + p
+	r2.URL.RawPath = ""
+	r2.Host = "" // stop the handler from thinking it is a subdomain gateway
+	h.gw.ServeHTTP(&locationRewriter{ResponseWriter: w, from: "/ipfs/" + c, to: base}, r2)
+}
+
+type locationRewriter struct {
+	http.ResponseWriter
+	from, to string
+}
+
+func (l *locationRewriter) WriteHeader(code int) {
+	if loc := l.Header().Get("Location"); strings.HasPrefix(loc, l.from) {
+		l.Header().Set("Location", l.to+strings.TrimPrefix(loc, l.from))
+	}
+	l.ResponseWriter.WriteHeader(code)
+}
+
+func (h *Host) serveDirectory(w http.ResponseWriter, r *http.Request) {
+	h.mu.Lock()
+	names := make([]string, 0, len(h.reg.Names))
+	for n := range h.reg.Names {
+		names = append(names, n)
+	}
+	h.mu.Unlock()
+	sort.Strings(names)
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	fmt.Fprintf(w, "<!doctype html><meta charset=utf-8><title>%s</title><style>body{font:16px/1.5 system-ui;max-width:640px;margin:40px auto;padding:0 16px}li{margin:4px 0}</style>", html.EscapeString(h.Domain))
+	fmt.Fprintf(w, "<h1>%s</h1><p>Sites published from croptop. ENS names live at <code>name.%s</code>; free names at <code>%s/name</code>.</p><ul>", html.EscapeString(h.Domain), html.EscapeString(h.Domain), html.EscapeString(h.Domain))
+	for _, n := range names {
+		fmt.Fprintf(w, `<li><a href="/%s/">%s</a></li>`, html.EscapeString(n), html.EscapeString(n))
+	}
+	fmt.Fprint(w, "</ul>")
+}
+
+// ---- API
+
+func (h *Host) serveAPI(w http.ResponseWriter, r *http.Request) {
+	p := strings.TrimPrefix(r.URL.Path, "/v0/host/")
+	switch {
+	case p == "names" && r.Method == "POST":
+		h.claim(w, r)
+	case p == "push" && r.Method == "POST":
+		h.push(w, r)
+	case strings.HasPrefix(p, "names/") && r.Method == "GET":
+		h.mu.Lock()
+		e := h.reg.Keys[h.reg.Names[strings.TrimPrefix(p, "names/")]]
+		h.mu.Unlock()
+		h.entry(w, e)
+	case strings.HasPrefix(p, "keys/") && r.Method == "GET":
+		h.mu.Lock()
+		e := h.reg.Keys[strings.TrimPrefix(p, "keys/")]
+		h.mu.Unlock()
+		h.entry(w, e)
+	default:
+		http.Error(w, "not found", 404)
+	}
+}
+
+func (h *Host) entry(w http.ResponseWriter, e *Entry) {
+	if e == nil {
+		http.Error(w, "not found", 404)
+		return
+	}
+	pub := *e
+	pub.Record = nil
+	writeJSON(w, 200, pub)
+}
+
+// ClaimMessage is what a site signs to claim name for ipns at unix time t.
+func ClaimMessage(domain, name, ipns string, t int64) []byte {
+	return []byte(fmt.Sprintf("croptop-name\n%s\n%s\n%s\n%d", domain, name, ipns, t))
+}
+
+// PushMessage is what a site signs to push cid at seq for ipns at unix time t.
+func PushMessage(domain, ipns, cid string, seq uint64, t int64) []byte {
+	return []byte(fmt.Sprintf("croptop-push\n%s\n%s\n%s\n%d\n%d", domain, ipns, cid, seq, t))
+}
+
+func fresh(t int64) bool {
+	d := time.Since(time.Unix(t, 0))
+	return d < skew && d > -skew
+}
+
+func (h *Host) claim(w http.ResponseWriter, r *http.Request) {
+	var in struct {
+		Name, IPNS, Sig string
+		Time            int64
+	}
+	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 4096)).Decode(&in); err != nil {
+		http.Error(w, err.Error(), 400)
+		return
+	}
+	in.Name = strings.ToLower(strings.TrimSpace(in.Name))
+	if !nameRe.MatchString(in.Name) || reserved[in.Name] {
+		http.Error(w, "that name cannot be claimed", 400)
+		return
+	}
+	sig, _ := base64.StdEncoding.DecodeString(in.Sig)
+	// signed over the hostname the client addressed, which is the domain in production
+	if !fresh(in.Time) || !ipfs.VerifyIPNS(in.IPNS, ClaimMessage(hostnameOf(r), in.Name, in.IPNS, in.Time), sig) {
+		http.Error(w, "bad signature", 403)
+		return
+	}
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	if owner, taken := h.reg.Names[in.Name]; taken && owner != in.IPNS {
+		http.Error(w, "that name is taken", 409)
+		return
+	}
+	e := h.reg.Keys[in.IPNS]
+	if e == nil {
+		e = &Entry{IPNS: in.IPNS}
+		h.reg.Keys[in.IPNS] = e
+	}
+	if e.Name != "" && e.Name != in.Name {
+		delete(h.reg.Names, e.Name) // one name per key: renaming releases the old one
+	}
+	e.Name = in.Name
+	e.Updated = time.Now()
+	h.reg.Names[in.Name] = in.IPNS
+	if err := h.save(); err != nil {
+		http.Error(w, err.Error(), 500)
+		return
+	}
+	h.log("%s claimed by %s", in.Name, in.IPNS)
+	pub := *e
+	pub.Record = nil
+	writeJSON(w, 200, pub)
+}
+
+func (h *Host) push(w http.ResponseWriter, r *http.Request) {
+	ipnsName, c := r.Header.Get("X-Croptop-Ipns"), r.Header.Get("X-Croptop-Cid")
+	seq, _ := strconv.ParseUint(r.Header.Get("X-Croptop-Seq"), 10, 64)
+	t, _ := strconv.ParseInt(r.Header.Get("X-Croptop-Time"), 10, 64)
+	sig, _ := base64.StdEncoding.DecodeString(r.Header.Get("X-Croptop-Sig"))
+	if !fresh(t) || !ipfs.VerifyIPNS(ipnsName, PushMessage(hostnameOf(r), ipnsName, c, seq, t), sig) {
+		http.Error(w, "bad signature", 403)
+		return
+	}
+	var rec []byte
+	if b64 := r.Header.Get("X-Croptop-Record"); b64 != "" {
+		rec, _ = base64.StdEncoding.DecodeString(b64)
+	}
+	n, err := h.Engine.ReadBlocks(r.Context(), r.Body, maxPush)
+	if err != nil {
+		http.Error(w, "reading blocks: "+err.Error(), 400)
+		return
+	}
+	if ok, err := h.Engine.HasTree(r.Context(), c); err != nil || !ok {
+		http.Error(w, "the stream did not contain the whole site", 400)
+		return
+	}
+	h.mu.Lock()
+	e := h.reg.Keys[ipnsName]
+	if e == nil {
+		e = &Entry{IPNS: ipnsName}
+		h.reg.Keys[ipnsName] = e
+	}
+	if seq < e.Sequence {
+		h.mu.Unlock()
+		http.Error(w, fmt.Sprintf("host already has sequence %d", e.Sequence), 409)
+		return
+	}
+	e.CID, e.Sequence, e.Updated = c, seq, time.Now()
+	if len(rec) > 0 {
+		e.Record = rec
+	}
+	err = h.save()
+	h.mu.Unlock()
+	if err != nil {
+		http.Error(w, err.Error(), 500)
+		return
+	}
+	h.log("push %s: %d blocks, sequence %d -> %s", ipnsName, n, seq, c)
+	go func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
+		defer cancel()
+		h.Engine.Provide(ctx, c)
+		if len(rec) > 0 {
+			if err := h.Engine.PutRecord(ctx, ipnsName, rec); err != nil {
+				h.log("record for %s: %v", ipnsName, err)
+			}
+		}
+	}()
+	writeJSON(w, 200, map[string]any{"cid": c, "sequence": seq, "blocks": n, "name": e.Name})
+}
+
+func writeJSON(w http.ResponseWriter, code int, v any) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(code)
+	json.NewEncoder(w).Encode(v)
+}

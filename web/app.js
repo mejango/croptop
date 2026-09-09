@@ -159,10 +159,21 @@
 
   const siteById = (id) => state.sites.find((s) => s.id === id);
 
+  // the site's canonical address, the same rule as internal/gateway
+  const siteURL = (site) => {
+    const g = site.croptopGateway || "sucks";
+    const ens = site.domain && site.domain.endsWith(".eth") ? site.domain : null;
+    if (g === "crop.top") {
+      if (ens) return `https://${ens.slice(0, -4)}.crop.top/`;
+      if (site.croptopName) return `https://crop.top/${site.croptopName}/`;
+      return `https://${site.ipns}.crop.top/`;
+    }
+    return ens ? `https://${ens}.${g}/` : `https://${site.ipns}.eth.${g}/`;
+  };
+
   const stateStrip = (site) => {
     const cls = site.publishedElsewhere ? "elsewhere" : site.lastPublishedCID ? "live" : "never";
-    const tld = site.croptopGateway || "sucks";
-    const url = site.domain && site.domain.endsWith(".eth") ? `https://${site.domain}.${tld}/` : `https://${site.ipns}.eth.${tld}/`;
+    const url = siteURL(site);
     const strip = h("div", { class: "state " + cls }, h("span", { class: "dot" }));
     if (site.publishedElsewhere) {
       strip.append(h("span", { class: "grow" }, "Another machine published this site more recently. Sync pulls its posts in and makes this machine the publisher again."),
@@ -406,6 +417,7 @@
         await api("PUT", `/v0/croptop/sites/${id}`, {
           name: $("[name=name]", form).value, about: $("[name=about]", form).value, domain: $("[name=domain]", form).value, tags,
           gateway: $("[name=gateway]", form).value,
+          host: $("[name=host]", form).value,
           custom: { customCodeHead: $("[name=customCodeHead]", form).value, customCodeHeadEnabled: !!$("[name=customCodeHead]", form).value.trim(),
                     customCodeBodyEnd: $("[name=customCodeBodyEnd]", form).value, customCodeBodyEndEnabled: !!$("[name=customCodeBodyEnd]", form).value.trim(),
                     doNotIndex: $("[name=doNotIndex]", form).checked },
@@ -422,6 +434,16 @@
         h("label", {}, "About", h("input", { type: "text", name: "about", value: site.about })),
         h("label", {}, "ENS domain", h("input", { type: "text", name: "domain", value: site.domain || "", placeholder: "yoursite.eth" }), h("span", { class: "help" }, "Point the domain's content hash at ", h("code", {}, "ipns://" + site.ipns), " once, then every publish updates it.")),
         h("label", {}, "Gateway", h("select", { name: "gateway" }, ...gateways.map((g) => h("option", { value: g.Key, selected: (site.croptopGateway || "sucks") === g.Key ? "" : null }, g.Name))), h("span", { class: "help" }, "Written into the site's absolute links. Any gateway can read the site; this one is the canonical address.")),
+        h("label", {}, "Host", h("input", { type: "text", name: "host", value: site.croptopHost || "", placeholder: "https://crop.top" }), h("span", { class: "help" }, "A croptop host receives every publish and serves it at once, even while this computer is off. Leave empty to publish to IPFS only.")),
+        h("label", {}, "Free name on the host", h("div", { class: "row" }, h("input", { type: "text", name: "cropname", value: site.croptopName || "", placeholder: "yoursite", style: "flex:1" }),
+          h("button", { class: "btn", type: "button", onclick: async (e) => {
+            const btn = e.target; btn.disabled = true;
+            try {
+              await api("PUT", `/v0/croptop/sites/${id}`, { host: $("[name=host]", form).value || "https://crop.top" });
+              const r = await api("POST", `/v0/croptop/sites/${id}/name`, { name: $("[name=cropname]", form).value });
+              await loadSites(); toast(`Claimed ${r.croptopName}. Publish to push the site there.`);
+            } catch (err) { toast(err.message, true); } finally { btn.disabled = false; }
+          } }, "Claim")), h("span", { class: "help" }, "Free, first come, one per site: ", h("code", {}, "crop.top/yoursite"), ". ENS sites also answer at ", h("code", {}, "yoursite.crop.top"), ".")),
         h("label", {}, "Tags", h("input", { type: "text", name: "tags", value: Object.keys(site.tags || {}).join(", ") }), h("span", { class: "help" }, "Tags offered in the site's filter bar.")),
         h("label", {}, "Avatar", h("input", { type: "file", name: "avatar", accept: "image/*" })),
         h("label", { class: "row" }, h("input", { type: "checkbox", name: "doNotIndex", checked: site.doNotIndex ? "" : null, style: "width:auto" }), " Ask search engines not to index")),

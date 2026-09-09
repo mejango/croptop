@@ -91,6 +91,15 @@ func (p *Publisher) Publish(ctx context.Context, siteID string, force bool) (Res
 	if !p.SkipPrewarm {
 		p.log("asking gateways to fetch the new version")
 		go func() {
+			if HostOf(site) != "" {
+				pctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
+				if err := p.Push(pctx, site, cid, seq); err != nil {
+					p.log("push to %s failed: %v", HostOf(site), err)
+				} else {
+					p.log("pushed %s to %s", site.Name, HostOf(site))
+				}
+				cancel()
+			}
 			p.prewarm(context.Background(), site, cid)
 			p.prewarmAll(site, cid)
 		}()

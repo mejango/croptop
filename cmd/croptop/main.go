@@ -20,6 +20,7 @@ import (
 
 	"github.com/mejango/croptop/internal/config"
 	"github.com/mejango/croptop/internal/follow"
+	"github.com/mejango/croptop/internal/host"
 	"github.com/mejango/croptop/internal/ipfs"
 	"github.com/mejango/croptop/internal/publish"
 	"github.com/mejango/croptop/internal/render"
@@ -52,6 +53,8 @@ const usage = `croptop — publish Croptop sites to IPFS
   croptop version
 
 Flags for serve: --listen <addr>, --role node (headless: no browser, log only)
+  croptop host --domain crop.top --listen 127.0.0.1:8090
+                           run a gateway and pin host for a domain (see docs/host.md)
 
 Common flags: --data <dir> (default: ` + "%s" + `), --templates <dir>
 `
@@ -94,6 +97,7 @@ func run(args []string) error {
 	container := fs.String("container", "", "Planet container path (import-planet)")
 	engineFlag := fs.String("engine", "", "ipfs engine: kubo (downloaded sidecar) or embedded (built in); remembered in config")
 	role := fs.String("role", "console", "console (opens the browser) or node (headless)")
+	domain := fs.String("domain", "crop.top", "domain this host serves (host)")
 	if err := fs.Parse(flagsFirst(args)); err != nil {
 		return nil
 	}
@@ -132,6 +136,8 @@ func run(args []string) error {
 		}
 	case "serve":
 		return a.serve(*listen, *noOpen || *role == "node")
+	case "host":
+		return a.host(*domain, *listen)
 	case "status":
 		if *listen != "" {
 			a.cfg.Listen = *listen
@@ -504,6 +510,44 @@ func (a *app) serve(listen string, noOpen bool) error {
 		println("stopping")
 	}()
 	return srv.ListenAndServe(ctx, a.cfg.Listen)
+}
+
+// host runs the crop.top role: gateway, pin host, and name registry for a domain.
+func (a *app) host(domain, listen string) error {
+	if listen == "" {
+		listen = "127.0.0.1:8090"
+	}
+	if err := a.open("embedded"); err != nil {
+		return err
+	}
+	e, ok := a.engine.(*ipfs.Embedded)
+	if !ok {
+		return fmt.Errorf("host needs the embedded engine")
+	}
+	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer cancel()
+	if err := a.startNode(ctx); err != nil {
+		return err
+	}
+	defer a.engine.Stop()
+	h := &host.Host{Domain: strings.ToLower(domain), DataDir: a.dataDir, Engine: e, Log: println}
+	if err := h.Start(); err != nil {
+		return err
+	}
+	go h.Run(ctx)
+	srv := &http.Server{Addr: listen, Handler: h, ReadHeaderTimeout: 30 * time.Second}
+	go func() {
+		<-ctx.Done()
+		println("stopping")
+		sctx, c := context.WithTimeout(context.Background(), 5*time.Second)
+		defer c()
+		srv.Shutdown(sctx)
+	}()
+	println(fmt.Sprintf("hosting %s at http://%s", h.Domain, listen))
+	if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+		return err
+	}
+	return nil
 }
 
 // status reads the running console's API and prints a summary.

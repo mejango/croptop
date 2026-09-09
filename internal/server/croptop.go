@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/mejango/croptop/internal/gateway"
+	"github.com/mejango/croptop/internal/publish"
 	"github.com/mejango/croptop/internal/render"
 	"github.com/mejango/croptop/internal/store"
 )
@@ -92,6 +93,7 @@ func (s *Server) routesCroptop(mux *http.ServeMux) {
 			Tags        map[string]string
 			Archived    *bool
 			Gateway     *string
+			Host        *string                    // croptop host base URL to push to, "" turns pushing off
 			Custom      map[string]json.RawMessage // customCodeHead etc, passed through to Raw
 		}
 		if err := json.NewDecoder(r.Body).Decode(&in); err != nil {
@@ -117,6 +119,9 @@ func (s *Server) routesCroptop(mux *http.ServeMux) {
 		if in.Gateway != nil {
 			gateway.Set(site, *in.Gateway)
 		}
+		if in.Host != nil {
+			publish.SetHost(site, *in.Host)
+		}
 		if site.Raw == nil {
 			site.Raw = map[string]json.RawMessage{}
 		}
@@ -128,6 +133,23 @@ func (s *Server) routesCroptop(mux *http.ServeMux) {
 		site.Updated = store.Now()
 		if err := s.Store.SaveSite(site); err != nil {
 			writeErr(w, 500, err)
+			return
+		}
+		s.render(r.Context(), site.ID)
+		writeJSON(w, 200, site)
+	})
+	mux.HandleFunc("POST /v0/croptop/sites/{id}/name", func(w http.ResponseWriter, r *http.Request) {
+		site, ok := s.site(w, r)
+		if !ok {
+			return
+		}
+		var in struct{ Name string }
+		if err := json.NewDecoder(r.Body).Decode(&in); err != nil {
+			writeErr(w, 400, err)
+			return
+		}
+		if err := s.Pub.Claim(r.Context(), site, in.Name); err != nil {
+			writeErr(w, 400, err)
 			return
 		}
 		s.render(r.Context(), site.ID)

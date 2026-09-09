@@ -14,6 +14,9 @@ type Gateway struct {
 	Name  string // shown in the console
 	TLD   string // appended to an .eth name: yoursite.eth -> yoursite.eth.<TLD>
 	Names bool   // resolves raw IPNS names and CIDs as subdomains (<k51…>.eth.<TLD>, <cid>.eth.<TLD>)
+	// Domain marks a croptop host (see internal/host): yoursite.eth -> yoursite.<Domain>,
+	// a claimed free name -> <Domain>/<name>/, raw names and CIDs -> <k51…>.<Domain>.
+	Domain string
 }
 
 // Table order is the fallback order. Add a gateway here and nowhere else.
@@ -21,6 +24,20 @@ var Table = []Gateway{
 	{Key: "sucks", Name: "eth.sucks", TLD: "sucks", Names: true},
 	{Key: "shop", Name: "eth.shop", TLD: "shop", Names: true},
 	{Key: "limo", Name: "eth.limo", TLD: "limo", Names: false}, // .eth domains only
+	{Key: "crop.top", Name: "crop.top", Names: true, Domain: "crop.top"},
+}
+
+// NameKey is the site JSON key holding a free name claimed on a croptop host.
+const NameKey = "croptopName"
+
+func claimedName(site *store.Site) string {
+	if raw, ok := site.Raw[NameKey]; ok {
+		var s string
+		if json.Unmarshal(raw, &s) == nil {
+			return strings.TrimSpace(s)
+		}
+	}
+	return ""
 }
 
 const Default = "sucks"
@@ -63,6 +80,15 @@ func Set(site *store.Site, key string) {
 func URL(site *store.Site) string { return urlOn(site, Of(site)) }
 
 func urlOn(site *store.Site, g Gateway) string {
+	if g.Domain != "" {
+		if site.Domain != nil && strings.HasSuffix(strings.TrimSpace(*site.Domain), ".eth") {
+			return "https://" + strings.TrimSuffix(strings.TrimSpace(*site.Domain), ".eth") + "." + g.Domain + "/"
+		}
+		if n := claimedName(site); n != "" {
+			return "https://" + g.Domain + "/" + n + "/"
+		}
+		return "https://" + site.IPNS + "." + g.Domain + "/"
+	}
 	if site.Domain != nil {
 		d := strings.TrimSpace(*site.Domain)
 		switch {
@@ -96,7 +122,19 @@ func CIDURL(site *store.Site, cid string) string {
 	if strings.HasPrefix(cid, "Qm") {
 		return "https://dweb.link/ipfs/" + cid + "/"
 	}
-	return "https://" + cid + ".eth." + namesGateway(Of(site)).TLD + "/"
+	g := namesGateway(Of(site))
+	if g.Domain != "" {
+		return "https://" + cid + "." + g.Domain + "/"
+	}
+	return "https://" + cid + ".eth." + g.TLD + "/"
+}
+
+// nameBase is the subdomain gateway base for a raw label (CID or IPNS name).
+func nameBase(g Gateway, label string) string {
+	if g.Domain != "" {
+		return "https://" + label + "." + g.Domain + "/"
+	}
+	return "https://" + label + ".eth." + g.TLD + "/"
 }
 
 // FetchURLs lists HTTP bases to read a site's current version from, most
@@ -106,14 +144,14 @@ func FetchURLs(ipns, cid string) []string {
 	if cid != "" && !strings.HasPrefix(cid, "Qm") {
 		for _, g := range Table {
 			if g.Names {
-				out = append(out, "https://"+cid+".eth."+g.TLD+"/")
+				out = append(out, nameBase(g, cid))
 			}
 		}
 		out = append(out, "https://dweb.link/ipfs/"+cid+"/")
 	}
 	for _, g := range Table {
 		if g.Names {
-			out = append(out, "https://"+ipns+".eth."+g.TLD+"/")
+			out = append(out, nameBase(g, ipns))
 		}
 	}
 	return append(out, "https://dweb.link/ipns/"+ipns+"/")

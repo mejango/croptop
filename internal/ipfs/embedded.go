@@ -58,14 +58,16 @@ type Embedded struct {
 	dht    *dht.IpfsDHT
 	ps     *pubsub.PubSub
 	topics map[string]*pubsub.Topic
-	ds     datastore.Batching
-	blocks datastore.Batching
-	mds    datastore.Batching
-	bstore blockstore.Blockstore
-	bswap  *bitswap.Bitswap
-	bserv  blockservice.BlockService
-	dag    ipld.DAGService
-	port   int
+	// records: the last IPNS record signed per site key, for pushing to hosts
+	records map[string][]byte
+	ds      datastore.Batching
+	blocks  datastore.Batching
+	mds     datastore.Batching
+	bstore  blockstore.Blockstore
+	bswap   *bitswap.Bitswap
+	bserv   blockservice.BlockService
+	dag     ipld.DAGService
+	port    int
 }
 
 func NewEmbedded(dataDir string) *Embedded {

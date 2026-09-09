@@ -8,6 +8,7 @@ import (
 	"encoding/pem"
 	"errors"
 	"fmt"
+	"github.com/ipfs/boxo/ipns"
 	"math/big"
 	"os"
 	"path/filepath"
@@ -133,4 +134,39 @@ func ipnsName(pub ed25519.PublicKey) string {
 	mh := append([]byte{0x00, byte(len(pubProto))}, pubProto...)
 	cid := append([]byte{0x01, 0x72}, mh...)
 	return "k" + new(big.Int).SetBytes(cid).Text(36)
+}
+
+// Sign signs msg with the site's ed25519 key, for host requests.
+func (k *Keystore) Sign(name string, msg []byte) ([]byte, error) {
+	priv, err := k.private(name)
+	if err != nil {
+		return nil, err
+	}
+	return ed25519.Sign(priv, msg), nil
+}
+
+// VerifyIPNS checks a signature against the public key inside an IPNS name.
+func VerifyIPNS(ipnsName string, msg, sig []byte) bool {
+	pub, err := PublicKeyOf(ipnsName)
+	if err != nil {
+		return false
+	}
+	return ed25519.Verify(pub, msg, sig)
+}
+
+// PublicKeyOf extracts the ed25519 public key an IPNS name (k51...) embeds.
+func PublicKeyOf(ipnsName string) (ed25519.PublicKey, error) {
+	n, err := ipns.NameFromString(strings.TrimPrefix(ipnsName, "/ipns/"))
+	if err != nil {
+		return nil, err
+	}
+	pk, err := n.Peer().ExtractPublicKey()
+	if err != nil {
+		return nil, err
+	}
+	raw, err := pk.Raw()
+	if err != nil || len(raw) != ed25519.PublicKeySize {
+		return nil, fmt.Errorf("not an ed25519 key")
+	}
+	return ed25519.PublicKey(raw), nil
 }

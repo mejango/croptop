@@ -66,20 +66,14 @@ func (e *Embedded) NamePublish(ctx context.Context, key, c string, seq uint64) e
 	if err != nil {
 		return err
 	}
-	rkey := string(name.RoutingKey())
-	if !e.Offline {
-		e.waitForRoutingTable(ctx, 20, 60*time.Second)
+	e.mu.Lock()
+	if e.records == nil {
+		e.records = map[string][]byte{}
 	}
-	start := time.Now()
-	closest, _ := e.dht.GetClosestPeers(ctx, rkey)
-	e.Log(fmt.Sprintf("ipns put: %d closest peers found in %s", len(closest), time.Since(start).Round(time.Millisecond)))
-	if err := e.dht.PutValue(ctx, rkey, b); err != nil {
-		return fmt.Errorf("ipns put: %w", err)
-	}
-	e.Log(fmt.Sprintf("ipns put done in %s", time.Since(start).Round(time.Millisecond)))
-	if !e.Offline {
-		e.putDelegated(ctx, name, b)
-		go e.putPubsub(context.Background(), name, b)
+	e.records[key] = b
+	e.mu.Unlock()
+	if err := e.putRecord(ctx, name, b); err != nil {
+		return err
 	}
 	if !e.Offline {
 		// read our own record back from the network as a check
@@ -237,4 +231,51 @@ func (e *Embedded) putPubsub(ctx context.Context, name ipns.Name, rec []byte) {
 		return
 	}
 	e.Log(fmt.Sprintf("ipns pubsub: sent to %d topic peers", len(t.ListPeers())))
+}
+
+// Record returns the last IPNS record this node signed for key, or nil.
+func (e *Embedded) Record(key string) []byte {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	return e.records[key]
+}
+
+// PutRecord re-announces a signed record made elsewhere (a pushed site's
+// record on a host). It is validated against the name's key first.
+func (e *Embedded) PutRecord(ctx context.Context, ipnsName string, rec []byte) error {
+	if e.dht == nil {
+		return fmt.Errorf("node not started")
+	}
+	name, err := ipns.NameFromString(strings.TrimPrefix(ipnsName, "/ipns/"))
+	if err != nil {
+		return err
+	}
+	r, err := ipns.UnmarshalRecord(rec)
+	if err != nil {
+		return err
+	}
+	if err := ipns.ValidateWithName(r, name); err != nil {
+		return err
+	}
+	return e.putRecord(ctx, name, rec)
+}
+
+// putRecord puts a marshalled record in the DHT, the delegated endpoint, and pubsub.
+func (e *Embedded) putRecord(ctx context.Context, name ipns.Name, b []byte) error {
+	rkey := string(name.RoutingKey())
+	if !e.Offline {
+		e.waitForRoutingTable(ctx, 20, 60*time.Second)
+	}
+	start := time.Now()
+	closest, _ := e.dht.GetClosestPeers(ctx, rkey)
+	e.Log(fmt.Sprintf("ipns put: %d closest peers found in %s", len(closest), time.Since(start).Round(time.Millisecond)))
+	if err := e.dht.PutValue(ctx, rkey, b); err != nil {
+		return fmt.Errorf("ipns put: %w", err)
+	}
+	e.Log(fmt.Sprintf("ipns put done in %s", time.Since(start).Round(time.Millisecond)))
+	if !e.Offline {
+		e.putDelegated(ctx, name, b)
+		go e.putPubsub(context.Background(), name, b)
+	}
+	return nil
 }
