@@ -16,8 +16,11 @@ cd worker
 export CLOUDFLARE_API_TOKEN=... CLOUDFLARE_ACCOUNT_ID=...
 npx -p node@22 -p wrangler wrangler kv namespace create croptop-registry   # put the id in wrangler.toml
 npx -p node@22 -p wrangler wrangler r2 bucket create croptop-sites
-npx -p node@22 -p wrangler wrangler deploy
+npx -p node@22 -p wrangler wrangler deploy -c wrangler.toml
 ```
+
+Always name the config with `-c`. Without it wrangler can fall back to a
+no-op worker named after the directory and upload that instead, silently.
 
 The token needs Workers Scripts, Workers Routes, KV and R2 edit on the account
 and the zone. `wrangler.toml` attaches the routes `crop.top/*` and
