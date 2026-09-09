@@ -8,12 +8,24 @@ const W = () => canvas.width, H = () => canvas.height;
 const donors = Array.from({ length: 28 }, () => ({ x: rand() * 0.35, y: rand(), r: 2 + rand() * 4 }));
 const spend = Array.from({ length: 5 }, (_, i) => ({ x: 0.85 + rand() * 0.1, y: 0.15 + i * 0.175, label: ["organizers", "ads", "staff", "events", "travel"][i] }));
 const coins = [];
+let mouse = null;
+canvas.addEventListener("pointermove", (e) => { const b = canvas.getBoundingClientRect(); mouse = { x: (e.clientX - b.left) / b.width, y: (e.clientY - b.top) / b.height }; });
+canvas.addEventListener("pointerleave", () => { mouse = null; });
 function spawn() { const d = donors[Math.floor(rand() * donors.length)]; coins.push({ from: { x: d.x, y: d.y }, to: { x: 0.5, y: 0.5 }, t: 0, phase: 0, speed: 0.004 + rand() * 0.006 }); }
 function frame() {
   if (document.hidden) return requestAnimationFrame(frame);
   canvas.width = canvas.clientWidth * devicePixelRatio; canvas.height = canvas.clientHeight * devicePixelRatio;
   const w = W(), h = H(); ctx.clearRect(0, 0, w, h);
-  ctx.fillStyle = "rgba(255,255,255,.35)"; for (const d of donors) { ctx.beginPath(); ctx.arc(d.x * w, d.y * h, d.r * devicePixelRatio, 0, 7); ctx.fill(); }
+  for (const d of donors) {
+    const near = mouse && Math.hypot(d.x - mouse.x, (d.y - mouse.y) * h / w) < .12;
+    ctx.fillStyle = near ? accent : "rgba(255,255,255,.35)";
+    ctx.beginPath(); ctx.arc(d.x * w, d.y * h, (near ? d.r + 3 : d.r) * devicePixelRatio, 0, 7); ctx.fill();
+  }
+  if (mouse) {
+    ctx.strokeStyle = accent; ctx.lineWidth = 1.5 * devicePixelRatio;
+    ctx.beginPath(); ctx.arc(mouse.x * w, mouse.y * h, (9 + Math.sin(Date.now() / 200) * 3) * devicePixelRatio, 0, 7); ctx.stroke();
+    if (Math.random() < .3) coins.push({ from: { ...mouse }, to: { x: 0.5, y: 0.5 }, t: 0, phase: 0, speed: 0.01 + Math.random() * 0.008 });
+  }
   ctx.fillStyle = accent; ctx.beginPath(); ctx.arc(0.5 * w, 0.5 * h, 18 * devicePixelRatio, 0, 7); ctx.fill();
   ctx.fillStyle = "rgba(255,255,255,.7)"; ctx.font = `${12 * devicePixelRatio}px sans-serif`; ctx.textAlign = "left";
   for (const s of spend) { ctx.fillRect(s.x * w - 3, s.y * h - 3, 6 * devicePixelRatio, 6 * devicePixelRatio); ctx.fillText(s.label, s.x * w + 10 * devicePixelRatio, s.y * h + 4 * devicePixelRatio); }

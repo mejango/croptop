@@ -138,6 +138,11 @@ Any post's preview can be embedded on its own: `https://<site>/?preview=<post id
 renders just that preview filling the viewport. The console uses it for the
 tiles on a site's page; it works in an iframe anywhere.
 
+Previews get the mouse: hover and move events work, and a click still opens
+the post (the frame handles it, and the embeddable page reports it to its
+parent as a `croptop-preview-click` message). The coin-flow example turns the
+pointer into a donor.
+
 The template mounts it for every such post on the page at once, so keep it
 light: one timer, small fetches, stop when `el.isConnected` is false. The
 six examples in `examples/widgets/*.preview.js` show live gas, self-balancing

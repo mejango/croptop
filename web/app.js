@@ -199,6 +199,8 @@
     const m = $("#main");
     const posts = await api("GET", `/v0/planets/my/${id}/articles`);
     const grid = h("div", { class: "grid" }, h("a", { class: "tile new", href: `#/site/${id}/post/new` }, "+ New post"));
+    // previews are iframes that take the mouse; a click inside one arrives as a message
+    window.onmessage = (e) => { if (e.data && e.data.type === "croptop-preview-click" && e.data.post) location.hash = `#/site/${id}/post/${e.data.post}`; };
     for (const p of posts) {
       const hasMedia = (p.attachments || []).some((a) => !a.startsWith("_"));
       const cover = (p.attachments || []).find((a) => /\.(png|jpe?g|gif|webp)$/i.test(a)) || (p.videoFilename ? "_videoThumbnail.png" : "_cover.png");

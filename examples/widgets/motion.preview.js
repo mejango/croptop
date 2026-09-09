@@ -1,4 +1,5 @@
-// Feed preview: the same flow of coins, smaller and calmer.
+// Feed preview: the same flow of coins, smaller and calmer. Hover to become a donor:
+// coins stream from the pointer into the campaign and donors near you light up.
 export default function (el, { post }) {
   const canvas = document.createElement("canvas");
   canvas.style.cssText = "position:absolute;inset:0;width:100%;height:100%;display:block";
@@ -11,12 +12,24 @@ export default function (el, { post }) {
   const donors = Array.from({ length: 16 }, () => ({ x: .08 + rand() * .3, y: .1 + rand() * .8 }));
   const spend = Array.from({ length: 5 }, (_, i) => ({ x: .88, y: .15 + i * .175 }));
   const coins = [];
+  let mouse = null;
+  el.addEventListener("pointermove", (e) => { const b = canvas.getBoundingClientRect(); mouse = { x: (e.clientX - b.left) / b.width, y: (e.clientY - b.top) / b.height }; });
+  el.addEventListener("pointerleave", () => { mouse = null; });
   const frame = () => {
     if (!el.isConnected) return;
     if (document.hidden) return requestAnimationFrame(frame);
     const w = canvas.width = canvas.clientWidth * devicePixelRatio, h = canvas.height = canvas.clientHeight * devicePixelRatio, r = devicePixelRatio;
     ctx.clearRect(0, 0, w, h);
-    ctx.globalAlpha = .45; ctx.fillStyle = fg; for (const d of donors) { ctx.beginPath(); ctx.arc(d.x * w, d.y * h, 2.5 * r, 0, 7); ctx.fill(); }
+    for (const d of donors) {
+      const near = mouse && Math.hypot(d.x - mouse.x, (d.y - mouse.y) * h / w) < .14;
+      ctx.globalAlpha = near ? 1 : .45; ctx.fillStyle = near ? accent : fg;
+      ctx.beginPath(); ctx.arc(d.x * w, d.y * h, (near ? 4 : 2.5) * r, 0, 7); ctx.fill();
+    }
+    if (mouse) {
+      ctx.globalAlpha = .9; ctx.strokeStyle = accent; ctx.lineWidth = 1.5 * r;
+      ctx.beginPath(); ctx.arc(mouse.x * w, mouse.y * h, (7 + Math.sin(Date.now() / 200) * 2) * r, 0, 7); ctx.stroke();
+      if (Math.random() < .35) coins.push({ from: { ...mouse }, to: { x: .5, y: .5 }, t: 0, phase: 0, sp: .012 + Math.random() * .01 });
+    }
     ctx.globalAlpha = 1; ctx.fillStyle = accent; ctx.beginPath(); ctx.arc(.5 * w, .5 * h, 12 * r, 0, 7); ctx.fill();
     ctx.globalAlpha = .7; ctx.fillStyle = fg; for (const s of spend) ctx.fillRect(s.x * w - 2 * r, s.y * h - 2 * r, 4 * r, 4 * r);
     if (rand() < .08) { const d = donors[Math.floor(rand() * donors.length)]; coins.push({ from: d, to: { x: .5, y: .5 }, t: 0, phase: 0, sp: .006 + rand() * .006 }); }
