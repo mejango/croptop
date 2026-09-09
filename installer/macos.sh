@@ -7,13 +7,12 @@ WORK=$(mktemp -d)
 for a in amd64 arm64; do mkdir -p "$WORK/$a"; tar -xzf "$IN/croptop_${VER}_darwin_${a}.tar.gz" -C "$WORK/$a" croptop; done
 APP="$OUT/Croptop.app"
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
+# The binary is the app's executable: with no arguments it runs the console
+# and opens the browser. (No separate launcher: macOS file systems are
+# case-insensitive, so "Croptop" and "croptop" would be the same file.)
 lipo -create -output "$APP/Contents/MacOS/croptop" "$WORK/amd64/croptop" "$WORK/arm64/croptop"
-# the app's own executable: runs the console, which opens the browser
-cat > "$APP/Contents/MacOS/Croptop" <<'SH'
-#!/bin/sh
-exec "$(dirname "$0")/croptop" serve
-SH
-chmod +x "$APP/Contents/MacOS/Croptop" "$APP/Contents/MacOS/croptop"
+chmod +x "$APP/Contents/MacOS/croptop"
+lipo -info "$APP/Contents/MacOS/croptop"
 cp "$(dirname "$0")/Croptop.icns" "$APP/Contents/Resources/Croptop.icns"
 cat > "$APP/Contents/Info.plist" <<PLIST
 <?xml version="1.0" encoding="UTF-8"?>
@@ -24,7 +23,7 @@ cat > "$APP/Contents/Info.plist" <<PLIST
   <key>CFBundleIdentifier</key><string>top.crop.croptop</string>
   <key>CFBundleVersion</key><string>$VER</string>
   <key>CFBundleShortVersionString</key><string>$VER</string>
-  <key>CFBundleExecutable</key><string>Croptop</string>
+  <key>CFBundleExecutable</key><string>croptop</string>
   <key>CFBundleIconFile</key><string>Croptop</string>
   <key>CFBundlePackageType</key><string>APPL</string>
   <key>LSMinimumSystemVersion</key><string>12.0</string>

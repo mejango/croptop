@@ -11,8 +11,8 @@ TAG=$(curl -fsSL "https://api.github.com/repos/$REPO/releases/latest" | sed -n '
 [ -n "$TAG" ] || { echo "could not find the latest release" >&2; exit 1; }
 VER=${TAG#v}
 FILE="croptop_${VER}_${OS}_${ARCH}.tar.gz"
-DEST=/usr/local/bin
-[ -w "$DEST" ] || DEST="$HOME/.local/bin"
+DEST=${CROPTOP_INSTALL_DIR:-/usr/local/bin}
+[ -w "$DEST" ] || [ -n "${CROPTOP_INSTALL_DIR:-}" ] || DEST="$HOME/.local/bin"
 mkdir -p "$DEST"
 TMP=$(mktemp -d)
 echo "downloading croptop $VER for $OS/$ARCH"

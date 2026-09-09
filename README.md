@@ -24,7 +24,7 @@ irm https://crop.top/install.ps1 | iex             # Windows
 
 Or pick what fits:
 
-- **macOS app**: download `Croptop.dmg` from the [latest release](https://github.com/mejango/croptop/releases/latest), drag Croptop to Applications. It is not notarized yet, so the first time right-click it and choose Open.
+- **macOS app**: download `Croptop.dmg` from the [latest release](https://github.com/mejango/croptop/releases/latest), drag Croptop to Applications. It is not notarized yet: the first launch is blocked, then System Settings, Privacy & Security shows an Open Anyway button for it.
 - **Homebrew**: `brew install mejango/tap/croptop`
 - **Windows installer**: `croptop-setup.exe` from the latest release. Windows will show a SmartScreen notice because the installer is unsigned; choose More info, Run anyway.
 - **Debian, Ubuntu**: the `.deb` from the latest release. **Fedora**: the `.rpm`.
