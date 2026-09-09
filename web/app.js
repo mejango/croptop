@@ -204,6 +204,12 @@
       const cover = (p.attachments || []).find((a) => /\.(png|jpe?g|gif|webp)$/i.test(a)) || (p.videoFilename ? "_videoThumbnail.png" : "_cover.png");
       const cov = h("div", { class: "cover" + (hasMedia || cover === "_cover.png" ? "" : " blank"), style: `background-image:url("/${id}/${p.id}/${encodeURIComponent(cover)}?t=${Math.floor(Date.now()/60000)}")` });
       if (p.videoFilename) cov.append(h("span", {}, "video")); else if (p.audioFilename) cov.append(h("span", {}, "audio"));
+      const hasPreview = (p.attachments || []).includes("preview.js") || /<script[^>]+type=["']croptop\/preview["']/i.test(p.content || "");
+      if (hasPreview) {
+        // the post draws its own tile: the site's ?preview= page, live
+        cov.style.background = "var(--paper)";
+        cov.append(h("iframe", { class: "preview", src: `/${id}/?preview=${p.id}&t=${Math.floor(Date.now()/60000)}`, sandbox: "allow-scripts allow-same-origin", loading: "lazy", title: p.title || "preview", tabindex: "-1" }));
+      }
       grid.append(h("a", { class: "tile", href: `#/site/${id}/post/${p.id}` }, cov, h("div", { class: "meta" }, p.title || "Untitled", h("small", {}, when(p.created).toLocaleDateString()))));
     }
     const strip = stateStrip(site);

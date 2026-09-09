@@ -122,6 +122,22 @@ export default function (el, { post, site, env, size, base }) {
 }
 ```
 
+Or write it straight into the post, no attachment needed:
+
+```html
+<script type="croptop/preview">
+export default function (el, { post }) { el.textContent = post.title; }
+</script>
+```
+
+The inline form travels with `planet.json`, so the feed can draw it before a
+single extra file has been fetched. Browsers ignore the unknown script type on
+the post page itself. One post, one preview: the inline form wins if both exist.
+
+Any post's preview can be embedded on its own: `https://<site>/?preview=<post id>`
+renders just that preview filling the viewport. The console uses it for the
+tiles on a site's page; it works in an iframe anywhere.
+
 The template mounts it for every such post on the page at once, so keep it
 light: one timer, small fetches, stop when `el.isConnected` is false. The
 six examples in `examples/widgets/*.preview.js` show live gas, self-balancing
