@@ -167,9 +167,25 @@ func TestClaimPushServe(t *testing.T) {
 		t.Fatalf("directory at /directory: %d %s", code, b)
 	}
 	h.Root = ""
-	// a push forwarded from a trusted domain verifies against that domain
+	// a push forwarded from a trusted domain verifies against that domain,
+	// and may carry its files base64-encoded
 	h.Trust = []string{"crop.example"}
-	body5, ctype5 := form()
+	body5, ctype5 := func() (*bytes.Buffer, string) {
+		var buf bytes.Buffer
+		mw := multipart.NewWriter(&buf)
+		filepath.WalkDir(dir, func(path string, d os.DirEntry, err error) error {
+			if d.IsDir() {
+				return nil
+			}
+			rel, _ := filepath.Rel(dir, path)
+			w, _ := mw.CreateFormFile("file:"+filepath.ToSlash(rel), filepath.Base(rel))
+			b, _ := os.ReadFile(path)
+			w.Write([]byte(base64.StdEncoding.EncodeToString(b)))
+			return nil
+		})
+		mw.Close()
+		return &buf, mw.FormDataContentType()
+	}()
 	fsig, _ := site.Keystore().Sign("site1", PushMessage("crop.example", ipnsName, root, 4, now))
 	freq, _ := http.NewRequest("POST", srv.URL+"/v0/host/push", body5)
 	freq.Host = "crop.test"
@@ -180,15 +196,20 @@ func TestClaimPushServe(t *testing.T) {
 	freq.Header.Set("X-Croptop-Time", strconv.FormatInt(now, 10))
 	freq.Header.Set("X-Croptop-Sig", base64.StdEncoding.EncodeToString(fsig))
 	freq.Header.Set("X-Croptop-Signed-Host", "crop.example")
+	freq.Header.Set("X-Croptop-Encoding", "base64")
 	if fr, _ := http.DefaultClient.Do(freq); fr.StatusCode != 200 {
 		b, _ := readAll(fr)
 		t.Fatalf("forwarded push: %s %s", fr.Status, b)
 	}
-	freq.Header.Set("X-Croptop-Signed-Host", "evil.example")
 	body6, ctype6 := form()
-	freq.Body, freq.Header["Content-Type"] = io.NopCloser(body6), []string{ctype6}
-	if fr, _ := http.DefaultClient.Do(freq); fr.StatusCode != 403 {
-		t.Fatalf("untrusted forward: want 403, got %s", fr.Status)
+	ureq, _ := http.NewRequest("POST", srv.URL+"/v0/host/push", body6)
+	ureq.Host = "crop.test"
+	ureq.Header = freq.Header.Clone()
+	ureq.Header.Set("Content-Type", ctype6)
+	ureq.Header.Set("X-Croptop-Signed-Host", "evil.example")
+	ureq.Header.Del("X-Croptop-Encoding")
+	if fr, err := http.DefaultClient.Do(ureq); err != nil || fr.StatusCode != 403 {
+		t.Fatalf("untrusted forward: want 403, got %v %v", err, fr)
 	}
 	h.Trust = nil
 	// registry survives a restart

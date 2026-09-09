@@ -570,13 +570,16 @@ func writeJSON(w http.ResponseWriter, code int, v any) {
 
 // saveMultipart writes each "file:<path>" part to dir at that path. The path
 // rides in the field name because Go's multipart reader strips directories
-// from file names.
+// from file names. With X-Croptop-Encoding: base64 the parts are base64 text,
+// which lets a forwarded push cross a web application firewall that would
+// otherwise read a site's HTML and scripts as an attack.
 func saveMultipart(r *http.Request, dir string) (int, error) {
 	r.Body = http.MaxBytesReader(nil, r.Body, maxPush)
 	mr, err := r.MultipartReader()
 	if err != nil {
 		return 0, err
 	}
+	b64 := strings.EqualFold(r.Header.Get("X-Croptop-Encoding"), "base64")
 	n := 0
 	for {
 		part, err := mr.NextPart()
@@ -598,7 +601,11 @@ func saveMultipart(r *http.Request, dir string) (int, error) {
 		if err != nil {
 			return n, err
 		}
-		_, err = io.Copy(f, part)
+		var src io.Reader = part
+		if b64 {
+			src = base64.NewDecoder(base64.StdEncoding, part)
+		}
+		_, err = io.Copy(f, src)
 		f.Close()
 		if err != nil {
 			return n, err

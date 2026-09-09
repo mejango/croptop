@@ -224,6 +224,33 @@ async function api(request, url, env, ctx) {
   if (p.startsWith("names/") && request.method === "GET") return entryResponse(await entryByName(env, p.slice(6)));
   if (p.startsWith("keys/") && request.method === "GET") return entryResponse(await entryByKey(env, p.slice(5)));
   if (p === "debug/resolve" && request.method === "GET") return debugResolve(env, url.searchParams.get("name") || "");
+  if (p === "debug/nodeforward" && request.method === "GET" && env.NODE) {
+    // forward a slice of a pushed site's real files to the node, to find what a firewall dislikes
+    const cid = url.searchParams.get("cid"), from = Number(url.searchParams.get("from") || 0), to = Number(url.searchParams.get("to") || 1000);
+    const list = await env.SITES.list({ prefix: `sites/${cid}/`, limit: 1000 });
+    const keys = list.objects.map((o) => o.key).slice(from, to);
+    const fd = new FormData();
+    const b64 = !!url.searchParams.get("b64");
+    for (const k of keys) { const o = await env.SITES.get(k); const buf = await o.arrayBuffer(); fd.append("file:" + k.slice(`sites/${cid}/`.length), new Blob([b64 ? toBase64(buf) : buf]), k.split("/").pop()); }
+    const hdrs = { ...UA, "X-Croptop-Signed-Host": "test.crop.top" };
+    if (b64) hdrs["X-Croptop-Encoding"] = "base64";
+    if (url.searchParams.get("real")) {
+      const last = await env.REGISTRY.get("lastpush:" + url.searchParams.get("real"), { type: "json" });
+      for (const [k, v] of Object.entries(last || {})) if (v && !(url.searchParams.get("omit") || "").split(",").includes(k.replace("X-Croptop-", ""))) hdrs[k] = v;
+    }
+    const r = await fetch(`${env.NODE}/v0/host/push`, { method: "POST", headers: hdrs, body: fd });
+    return json({ sent: keys.length, headers: Object.keys(hdrs), status: r.status, body: (await r.text()).slice(0, 60) });
+  }
+  if (p === "debug/nodepush" && request.method === "GET" && env.NODE) {
+    // what does the node's edge say to a POST from a Worker?
+    const kb = Number(url.searchParams.get("kb") || 1), parts = Number(url.searchParams.get("parts") || 1);
+    const payload = url.searchParams.get("xss") ? "<html><script type=\"module\">const x = document.getElementById('a'); x.innerHTML = '<b>hi</b>'; fetch('https://example.com');</script></html>" : null;
+    const fd = new FormData(); for (let i = 0; i < parts; i++) fd.append(`file:dir${i % 7}/probe${i}.${payload ? "html" : "txt"}`, new Blob([payload || new Uint8Array(kb * 1024)]), `probe${i}.${payload ? "html" : "txt"}`);
+    const hdrs = { ...UA, "X-Croptop-Signed-Host": "test.crop.top" };
+    if (url.searchParams.get("hdrs")) Object.assign(hdrs, { "X-Croptop-Ipns": "k51qzi5uqu5dilqjwgdm3zj0g24zaowqfxoargdm1lbj7s4frpwuzqp2tmxm4g", "X-Croptop-Cid": "bafybeigdyrzt5sfp7udm7hu76uh7y26nf3efuylqabf3oclgtqy55fbzdi", "X-Croptop-Seq": "1", "X-Croptop-Time": String(Math.floor(Date.now() / 1000)), "X-Croptop-Sig": btoa(String.fromCharCode(...new Uint8Array(64))), "X-Croptop-Record": btoa(String.fromCharCode(...new Uint8Array(Number(url.searchParams.get("rec") || 400)))) });
+    const r = await fetch(`${env.NODE}/v0/host/push`, { method: "POST", headers: hdrs, body: fd });
+    return json({ status: r.status, server: r.headers.get("server"), cf: r.headers.get("cf-ray"), body: (await r.text()).slice(0, 300), headers: Object.fromEntries([...r.headers.entries()].slice(0, 12)) });
+  }
   return text("not found", 404);
 }
 
@@ -285,6 +312,7 @@ async function push(request, url, env, ctx) {
   await saveEntry(env, e);
   await env.REGISTRY.put("pushed:" + cid, "1");
   if (e.record) ctx.waitUntil(republish(ipns, e.record));
+  await env.REGISTRY.put("lastpush:" + ipns, JSON.stringify(Object.fromEntries(["Ipns", "Cid", "Seq", "Time", "Sig", "Record"].map((k) => ["X-Croptop-" + k, request.headers.get("X-Croptop-" + k) || ""]))), { expirationTtl: 3600 });
   // replicate to the node so the IPFS network gets the site from a reachable
   // peer, not from the author's laptop; it re-adds the files and checks the cid
   if (env.NODE) ctx.waitUntil(forwardPush(env, request, form, signingHost(request, url, env)));
@@ -317,11 +345,13 @@ async function debugResolve(env, name) {
 async function forwardPush(env, request, form, signedHost) {
   try {
     const fd = new FormData();
-    for (const [field, value] of form.entries()) if (field.startsWith("file:") && typeof value !== "string") fd.append(field, value, value.name);
-    const headers = { ...UA, "X-Croptop-Signed-Host": signedHost };
+    for (const [field, value] of form.entries()) if (field.startsWith("file:") && typeof value !== "string") fd.append(field, new Blob([toBase64(await value.arrayBuffer())]), value.name);
+    // base64, because a firewall in front of the node reads a site's scripts as an attack
+    const headers = { ...UA, "X-Croptop-Signed-Host": signedHost, "X-Croptop-Encoding": "base64" };
     for (const k of ["Ipns", "Cid", "Seq", "Time", "Sig", "Record"]) { const v = request.headers.get("X-Croptop-" + k); if (v) headers["X-Croptop-" + k] = v; }
+    console.log("node push start", Object.keys(headers).join(","), [...fd.keys()].length + " files");
     const r = await fetch(`${env.NODE}/v0/host/push`, { method: "POST", headers, body: fd });
-    if (!r.ok) console.log("node push", r.status, (await r.text()).slice(0, 120));
+    console.log("node push result", r.status, r.headers.get("server") || "", r.headers.get("content-type") || "", (await r.text()).slice(0, 200));
   } catch (e) {
     console.log("node push failed", e.message);
   }
@@ -397,6 +427,13 @@ function parseRecord(b) {
     else break;
   }
   return out;
+}
+
+function toBase64(buf) {
+  const bytes = new Uint8Array(buf);
+  let bin = "";
+  for (let i = 0; i < bytes.length; i += 0x8000) bin += String.fromCharCode.apply(null, bytes.subarray(i, i + 0x8000));
+  return btoa(bin);
 }
 
 // ---------- small helpers
