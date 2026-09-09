@@ -13,7 +13,6 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
-	"sync/atomic"
 	"time"
 
 	"github.com/mejango/croptop/internal/gateway"
@@ -196,7 +195,7 @@ func (p *Publisher) prewarm(ctx context.Context, site *store.Site, cid string) {
 // by CID, so the gateway's node holds the whole site while this one is still
 // online. Runs in the background after publish; a few requests at a time.
 func (p *Publisher) prewarmAll(site *store.Site, cid string) {
-	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Minute)
+	ctx, cancel := context.WithTimeout(context.Background(), 40*time.Minute)
 	defer cancel()
 	base := gateway.CIDURL(site, cid)
 	dir := p.Store.PublicDir(site.ID)
@@ -209,35 +208,42 @@ func (p *Publisher) prewarmAll(site *store.Site, cid string) {
 		return nil
 	})
 	client := &http.Client{Timeout: 3 * time.Minute}
-	sem := make(chan struct{}, 4)
-	var wg sync.WaitGroup
-	var ok, failed int64
 	start := time.Now()
-	for _, rel := range paths {
-		rel := rel
-		wg.Add(1)
-		sem <- struct{}{}
-		go func() {
-			defer wg.Done()
-			defer func() { <-sem }()
-			req, err := http.NewRequestWithContext(ctx, "GET", base+rel, nil)
-			if err != nil {
-				return
-			}
-			resp, err := client.Do(req)
-			if err != nil {
-				atomic.AddInt64(&failed, 1)
-				return
-			}
-			io.Copy(io.Discard, io.LimitReader(resp.Body, 32<<20))
-			resp.Body.Close()
-			if resp.StatusCode < 400 {
-				atomic.AddInt64(&ok, 1)
-			} else {
-				atomic.AddInt64(&failed, 1)
-			}
-		}()
+	remaining := paths
+	// The gateway keeps whatever blocks it managed to fetch, so a second and
+	// third pass over the failures usually completes a site a slow link
+	// could not deliver in one go.
+	for pass := 1; pass <= 3 && len(remaining) > 0 && ctx.Err() == nil; pass++ {
+		sem := make(chan struct{}, 4)
+		var wg sync.WaitGroup
+		var mu sync.Mutex
+		var failed []string
+		for _, rel := range remaining {
+			rel := rel
+			wg.Add(1)
+			sem <- struct{}{}
+			go func() {
+				defer wg.Done()
+				defer func() { <-sem }()
+				req, err := http.NewRequestWithContext(ctx, "GET", base+rel, nil)
+				if err != nil {
+					return
+				}
+				resp, err := client.Do(req)
+				if err == nil {
+					io.Copy(io.Discard, io.LimitReader(resp.Body, 32<<20))
+					resp.Body.Close()
+				}
+				if err != nil || resp.StatusCode >= 400 {
+					mu.Lock()
+					failed = append(failed, rel)
+					mu.Unlock()
+				}
+			}()
+		}
+		wg.Wait()
+		remaining = failed
 	}
-	wg.Wait()
+	ok, failed := len(paths)-len(remaining), len(remaining)
 	p.log("gateway now holds %d of %d files for %s (%d failed) after %s", ok, len(paths), site.Name, failed, time.Since(start).Round(time.Second))
 }
