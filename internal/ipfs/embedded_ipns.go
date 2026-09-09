@@ -79,7 +79,7 @@ func (e *Embedded) NamePublish(ctx context.Context, key, c string, seq uint64) e
 	e.Log(fmt.Sprintf("ipns put done in %s", time.Since(start).Round(time.Millisecond)))
 	if !e.Offline {
 		e.putDelegated(ctx, name, b)
-		e.putPubsub(ctx, name, b)
+		go e.putPubsub(context.Background(), name, b)
 	}
 	if !e.Offline {
 		// read our own record back from the network as a check
