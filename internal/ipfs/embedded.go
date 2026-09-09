@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/ipfs/boxo/bitswap"
@@ -405,7 +406,50 @@ func (e *Embedded) Provide(ctx context.Context, c string) error {
 	}
 	pctx, cancel := context.WithTimeout(ctx, 2*time.Minute)
 	defer cancel()
-	return e.dht.Provide(pctx, id, true)
+	if err := e.dht.Provide(pctx, id, true); err != nil {
+		return err
+	}
+	go e.provideTree(id)
+	return nil
+}
+
+// provideTree announces every block under root, as kubo's reprovider does,
+// so a gateway fetching one file deep in the site finds this node for that
+// block directly instead of only for the root. Best effort, in the background.
+func (e *Embedded) provideTree(root cid.Cid) {
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Minute)
+	defer cancel()
+	var cids []cid.Cid
+	err := merkledag.Walk(ctx, merkledag.GetLinksDirect(e.dag), root, func(c cid.Cid) bool {
+		if c.Equals(root) {
+			return true
+		}
+		cids = append(cids, c)
+		return true
+	})
+	if err != nil {
+		e.Log("provide tree walk: " + err.Error())
+	}
+	sem := make(chan struct{}, 8)
+	var wg sync.WaitGroup
+	var failed int64
+	start := time.Now()
+	for _, c := range cids {
+		c := c
+		wg.Add(1)
+		sem <- struct{}{}
+		go func() {
+			defer wg.Done()
+			defer func() { <-sem }()
+			pctx, cancel := context.WithTimeout(ctx, 2*time.Minute)
+			defer cancel()
+			if err := e.dht.Provide(pctx, c, true); err != nil {
+				atomic.AddInt64(&failed, 1)
+			}
+		}()
+	}
+	wg.Wait()
+	e.Log(fmt.Sprintf("provided %d blocks under %s (%d failed) in %s", len(cids)-int(failed), root, failed, time.Since(start).Round(time.Second)))
 }
 
 // FindProviders lists peers announcing the CID, up to 20 within 20 seconds.

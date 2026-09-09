@@ -91,6 +91,7 @@ func (p *Publisher) Publish(ctx context.Context, siteID string, force bool) (Res
 	if !p.SkipPrewarm {
 		p.log("asking gateways to fetch the new version")
 		p.prewarm(ctx, site, cid)
+		go p.prewarmAll(site, cid)
 	}
 	return Result{CID: cid, Sequence: seq}, nil
 }
