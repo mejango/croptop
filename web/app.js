@@ -210,7 +210,7 @@
       if (hasPreview) {
         // the post draws its own tile: the site's ?preview= page, live
         cov.style.background = "var(--paper)";
-        cov.append(h("iframe", { class: "preview", src: `/${id}/?preview=${p.id}&t=${Math.floor(Date.now()/60000)}`, sandbox: "allow-scripts allow-same-origin", loading: "lazy", title: p.title || "preview", tabindex: "-1" }));
+        cov.append(h("iframe", { class: "tile-preview", src: `/${id}/?preview=${p.id}&t=${Math.floor(Date.now()/60000)}`, sandbox: "allow-scripts allow-same-origin", loading: "lazy", title: p.title || "preview", tabindex: "-1" }));
       }
       grid.append(h("a", { class: "tile", href: `#/site/${id}/post/${p.id}` }, cov, h("div", { class: "meta" }, p.title || "Untitled", h("small", {}, when(p.created).toLocaleDateString()))));
     }

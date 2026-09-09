@@ -71,7 +71,7 @@ h2 { font-size: 18px; }
 .tile .cover { aspect-ratio: 1; background: var(--ink) center/cover no-repeat; display: flex; align-items: flex-end; }
 .tile .cover.blank { background: #fff0fa; }
 .tile .cover { position: relative; }
-.tile .cover iframe.preview { position: absolute; inset: 0; width: 100%; height: 100%; border: 0; display: block; background: var(--paper); }
+.tile .cover iframe.tile-preview { position: absolute; inset: 0; width: 100%; height: 100%; border: 0; display: block; background: var(--paper); }
 .tile .cover span { font-family: var(--pixel); color: var(--paper); font-size: 12px; padding: 8px; background: rgba(23,23,23,.7); }
 .tile .meta { padding: 8px 10px; font-size: 14px; }
 .tile .meta small { color: var(--muted); display: block; }
