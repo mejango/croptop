@@ -167,12 +167,36 @@ func TestClaimPushServe(t *testing.T) {
 		t.Fatalf("directory at /directory: %d %s", code, b)
 	}
 	h.Root = ""
+	// a push forwarded from a trusted domain verifies against that domain
+	h.Trust = []string{"crop.example"}
+	body5, ctype5 := form()
+	fsig, _ := site.Keystore().Sign("site1", PushMessage("crop.example", ipnsName, root, 4, now))
+	freq, _ := http.NewRequest("POST", srv.URL+"/v0/host/push", body5)
+	freq.Host = "crop.test"
+	freq.Header.Set("Content-Type", ctype5)
+	freq.Header.Set("X-Croptop-Ipns", ipnsName)
+	freq.Header.Set("X-Croptop-Cid", root)
+	freq.Header.Set("X-Croptop-Seq", "4")
+	freq.Header.Set("X-Croptop-Time", strconv.FormatInt(now, 10))
+	freq.Header.Set("X-Croptop-Sig", base64.StdEncoding.EncodeToString(fsig))
+	freq.Header.Set("X-Croptop-Signed-Host", "crop.example")
+	if fr, _ := http.DefaultClient.Do(freq); fr.StatusCode != 200 {
+		b, _ := readAll(fr)
+		t.Fatalf("forwarded push: %s %s", fr.Status, b)
+	}
+	freq.Header.Set("X-Croptop-Signed-Host", "evil.example")
+	body6, ctype6 := form()
+	freq.Body, freq.Header["Content-Type"] = io.NopCloser(body6), []string{ctype6}
+	if fr, _ := http.DefaultClient.Do(freq); fr.StatusCode != 403 {
+		t.Fatalf("untrusted forward: want 403, got %s", fr.Status)
+	}
+	h.Trust = nil
 	// registry survives a restart
 	h2 := &Host{Domain: "crop.test", DataDir: h.DataDir, Engine: h.Engine}
 	if err := h2.Start(); err != nil {
 		t.Fatal(err)
 	}
-	if h2.reg.Names["probe"] != ipnsName || h2.reg.Keys[ipnsName].Sequence != 3 {
+	if h2.reg.Names["probe"] != ipnsName || h2.reg.Keys[ipnsName].Sequence != 4 {
 		t.Fatal("registry not persisted")
 	}
 }

@@ -100,6 +100,7 @@ func run(args []string) error {
 	domain := fs.String("domain", "crop.top", "domain this host serves (host)")
 	root := fs.String("root", "", "site the bare domain serves: an ENS name, IPNS name, or CID (host)")
 	announce := fs.String("announce", os.Getenv("CROPTOP_ANNOUNCE"), "public multiaddrs to advertise, comma separated, for a node behind a proxy (host)")
+	trust := fs.String("trust", os.Getenv("CROPTOP_TRUST"), "domains whose forwarded pushes are accepted, comma separated (host)")
 	if err := fs.Parse(flagsFirst(args)); err != nil {
 		return nil
 	}
@@ -139,7 +140,7 @@ func run(args []string) error {
 	case "serve":
 		return a.serve(*listen, *noOpen || *role == "node")
 	case "host":
-		return a.host(*domain, *listen, *root, *announce)
+		return a.host(*domain, *listen, *root, *announce, *trust)
 	case "status":
 		if *listen != "" {
 			a.cfg.Listen = *listen
@@ -515,7 +516,7 @@ func (a *app) serve(listen string, noOpen bool) error {
 }
 
 // host runs the crop.top role: gateway, pin host, and name registry for a domain.
-func (a *app) host(domain, listen, root, announce string) error {
+func (a *app) host(domain, listen, root, announce, trust string) error {
 	if listen == "" {
 		listen = "127.0.0.1:8090"
 	}
@@ -536,6 +537,9 @@ func (a *app) host(domain, listen, root, announce string) error {
 	}
 	defer a.engine.Stop()
 	h := &host.Host{Domain: strings.ToLower(domain), DataDir: a.dataDir, Engine: e, Log: println, Root: root}
+	if trust != "" {
+		h.Trust = strings.Split(trust, ",")
+	}
 	if err := h.Start(); err != nil {
 		return err
 	}

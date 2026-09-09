@@ -11,7 +11,8 @@ routes = [
 [vars]
 DOMAIN = "crop.top"
 ROOT = "croptop.eth"           # what the bare domain shows beside claimed names
-UPSTREAMS = "eth.sucks,eth.shop"   # name gateways used for anything not pushed here
+UPSTREAMS = "eth.sucks,eth.shop,https://croptop-host-production.up.railway.app"
+NODE = "https://croptop-host-production.up.railway.app"   # every push is replicated here
 
 [[r2_buckets]]
 binding = "SITES"

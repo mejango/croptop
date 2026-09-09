@@ -285,6 +285,9 @@ async function push(request, url, env, ctx) {
   await saveEntry(env, e);
   await env.REGISTRY.put("pushed:" + cid, "1");
   if (e.record) ctx.waitUntil(republish(ipns, e.record));
+  // replicate to the node so the IPFS network gets the site from a reachable
+  // peer, not from the author's laptop; it re-adds the files and checks the cid
+  if (env.NODE) ctx.waitUntil(forwardPush(env, request, form, signingHost(request, url, env)));
   return json({ cid, sequence: seq, files: n, name: e.name || "" });
 }
 
@@ -309,6 +312,19 @@ async function debugResolve(env, name) {
   if (key) for (const up of upstreams(env)) await probe("upstream:" + up, () => rootsOf(upstreamURL(up, "ipns", key)));
   await probe("resolveAny", () => resolveAny(env, name));
   return json(out);
+}
+
+async function forwardPush(env, request, form, signedHost) {
+  try {
+    const fd = new FormData();
+    for (const [field, value] of form.entries()) if (field.startsWith("file:") && typeof value !== "string") fd.append(field, value, value.name);
+    const headers = { ...UA, "X-Croptop-Signed-Host": signedHost };
+    for (const k of ["Ipns", "Cid", "Seq", "Time", "Sig", "Record"]) { const v = request.headers.get("X-Croptop-" + k); if (v) headers["X-Croptop-" + k] = v; }
+    const r = await fetch(`${env.NODE}/v0/host/push`, { method: "POST", headers, body: fd });
+    if (!r.ok) console.log("node push", r.status, (await r.text()).slice(0, 120));
+  } catch (e) {
+    console.log("node push failed", e.message);
+  }
 }
 
 // ---------- IPNS records: keep them alive from here

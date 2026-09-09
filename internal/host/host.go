@@ -53,6 +53,10 @@ type Host struct {
 	// Root is the site the bare domain serves where no claimed name matches:
 	// an ENS name (croptop.eth), an IPNS name, or a CID. Empty shows the directory.
 	Root string
+	// Trust lists hostnames whose pushes this host accepts when forwarded, as
+	// crop.top's Worker replicates every push to its node: the request carries
+	// X-Croptop-Signed-Host naming the domain the site signed for.
+	Trust []string
 
 	mu    sync.Mutex
 	reg   registry
@@ -154,6 +158,19 @@ func hostnameOf(r *http.Request) string {
 		hostname = hostname[:i]
 	}
 	return hostname
+}
+
+// signingHost is the hostname a request's signature must cover: the one the
+// client addressed, or a trusted domain it was forwarded from.
+func (h *Host) signingHost(r *http.Request) string {
+	if fwd := strings.ToLower(strings.TrimSpace(r.Header.Get("X-Croptop-Signed-Host"))); fwd != "" {
+		for _, t := range h.Trust {
+			if strings.EqualFold(strings.TrimSpace(t), fwd) {
+				return fwd
+			}
+		}
+	}
+	return hostnameOf(r)
 }
 
 func (h *Host) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -437,7 +454,7 @@ func (h *Host) claim(w http.ResponseWriter, r *http.Request) {
 	}
 	sig, _ := base64.StdEncoding.DecodeString(in.Sig)
 	// signed over the hostname the client addressed, which is the domain in production
-	if !fresh(in.Time) || !ipfs.VerifyIPNS(in.IPNS, ClaimMessage(hostnameOf(r), in.Name, in.IPNS, in.Time), sig) {
+	if !fresh(in.Time) || !ipfs.VerifyIPNS(in.IPNS, ClaimMessage(h.signingHost(r), in.Name, in.IPNS, in.Time), sig) {
 		http.Error(w, "bad signature", 403)
 		return
 	}
@@ -473,7 +490,7 @@ func (h *Host) push(w http.ResponseWriter, r *http.Request) {
 	seq, _ := strconv.ParseUint(r.Header.Get("X-Croptop-Seq"), 10, 64)
 	t, _ := strconv.ParseInt(r.Header.Get("X-Croptop-Time"), 10, 64)
 	sig, _ := base64.StdEncoding.DecodeString(r.Header.Get("X-Croptop-Sig"))
-	if !fresh(t) || !ipfs.VerifyIPNS(ipnsName, PushMessage(hostnameOf(r), ipnsName, c, seq, t), sig) {
+	if !fresh(t) || !ipfs.VerifyIPNS(ipnsName, PushMessage(h.signingHost(r), ipnsName, c, seq, t), sig) {
 		http.Error(w, "bad signature", 403)
 		return
 	}

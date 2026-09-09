@@ -8,7 +8,8 @@ routes = [{ pattern = "test.crop.top/*", zone_name = "crop.top" }]
 [vars]
 DOMAIN = "test.crop.top"
 ROOT = "croptop.eth"
-UPSTREAMS = "eth.sucks,eth.shop"
+UPSTREAMS = "eth.sucks,eth.shop,https://croptop-host-production.up.railway.app"
+NODE = "https://croptop-host-production.up.railway.app"   # every push is replicated here
 
 [[r2_buckets]]
 binding = "SITES"
