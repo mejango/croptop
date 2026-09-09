@@ -393,7 +393,17 @@ func (h *Host) serveAPI(w http.ResponseWriter, r *http.Request) {
 	p := strings.TrimPrefix(r.URL.Path, "/v0/host/")
 	switch {
 	case p == "health":
-		w.Write([]byte("ok"))
+		// plain "ok" for probes; peer id and addresses for operators
+		if r.URL.Query().Get("peer") == "" {
+			w.Write([]byte("ok"))
+			return
+		}
+		info, err := h.Engine.Info(r.Context())
+		if err != nil {
+			http.Error(w, err.Error(), 500)
+			return
+		}
+		writeJSON(w, 200, info)
 	case p == "names" && r.Method == "POST":
 		h.claim(w, r)
 	case p == "push" && r.Method == "POST":
