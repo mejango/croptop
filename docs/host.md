@@ -44,6 +44,12 @@ The repo has a `Dockerfile` and `railway.toml`. On Railway:
    With an announced address the node runs as a DHT server, so other nodes
    and gateways fetch straight from it.
 
+crop.top's Worker replicates every push to its node (`NODE` in `wrangler.toml`)
+with `X-Croptop-Signed-Host` naming the domain the site signed for; the node
+accepts that only for domains in `CROPTOP_TRUST`. The files travel base64-encoded
+(`X-Croptop-Encoding: base64`) because the firewall in front of Railway rejects
+minified JavaScript in request bodies as an attack.
+
 The container answers `/v0/host/health`, the push and name API, the classic
 `/ipfs/<cid>/...` and `/ipns/<name>/...` paths, and `<label>.<domain>` if you
 give it a wildcard. The Worker can use it as an upstream in path form:
