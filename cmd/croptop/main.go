@@ -53,7 +53,7 @@ const usage = `croptop — publish Croptop sites to IPFS
   croptop version
 
 Flags for serve: --listen <addr>, --role node (headless: no browser, log only)
-  croptop host --domain crop.top --listen 127.0.0.1:8090 [--root croptop.eth]
+  croptop host --domain crop.top --listen 127.0.0.1:8090 [--root croptop.eth] [--announce /dns4/…/tcp/…]
                            run a gateway and pin host for a domain (see docs/host.md)
 
 Common flags: --data <dir> (default: ` + "%s" + `), --templates <dir>
@@ -99,6 +99,7 @@ func run(args []string) error {
 	role := fs.String("role", "console", "console (opens the browser) or node (headless)")
 	domain := fs.String("domain", "crop.top", "domain this host serves (host)")
 	root := fs.String("root", "", "site the bare domain serves: an ENS name, IPNS name, or CID (host)")
+	announce := fs.String("announce", os.Getenv("CROPTOP_ANNOUNCE"), "public multiaddrs to advertise, comma separated, for a node behind a proxy (host)")
 	if err := fs.Parse(flagsFirst(args)); err != nil {
 		return nil
 	}
@@ -138,7 +139,7 @@ func run(args []string) error {
 	case "serve":
 		return a.serve(*listen, *noOpen || *role == "node")
 	case "host":
-		return a.host(*domain, *listen, *root)
+		return a.host(*domain, *listen, *root, *announce)
 	case "status":
 		if *listen != "" {
 			a.cfg.Listen = *listen
@@ -514,7 +515,7 @@ func (a *app) serve(listen string, noOpen bool) error {
 }
 
 // host runs the crop.top role: gateway, pin host, and name registry for a domain.
-func (a *app) host(domain, listen, root string) error {
+func (a *app) host(domain, listen, root, announce string) error {
 	if listen == "" {
 		listen = "127.0.0.1:8090"
 	}
@@ -524,6 +525,9 @@ func (a *app) host(domain, listen, root string) error {
 	e, ok := a.engine.(*ipfs.Embedded)
 	if !ok {
 		return fmt.Errorf("host needs the embedded engine")
+	}
+	if announce != "" {
+		e.Announce = strings.Split(announce, ",")
 	}
 	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer cancel()

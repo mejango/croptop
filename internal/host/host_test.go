@@ -145,6 +145,16 @@ func TestClaimPushServe(t *testing.T) {
 	if r, _ := http.DefaultClient.Do(preq); r.StatusCode != 409 {
 		t.Fatalf("stale push: want 409, got %s", r.Status)
 	}
+	// classic path gateway on the bare domain
+	if code, b := get("crop.test", "/ipfs/"+root+"/planet.json"); code != 200 || !strings.Contains(b, "Probe") {
+		t.Fatalf("/ipfs path: %d %s", code, b)
+	}
+	if code, b := get("crop.test", "/ipns/"+ipnsName+"/post/"); code != 200 || !strings.Contains(b, "<h1>hi</h1>") {
+		t.Fatalf("/ipns path: %d %s", code, b)
+	}
+	if code, _ := get("crop.test", "/v0/host/health"); code != 200 {
+		t.Fatalf("health: %d", code)
+	}
 	// with a root site, unclaimed bare paths come from it and the directory moves
 	h.Root = root
 	if code, b := get("crop.test", "/planet.json"); code != 200 || !strings.Contains(b, "Probe") {

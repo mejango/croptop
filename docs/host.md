@@ -29,6 +29,26 @@ Local development: `wrangler dev --local` rewrites every request's host to the
 zone name, so `.dev.vars` sets `SIGNING_HOST=localhost` to make signatures from
 a local console verify. Never set that in production.
 
+## Railway (or any container host)
+
+The repo has a `Dockerfile` and `railway.toml`. On Railway:
+
+1. New project from the GitHub repo. Add a volume mounted at `/data`.
+2. Variables: `CROPTOP_DOMAIN` (e.g. `node.crop.top`), `CROPTOP_ROOT` if the
+   bare domain should show a site, and `CROPTOP_ANNOUNCE` once you know the
+   TCP proxy address (next step).
+3. Networking: add a public HTTPS domain for port 8090 (a custom domain such
+   as `node.crop.top` is one CNAME in Cloudflare), and enable a TCP proxy for
+   port 4001. Railway gives it an address like `host.proxy.rlwy.net:12345`;
+   set `CROPTOP_ANNOUNCE=/dns4/host.proxy.rlwy.net/tcp/12345` and redeploy.
+   With an announced address the node runs as a DHT server, so other nodes
+   and gateways fetch straight from it.
+
+The container answers `/v0/host/health`, the push and name API, the classic
+`/ipfs/<cid>/...` and `/ipns/<name>/...` paths, and `<label>.<domain>` if you
+give it a wildcard. The Worker can use it as an upstream in path form:
+`UPSTREAMS = "https://node.crop.top,eth.sucks,eth.shop"`.
+
 ## Go (your own server)
 
 `croptop host` turns a server into a gateway, a pin host, and a name registry

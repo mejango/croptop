@@ -1,0 +1,4 @@
+.data*
+.git
+worker/node_modules
+croptop

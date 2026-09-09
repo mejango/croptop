@@ -35,6 +35,7 @@ import (
 	"github.com/libp2p/go-libp2p/p2p/host/autorelay"
 	"github.com/libp2p/go-libp2p/p2p/net/connmgr"
 	"github.com/multiformats/go-multiaddr"
+	ma "github.com/multiformats/go-multiaddr"
 )
 
 const EmbeddedVersion = "boxo v0.42.2"
@@ -48,6 +49,11 @@ type Embedded struct {
 	Log     func(string)
 	// Offline skips bootstrap and peering and listens on loopback only (tests).
 	Offline bool
+	// Announce lists public multiaddrs to advertise instead of guessing, for a
+	// node behind a fixed port mapping or a TCP proxy (Railway, Fly): e.g.
+	// /dns4/host.proxy.rlwy.net/tcp/12345. A node that announces is treated as
+	// publicly reachable and serves the DHT.
+	Announce []string
 
 	mu      sync.Mutex
 	running bool
@@ -149,6 +155,18 @@ func (e *Embedded) Start(ctx context.Context) error {
 		libp2p.ListenAddrStrings(listen...),
 		libp2p.ConnectionManager(cm),
 	}
+	if len(e.Announce) > 0 {
+		var announce []ma.Multiaddr
+		for _, a := range e.Announce {
+			m, err := ma.NewMultiaddr(strings.TrimSpace(a))
+			if err != nil {
+				return fmt.Errorf("announce %q: %w", a, err)
+			}
+			announce = append(announce, m)
+		}
+		// advertise only the public addresses; private ones would just fail for peers
+		opts = append(opts, libp2p.AddrsFactory(func([]ma.Multiaddr) []ma.Multiaddr { return announce }), libp2p.ForceReachabilityPublic())
+	}
 	if !e.Offline {
 		opts = append(opts, libp2p.NATPortMap(), libp2p.EnableHolePunching(), libp2p.EnableNATService(),
 			libp2p.EnableAutoRelayWithPeerSource(e.relaySource, autorelay.WithMinInterval(30*time.Second)))
@@ -168,6 +186,9 @@ func (e *Embedded) Start(ctx context.Context) error {
 		dopts = append(dopts, dht.BootstrapPeers(), dht.Mode(dht.ModeServer))
 	} else {
 		dopts = append(dopts, dht.BootstrapPeers(dht.GetDefaultBootstrapPeerAddrInfos()...))
+		if len(e.Announce) > 0 {
+			dopts = append(dopts, dht.Mode(dht.ModeServer))
+		}
 	}
 	d, err := dht.New(h, dopts...)
 	if err != nil {

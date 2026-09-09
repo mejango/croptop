@@ -173,6 +173,10 @@ func (h *Host) serveBare(w http.ResponseWriter, r *http.Request) {
 	switch {
 	case strings.HasPrefix(p, "/v0/host/"):
 		h.serveAPI(w, r)
+	case strings.HasPrefix(p, "/ipfs/") || strings.HasPrefix(p, "/ipns/"):
+		// classic path gateway, so a host with one hostname (Railway, Fly) can
+		// be an upstream for the Worker and a plain gateway for anyone
+		h.servePath(w, r, p)
 	case p == "/" && h.Root == "":
 		h.serveDirectory(w, r)
 	case p == "/directory" && h.Root != "":
@@ -225,14 +229,45 @@ func (h *Host) serveLabel(w http.ResponseWriter, r *http.Request, label string) 
 
 // resolveRoot turns Root (ENS name, IPNS name, or CID) into a CID.
 func (h *Host) resolveRoot(ctx context.Context) (string, error) {
-	r := strings.ToLower(strings.TrimSpace(h.Root))
+	return h.resolveRootLike(ctx, h.Root)
+}
+
+// servePath serves /ipfs/<cid>/... and /ipns/<name>/... on the bare domain.
+func (h *Host) servePath(w http.ResponseWriter, r *http.Request, p string) {
+	kind, rest, _ := strings.Cut(strings.TrimPrefix(p, "/"), "/")
+	label, sub, _ := strings.Cut(rest, "/")
+	if label == "" {
+		http.Error(w, "missing name", 400)
+		return
+	}
+	var c string
+	var err error
+	if kind == "ipfs" {
+		c = label
+	} else {
+		c, err = h.resolveRootLike(r.Context(), label)
+	}
+	if err != nil || c == "" {
+		http.Error(w, "could not resolve "+html.EscapeString(label)+": "+errText(err), 502)
+		return
+	}
+	if sub == "" && !strings.HasSuffix(p, "/") {
+		http.Redirect(w, r, p+"/", 301)
+		return
+	}
+	h.serveCID(w, r, c, "/"+sub, "/"+kind+"/"+label)
+}
+
+// resolveRootLike resolves an ENS name, an IPNS name, or a CID to a CID.
+func (h *Host) resolveRootLike(ctx context.Context, what string) (string, error) {
+	what = strings.ToLower(strings.TrimSpace(what))
 	switch {
-	case strings.HasPrefix(r, "bafy") || strings.HasPrefix(r, "qm"):
-		return r, nil
-	case strings.HasPrefix(r, "k51") || strings.HasPrefix(r, "k2k4"):
-		return h.resolveKey(ctx, r)
+	case strings.HasPrefix(what, "bafy") || strings.HasPrefix(what, "qm"):
+		return what, nil
+	case strings.HasPrefix(what, "k51") || strings.HasPrefix(what, "k2k4"):
+		return h.resolveKey(ctx, what)
 	default:
-		return h.resolveENS(ctx, r)
+		return h.resolveENS(ctx, what)
 	}
 }
 
@@ -340,6 +375,8 @@ func (h *Host) serveDirectory(w http.ResponseWriter, r *http.Request) {
 func (h *Host) serveAPI(w http.ResponseWriter, r *http.Request) {
 	p := strings.TrimPrefix(r.URL.Path, "/v0/host/")
 	switch {
+	case p == "health":
+		w.Write([]byte("ok"))
 	case p == "names" && r.Method == "POST":
 		h.claim(w, r)
 	case p == "push" && r.Method == "POST":

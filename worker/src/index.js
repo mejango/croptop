@@ -8,8 +8,11 @@ const NAME_RE = /^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$/;
 const RESERVED = new Set(["www", "api", "v0", "ipfs", "ipns", "push", "host", "admin", "mail", "static", "assets", "docs", "app", "directory"]);
 const MAX_PUSH = 100 << 20;
 const UA = { "User-Agent": "croptop-host/1 (+https://crop.top)" };
-// gateways that resolve names with a real IPFS node and answer Workers; used for anything not pushed here
+// gateways that resolve names with a real IPFS node and answer Workers; used for anything not pushed here.
+// Two forms: "eth.sucks" is a subdomain gateway (<cid>.eth.sucks); "https://node.crop.top" is a path
+// gateway (/ipfs/<cid>/..., /ipns/<name>/...), which is what a croptop host on one hostname offers.
 const upstreams = (env) => (env.UPSTREAMS || "eth.sucks,eth.shop").split(",").map((s) => s.trim()).filter(Boolean);
+const upstreamURL = (up, kind, label, path = "/") => up.startsWith("http") ? `${up}/${kind}/${label}${path}` : `https://${label}.${kind === "ipfs" || label.startsWith("k") ? up : up.replace(/^eth\./, "")}${path}`;
 
 export default {
   async fetch(request, env, ctx) {
@@ -83,7 +86,7 @@ async function resolveKey(env, ipns) {
       }
     }
     for (const up of upstreams(env)) {
-      const c = await rootsOf(`https://${ipns}.${up}/`);
+      const c = await rootsOf(upstreamURL(up, "ipns", ipns));
       if (c) return c;
     }
     return null;
@@ -107,7 +110,7 @@ async function resolveENS(env, ens) {
   // the upstream gateways resolve ENS with their own node, which hears IPNS updates over pubsub
   return cached(env, "ens:" + ens, async () => {
     for (const up of upstreams(env)) {
-      const c = await rootsOf(`https://${ens}.${up.replace(/^eth\./, "")}/`);
+      const c = await rootsOf(upstreamURL(up, "ipns", ens));
       if (c) return c;
     }
     return null;
@@ -144,7 +147,7 @@ async function serveSite(request, env, cid, path, base) {
   let last = null;
   for (const up of upstreams(env)) {
     try {
-      const r = await fetch(`https://${cid}.${up}${path}${new URL(request.url).search}`, { headers: { ...UA, Accept: request.headers.get("Accept") || "*/*" }, redirect: "follow" });
+      const r = await fetch(upstreamURL(up, "ipfs", cid, path + new URL(request.url).search), { headers: { ...UA, Accept: request.headers.get("Accept") || "*/*" }, redirect: "follow" });
       last = r;
       if (r.status >= 500 || r.status === 429) continue;
       const h = new Headers();
@@ -303,7 +306,7 @@ async function debugResolve(env, name) {
   if (key) {
     await probe("delegated", async () => { const r = await fetch(`https://delegated-ipfs.dev/routing/v1/ipns/${key}`, { headers: { Accept: "application/vnd.ipfs.ipns-record" } }); return r.status + " " + r.headers.get("content-type"); });
   }
-  if (key) for (const up of upstreams(env)) await probe("upstream:" + up, () => rootsOf(`https://${key}.${up}/`));
+  if (key) for (const up of upstreams(env)) await probe("upstream:" + up, () => rootsOf(upstreamURL(up, "ipns", key)));
   await probe("resolveAny", () => resolveAny(env, name));
   return json(out);
 }
