@@ -13,3 +13,5 @@ of your own: paste the HTML as the content, drop the script on the editor.
 | Money in motion | `motion.html`, `motion.js` | generative canvas seeded by the post id, reads the site's highlight color |
 | Who is reading this | `wallet.html`, `wallet.js` | `croptop.wallet.connect`, read-only balance and ENS lookup |
 | This site, so far | `timeline.html` | `croptop.site()` and `croptop.prefix` to draw every post as a timeline |
+
+Each post also carries a `preview.js` (here as `<name>.preview.js`) that draws its frame in the feed. See the Previews section of `docs/widgets.md`.

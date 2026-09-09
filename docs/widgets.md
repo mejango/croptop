@@ -109,6 +109,25 @@ Post content:
 <script type="module" src="poll.js"></script>
 ```
 
+## Previews in the feed
+
+The feed shows the first lines of a post's text in its frame. A widget post
+can replace that with something alive. Attach `preview.js`:
+
+```js
+export default function (el, { post, site, env, size, base }) {
+  // el: the frame (size "frame") or the list row's thumbnail (size "row").
+  // Draw into el; it is positioned, clipped, and its clicks open the post.
+  el.textContent = post.title;
+}
+```
+
+The template mounts it for every such post on the page at once, so keep it
+light: one timer, small fetches, stop when `el.isConnected` is false. The
+six examples in `examples/widgets/*.preview.js` show live gas, self-balancing
+budget bars, the coin flow, a typing wallet address, the site timeline, and
+a countdown.
+
 ## Sharing widgets
 
 A widget lives in a post, so a site whose posts are widgets is a registry:
