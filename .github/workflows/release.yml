@@ -23,3 +23,37 @@ jobs:
           args: release --clean
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          HOMEBREW_TAP_GITHUB_TOKEN: ${{ secrets.HOMEBREW_TAP_GITHUB_TOKEN }}
+
+  macos-app:
+    needs: goreleaser
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build Croptop.app and Croptop.dmg
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          VER=${GITHUB_REF_NAME#v}
+          mkdir -p in out
+          gh release download "$GITHUB_REF_NAME" --pattern "croptop_${VER}_darwin_*.tar.gz" --dir in
+          installer/macos.sh "$VER" in out
+          gh release upload "$GITHUB_REF_NAME" out/Croptop.dmg --clobber
+
+  windows-installer:
+    needs: goreleaser
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build croptop-setup
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          $ver = $env:GITHUB_REF_NAME.TrimStart("v")
+          foreach ($arch in @("amd64", "arm64")) {
+            gh release download $env:GITHUB_REF_NAME --pattern "croptop_${ver}_windows_${arch}.zip" --dir in
+            Expand-Archive "in/croptop_${ver}_windows_${arch}.zip" "dist/windows_${arch}"
+            & "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" /DVersion=$ver /DArch=$arch installer\windows.iss
+          }
+          gh release upload $env:GITHUB_REF_NAME dist/croptop-setup-amd64.exe dist/croptop-setup-arm64.exe --clobber

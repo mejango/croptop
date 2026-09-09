@@ -55,13 +55,30 @@
     if (!state.status) { n.append("Console offline"); return; }
     const ipfs = state.status.ipfs;
     n.append(h("b", { class: ipfs.running ? "" : "off" }, ipfs.running ? "IPFS on" : "IPFS off"), `, ${ipfs.peers} peers`, h("br"), `croptop ${state.status.version}`);
+    if (state.status.update) {
+      n.append(h("div", { class: "update" }, `${state.status.latest} is out. `, h("a", { href: "#", onclick: async (e) => {
+        e.preventDefault(); e.target.textContent = "Updating…";
+        try {
+          await api("POST", "/v0/croptop/update", {});
+          n.replaceChildren("Restarting…");
+          // the process swaps itself out; wait for the new one and reload
+          for (let i = 0; i < 60; i++) { await new Promise((r) => setTimeout(r, 1000)); try { const st = await api("GET", "/v0/croptop/status"); if (st.version !== state.status.version) { location.reload(); return; } } catch {} }
+          toast("The update finished but the console did not come back. Start croptop again.", true);
+        } catch (err) { toast(err.message, true); e.target.textContent = "Update"; }
+      } }, "Update")));
+    }
+    n.append(h("div", { class: "quit" }, h("a", { href: "#", onclick: async (e) => {
+      e.preventDefault();
+      if (!confirm("Quit Croptop? Your sites stay online on IPFS and on their host; publishing needs the console.")) return;
+      try { await api("POST", "/v0/croptop/quit", {}); n.replaceChildren("Croptop has quit. Close this tab."); document.title = "Croptop (quit)"; } catch (err) { toast(err.message, true); }
+    } }, "Quit Croptop")));
   };
   const template = async () => state.template || (state.template = await api("GET", "/v0/croptop/template"));
 
   const renderRail = () => {
     const box = $("#sites");
     box.replaceChildren();
-    const cur = location.hash.split("/")[2];
+    const cur = (location.hash.split("/")[2] || "").split("?")[0];
     for (const s of state.sites) {
       if (s.archived) continue;
       box.append(h("a", { href: "#/site/" + s.id, class: s.id === cur ? "current" : "" }, s.name, h("small", {}, s.publishedElsewhere ? "published elsewhere" : s.domain || s.ipns.slice(0, 12) + "…")));
@@ -205,14 +222,27 @@
     catch (err) { toast(err.message, true); }
   };
 
-  views.site = async (id) => {
+  views.site = async (id, q = new URLSearchParams()) => {
     const site = siteById(id); if (!site) return views.home();
     const m = $("#main");
     const posts = await api("GET", `/v0/planets/my/${id}/articles`);
-    const grid = h("div", { class: "grid" }, h("a", { class: "tile new", href: `#/site/${id}/post/new` }, "+ New post"));
+    // Tag filter: the site's tags plus any others posts carry. Selected tags live in the URL so
+    // they survive editing and come back with you; a new post created while filtering gets them.
+    const selected = (q.get("tags") || "").split(",").filter(Boolean);
+    const tagQuery = selected.length ? `?tags=${selected.map(encodeURIComponent).join(",")}` : "";
+    const tags = { ...(site.tags || {}) };
+    for (const p of posts) for (const t of Object.keys(p.tags || {})) tags[t] ??= p.tags[t] || t;
+    const tagbar = h("div", { class: "tags" });
+    if (Object.keys(tags).length) {
+      const link = (t, label, on) => h("a", { class: "tag" + (on ? " on" : ""), href: `#/site/${id}` + (t === null ? "" : (() => { const next = on ? selected.filter((x) => x !== t) : [...selected, t]; return next.length ? `?tags=${next.map(encodeURIComponent).join(",")}` : ""; })()) }, label);
+      tagbar.append(link(null, "all", !selected.length));
+      for (const [t, label] of Object.entries(tags)) tagbar.append(link(t, label, selected.includes(t)));
+    }
+    const grid = h("div", { class: "grid" }, h("a", { class: "tile new", href: `#/site/${id}/post/new${tagQuery}` }, "+ New post"));
     // previews are iframes that take the mouse; a click inside one arrives as a message
-    window.onmessage = (e) => { if (e.data && e.data.type === "croptop-preview-click" && e.data.post) location.hash = `#/site/${id}/post/${e.data.post}`; };
+    window.onmessage = (e) => { if (e.data && e.data.type === "croptop-preview-click" && e.data.post) location.hash = `#/site/${id}/post/${e.data.post}${tagQuery}`; };
     for (const p of posts) {
+      if (selected.length && !selected.every((t) => p.tags && t in p.tags)) continue;
       const hasMedia = (p.attachments || []).some((a) => !a.startsWith("_"));
       const cover = (p.attachments || []).find((a) => /\.(png|jpe?g|gif|webp)$/i.test(a)) || (p.videoFilename ? "_videoThumbnail.png" : "_cover.png");
       const cov = h("div", { class: "cover" + (hasMedia || cover === "_cover.png" ? "" : " blank"), style: `background-image:url("/${id}/${p.id}/${encodeURIComponent(cover)}?t=${Math.floor(Date.now()/60000)}")` });
@@ -223,7 +253,7 @@
         cov.style.background = "var(--paper)";
         cov.append(h("iframe", { class: "tile-preview", src: `/${id}/?preview=${p.id}&t=${Math.floor(Date.now()/60000)}`, sandbox: "allow-scripts allow-same-origin", loading: "lazy", title: p.title || "preview", tabindex: "-1" }));
       }
-      grid.append(h("a", { class: "tile", href: `#/site/${id}/post/${p.id}` }, cov, h("div", { class: "meta" }, p.title || "Untitled", h("small", {}, when(p.created).toLocaleDateString()))));
+      grid.append(h("a", { class: "tile", href: `#/site/${id}/post/${p.id}${tagQuery}` }, cov, h("div", { class: "meta" }, p.title || "Untitled", h("small", {}, when(p.created).toLocaleDateString()))));
     }
     const strip = stateStrip(site);
     m.replaceChildren(
@@ -233,7 +263,7 @@
           h("a", { class: "btn quiet", href: `#/site/${id}/template` }, "Template"),
           h("a", { class: "btn quiet", href: `#/site/${id}/settings` }, "Settings"),
           h("button", { class: "btn hot", id: "publish", onclick: () => publish(site) }, "Publish"))),
-      strip, grid);
+      strip, tagbar, grid);
     if (site.croptopTemplate && site.croptopTemplate.forked) {
       api("GET", `/v0/croptop/sites/${id}/template/upstream`).then((st) => {
         if (!st.changed || !st.changed.length) return;
@@ -253,11 +283,13 @@
     }
   };
 
-  views.post = async (id, pid) => {
+  views.post = async (id, pid, q = new URLSearchParams()) => {
     const site = siteById(id); if (!site) return views.home();
     const m = $("#main");
     const isNew = pid === "new";
-    const post = isNew ? { title: "", content: "", tags: {}, attachments: [] } : await api("GET", `/v0/planets/my/${id}/articles/${pid}`);
+    const filterTags = (q.get("tags") || "").split(",").filter(Boolean);
+    const back = `#/site/${id}` + (filterTags.length ? `?tags=${filterTags.map(encodeURIComponent).join(",")}` : "");
+    const post = isNew ? { title: "", content: "", tags: Object.fromEntries(filterTags.map((t) => [t, (site.tags || {})[t] || t])), attachments: [] } : await api("GET", `/v0/planets/my/${id}/articles/${pid}`);
     const files = h("div", { class: "files" });
     const queued = new DataTransfer(); // files dropped on a new post, uploaded on create
     const imageNames = () => (post.attachments || []).filter((a) => /\.(png|jpe?g|gif|webp|avif)$/i.test(a)).concat([...queued.files].map((f) => f.name).filter((n) => /\.(png|jpe?g|gif|webp|avif)$/i.test(n)));
@@ -367,7 +399,7 @@
         const url = isNew ? `/v0/planets/my/${id}/articles` : `/v0/planets/my/${id}/articles/${pid}?attachmentMode=append`;
         const saved = await api("POST", url, fd, true);
         if (isNew && heroSelect.value) { const fd2 = new FormData(); fd2.set("heroImage", heroSelect.value); await api("POST", `/v0/planets/my/${id}/articles/${saved.id}`, fd2, true); }
-        toast("Saved. Publish the site to put it on IPFS."); location.hash = `#/site/${id}`;
+        toast("Saved. Publish the site to put it on IPFS."); location.hash = back;
       } catch (err) { toast(err.message, true); btn.disabled = false; btn.textContent = "Save post"; }
     }},
       h("label", {}, "Title", h("input", { type: "text", name: "title", value: post.title, autofocus: "" })),
@@ -388,11 +420,11 @@
         h("label", {}, "External link", h("input", { type: "text", name: "externalLink", value: post.externalLink || "" }))),
       h("div", { class: "row" },
         h("button", { class: "btn hot", type: "submit" }, isNew ? "Create post" : "Save post"),
-        h("a", { class: "btn quiet", href: `#/site/${id}` }, "Cancel"),
+        h("a", { class: "btn quiet", href: back }, "Cancel"),
         isNew ? null : h("a", { class: "btn quiet", href: `/${id}/${pid}/`, target: "_blank" }, "Preview"),
         isNew ? null : h("button", { class: "btn quiet danger", type: "button", onclick: async () => {
           if (!confirm("Delete this post? Buyers keep their NFTs; the page disappears from the site on the next publish.")) return;
-          await api("DELETE", `/v0/planets/my/${id}/articles/${pid}`); toast("Post deleted"); location.hash = `#/site/${id}`;
+          await api("DELETE", `/v0/planets/my/${id}/articles/${pid}`); toast("Post deleted"); location.hash = back;
         }}, "Delete")));
     m.replaceChildren(h("div", { class: "head" }, h("div", {}, h("h1", {}, isNew ? "New post" : "Edit post"), h("p", {}, site.name))), form);
     renderPreview();
@@ -557,7 +589,9 @@
 
   /* ---------- router ---------- */
   const route = async () => {
-    const parts = location.hash.replace(/^#\/?/, "").split("/").filter(Boolean);
+    const [path, query = ""] = location.hash.replace(/^#\/?/, "").split("?");
+    const parts = path.split("/").filter(Boolean);
+    const q = new URLSearchParams(query);
     renderRail();
     try {
       if (!parts.length) return views.home();
@@ -566,10 +600,10 @@
       if (parts[0] === "follow") return views.follow();
       if (parts[0] === "f" && parts[1]) return views.followed(parts[1]);
       if (parts[0] === "site" && parts[1]) {
-        if (parts[2] === "post" && parts[3]) return views.post(parts[1], parts[3]);
+        if (parts[2] === "post" && parts[3]) return views.post(parts[1], parts[3], q);
         if (parts[2] === "settings") return views.settings(parts[1]);
         if (parts[2] === "template") return views.template(parts[1]);
-        return views.site(parts[1]);
+        return views.site(parts[1], q);
       }
       return views.home();
     } catch (err) { toast(err.message, true); }

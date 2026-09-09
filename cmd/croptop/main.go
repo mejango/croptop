@@ -27,6 +27,7 @@ import (
 	"github.com/mejango/croptop/internal/server"
 	"github.com/mejango/croptop/internal/store"
 	"github.com/mejango/croptop/internal/tpl"
+	"github.com/mejango/croptop/internal/update"
 	"github.com/mejango/croptop/templates"
 	"github.com/mejango/croptop/web"
 )
@@ -51,6 +52,7 @@ const usage = `croptop — publish Croptop sites to IPFS
   croptop template list | install <cid or name> | publish <dir>
   croptop engine           print the active ipfs engine (kubo or embedded)
   croptop version
+  croptop update           install the newest release over this binary
 
 Flags for serve: --listen <addr>, --role node (headless: no browser, log only)
   croptop host --domain crop.top --listen 127.0.0.1:8090 [--root croptop.eth] [--announce /dns4/…/tcp/…]
@@ -108,6 +110,21 @@ func run(args []string) error {
 	rest := fs.Args()
 
 	switch cmd {
+	case "update":
+		rel, err := update.Latest(context.Background())
+		if err != nil {
+			return err
+		}
+		if !update.Newer(version, rel.Version()) {
+			fmt.Printf("croptop %s is the newest release\n", version)
+			return nil
+		}
+		exe, err := update.Apply(context.Background(), rel, println)
+		if err != nil {
+			return err
+		}
+		fmt.Println("run croptop again to use", rel.Version(), "at", exe)
+		return nil
 	case "version":
 		fmt.Println("croptop", version, "kubo", ipfs.KuboVersion)
 		return nil
@@ -503,7 +520,7 @@ func (a *app) serve(listen string, noOpen bool) error {
 	ui, _ := fs.Sub(web.FS, ".")
 	srv := &server.Server{
 		Store: a.store, Pub: a.pub, Follow: a.follow, Tpl: a.tpl, Node: a.engine, Cfg: a.cfg, UI: ui, Templates: a.tmpl,
-		Version: version, DataDir: a.dataDir, Log: println,
+		Version: version, DataDir: a.dataDir, Log: println, Quit: cancel,
 	}
 	url := "http://" + strings.Replace(a.cfg.Listen, "0.0.0.0", "127.0.0.1", 1)
 	println("console at " + url)

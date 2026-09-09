@@ -66,6 +66,9 @@ h2 { font-size: 18px; }
 .state .hosts { color: var(--muted); font-size: 14px; white-space: nowrap; }
 
 /* post grid mirrors the site's own tiles */
+.tags { display: flex; flex-wrap: wrap; gap: 8px; margin: 0 0 14px; }
+.tags .tag { font-family: var(--pixel); font-size: 12px; padding: 6px 10px; border: 2px solid var(--ink); background: var(--paper); color: var(--ink); text-decoration: none; }
+.tags .tag.on { background: var(--ink); color: var(--paper); }
 .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); gap: 14px; }
 .tile { display: block; border: 2px solid var(--ink); background: var(--paper); }
 .tile .cover { aspect-ratio: 1; background: var(--ink) center/cover no-repeat; display: flex; align-items: flex-end; }
@@ -148,3 +151,7 @@ textarea.code[disabled] { color: var(--muted); }
 .updates { border: 2px solid var(--attention); background: #fff8e6; padding: 12px 14px; margin-bottom: 14px; display: grid; gap: 8px; }
 .updates .upd code { flex: 1; }
 .help.warn { color: #b7791f; }
+
+.node .update { margin-top: 8px; padding: 6px 8px; background: #fff0fa; border: 2px solid var(--ink); }
+.node .update a { font-weight: 700; }
+.node .quit { margin-top: 10px; opacity: .6; font-size: 12px; }

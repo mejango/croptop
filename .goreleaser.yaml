@@ -20,6 +20,30 @@ archives:
       - README.md
       - LICENSE
 
+nfpms:
+  - package_name: croptop
+    vendor: mejango
+    homepage: https://crop.top
+    maintainer: jango <me.jango@protonmail.com>
+    description: Publish websites peer to peer. The console, the IPFS node, and the host in one binary.
+    license: MIT
+    formats: [deb, rpm]
+    bindir: /usr/bin
+
+brews:
+  - name: croptop
+    homepage: https://crop.top
+    description: Publish websites peer to peer
+    license: MIT
+    repository:
+      owner: mejango
+      name: homebrew-tap
+      token: "{{ .Env.HOMEBREW_TAP_GITHUB_TOKEN }}"
+    skip_upload: '{{ if eq .Env.HOMEBREW_TAP_GITHUB_TOKEN "" }}true{{ else }}false{{ end }}'
+    directory: Formula
+    install: bin.install "croptop"
+    test: system "#{bin}/croptop", "version"
+
 checksum:
   name_template: checksums.txt
 

@@ -14,6 +14,7 @@ import (
 	"regexp"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/mejango/croptop/internal/config"
 	"github.com/mejango/croptop/internal/follow"
@@ -34,8 +35,14 @@ type Server struct {
 	UI        fs.FS
 	Templates fs.FS
 	Version   string
-	DataDir   string
-	Log       func(string)
+	// Quit stops the process; set by the command line so the console can offer it.
+	Quit func()
+
+	relMu   sync.Mutex
+	rel     string
+	relAt   time.Time
+	DataDir string
+	Log     func(string)
 
 	mu sync.Mutex // serializes render/publish per process
 }

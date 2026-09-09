@@ -2,10 +2,13 @@
 // that sites push to on publish, and a registry of free names. No IPFS node:
 // pushed sites live in R2, everything else is fetched from a public gateway.
 
+import installSh from "../../scripts/install.sh";
+import installPs1 from "../../scripts/install.ps1";
+
 const SKEW = 10 * 60;
 const RESOLVE_TTL = 60;
 const NAME_RE = /^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$/;
-const RESERVED = new Set(["www", "api", "v0", "ipfs", "ipns", "push", "host", "admin", "mail", "static", "assets", "docs", "app", "directory"]);
+const RESERVED = new Set(["www", "api", "v0", "ipfs", "ipns", "push", "host", "admin", "mail", "static", "assets", "docs", "app", "directory", "install", "install.sh", "install.ps1", "download"]);
 const MAX_PUSH = 100 << 20;
 const UA = { "User-Agent": "croptop-host/1 (+https://crop.top)" };
 // gateways that resolve names with a real IPFS node and answer Workers; used for anything not pushed here.
@@ -41,6 +44,9 @@ async function route(request, env, ctx) {
 async function serveBare(request, url, env, ctx) {
   const p = url.pathname;
   if (p.startsWith("/v0/host/")) return api(request, url, env, ctx);
+  if (p === "/install.sh") return new Response(installSh, { headers: { "content-type": "text/x-shellscript; charset=utf-8", "cache-control": "public, max-age=300" } });
+  if (p === "/install.ps1") return new Response(installPs1, { headers: { "content-type": "text/plain; charset=utf-8", "cache-control": "public, max-age=300" } });
+  if (p === "/install" || p === "/download") return Response.redirect("https://github.com/" + "mejango/croptop/releases/latest", 302);
   if (p === "/directory" || (p === "/" && !env.ROOT)) return directory(env);
   const [name, ...restParts] = p.slice(1).split("/");
   const entry = name && (await entryByName(env, name));

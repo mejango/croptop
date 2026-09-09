@@ -12,22 +12,25 @@ from the Mac app and back.
 
 ## Install
 
-Download the archive for your system from the
-[releases page](https://github.com/mejango/croptop/releases), unpack it, and
-put `croptop` somewhere on your `PATH`.
+One line, any platform:
 
-- **macOS**: the binary is not notarized yet. After unpacking, run
-  `xattr -d com.apple.quarantine croptop` once, or right-click, Open.
-- **Linux**: `chmod +x croptop`.
-- **Windows**: unzip and run `croptop.exe` from a terminal. Windows Defender
-  may ask on first launch because the node opens a listening port.
-
-Or build from source with Go 1.27+:
-
+```sh
+curl -fsSL https://crop.top/install.sh | sh        # macOS and Linux
 ```
-git clone --recurse-submodules https://github.com/mejango/croptop
-cd croptop && go build ./cmd/croptop
+
+```powershell
+irm https://crop.top/install.ps1 | iex             # Windows
 ```
+
+Or pick what fits:
+
+- **macOS app**: download `Croptop.dmg` from the [latest release](https://github.com/mejango/croptop/releases/latest), drag Croptop to Applications. It is not notarized yet, so the first time right-click it and choose Open.
+- **Homebrew**: `brew install mejango/tap/croptop`
+- **Windows installer**: `croptop-setup.exe` from the latest release. Windows will show a SmartScreen notice because the installer is unsigned; choose More info, Run anyway.
+- **Debian, Ubuntu**: the `.deb` from the latest release. **Fedora**: the `.rpm`.
+- **Plain binary**: the `.tar.gz` or `.zip` for your platform.
+
+Croptop updates itself: the console shows a banner when a new release is out, and `croptop update` does the same from a terminal.
 
 ## First run
 
@@ -161,6 +164,12 @@ their own resolution caches and can show the previous version for a long
 while after that, whichever engine published; the console's site page
 links the version the network holds. Set `CROPTOP_DEBUG=1` to see the
 engine's log lines.
+
+## Hosting
+
+`croptop host` makes a server a gateway and pin host for a domain, the way
+crop.top runs. Sites push to it on publish and stay up while your computer is
+closed. See `docs/host.md`.
 
 ## Commands
 

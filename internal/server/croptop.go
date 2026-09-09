@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"strings"
@@ -13,6 +14,7 @@ import (
 	"github.com/mejango/croptop/internal/publish"
 	"github.com/mejango/croptop/internal/render"
 	"github.com/mejango/croptop/internal/store"
+	"github.com/mejango/croptop/internal/update"
 )
 
 // routesCroptop are the UI's own routes, beyond Planet's API.
@@ -21,8 +23,11 @@ func (s *Server) routesCroptop(mux *http.ServeMux) {
 		ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
 		defer cancel()
 		info, err := s.Node.Info(ctx)
+		latest := s.latestRelease()
 		writeJSON(w, 200, map[string]any{
 			"version":  s.Version,
+			"latest":   latest,
+			"update":   update.Newer(s.Version, latest),
 			"dataDir":  s.DataDir,
 			"listen":   s.Cfg.Listen,
 			"passcode": s.Cfg.HasPasscode(),
@@ -31,6 +36,38 @@ func (s *Server) routesCroptop(mux *http.ServeMux) {
 				"version": info.Version, "lastError": s.Node.LastError(),
 			},
 		})
+	})
+	mux.HandleFunc("POST /v0/croptop/update", func(w http.ResponseWriter, r *http.Request) {
+		rel, err := update.Latest(r.Context())
+		if err != nil {
+			writeErr(w, 502, err)
+			return
+		}
+		if !update.Newer(s.Version, rel.Version()) {
+			writeErr(w, 400, fmt.Errorf("croptop %s is already the newest release", s.Version))
+			return
+		}
+		exe, err := update.Apply(r.Context(), rel, func(m string) { s.log("%s", m) })
+		if err != nil {
+			writeErr(w, 500, err)
+			return
+		}
+		writeJSON(w, 200, map[string]any{"installed": rel.Version(), "restarting": true})
+		go func() {
+			time.Sleep(500 * time.Millisecond) // let the response leave
+			s.log("restarting as croptop %s", rel.Version())
+			if err := update.Restart(exe); err != nil {
+				s.log("restart failed: %v (start croptop again by hand)", err)
+			}
+		}()
+	})
+	mux.HandleFunc("POST /v0/croptop/quit", func(w http.ResponseWriter, r *http.Request) {
+		if s.Quit == nil {
+			writeErr(w, 400, fmt.Errorf("this console cannot quit itself"))
+			return
+		}
+		writeJSON(w, 200, map[string]any{"quitting": true})
+		go func() { time.Sleep(300 * time.Millisecond); s.Quit() }()
 	})
 	mux.HandleFunc("POST /v0/croptop/markdown", func(w http.ResponseWriter, r *http.Request) {
 		b, _ := io.ReadAll(io.LimitReader(r.Body, 4<<20))
@@ -234,4 +271,20 @@ func (s *Server) routesCroptop(mux *http.ServeMux) {
 		}
 		writeJSON(w, 200, map[string]string{"url": render.SiteURL(site)})
 	})
+}
+
+// latestRelease is the newest release tag, checked at most hourly.
+func (s *Server) latestRelease() string {
+	s.relMu.Lock()
+	defer s.relMu.Unlock()
+	if time.Since(s.relAt) < time.Hour {
+		return s.rel
+	}
+	s.relAt = time.Now()
+	ctx, cancel := context.WithTimeout(context.Background(), 4*time.Second)
+	defer cancel()
+	if r, err := update.Latest(ctx); err == nil {
+		s.rel = r.Version()
+	}
+	return s.rel
 }
