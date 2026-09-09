@@ -6,8 +6,12 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"io/fs"
+	"mime/multipart"
 	"net/http"
 	"net/url"
+	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
@@ -62,23 +66,13 @@ func hostDomain(base string) (string, error) {
 	return strings.ToLower(u.Hostname()), nil
 }
 
-// blockSource is what the embedded engine adds beyond Engine: the bytes of a
-// site and the record that names them. The kubo engine cannot push.
-type blockSource interface {
-	WriteBlocks(ctx context.Context, root string, w io.Writer) error
-	Record(key string) []byte
-}
-
-// Push uploads the published site to its host so the host serves it at once
-// and keeps its IPNS record alive.
+// Push uploads the published site's files to its host so the host serves
+// them at once and keeps the IPNS record alive. The host checks that the
+// files hash to cid before it believes the sequence.
 func (p *Publisher) Push(ctx context.Context, site *store.Site, cid string, seq uint64) error {
 	base := HostOf(site)
 	if base == "" {
 		return nil
-	}
-	src, ok := p.Node.(blockSource)
-	if !ok {
-		return fmt.Errorf("pushing needs the embedded engine")
 	}
 	domain, err := hostDomain(base)
 	if err != nil {
@@ -89,20 +83,46 @@ func (p *Publisher) Push(ctx context.Context, site *store.Site, cid string, seq 
 	if err != nil {
 		return err
 	}
+	dir := p.Store.PublicDir(site.ID)
 	pr, pw := io.Pipe()
-	go func() { pw.CloseWithError(src.WriteBlocks(ctx, cid, pw)) }()
+	mw := multipart.NewWriter(pw)
+	go func() {
+		err := filepath.WalkDir(dir, func(path string, d fs.DirEntry, err error) error {
+			if err != nil || d.IsDir() {
+				return err
+			}
+			rel, _ := filepath.Rel(dir, path)
+			part, err := mw.CreateFormFile("file:"+filepath.ToSlash(rel), filepath.Base(rel))
+			if err != nil {
+				return err
+			}
+			f, err := os.Open(path)
+			if err != nil {
+				return err
+			}
+			defer f.Close()
+			_, err = io.Copy(part, f)
+			return err
+		})
+		if err == nil {
+			err = mw.Close()
+		}
+		pw.CloseWithError(err)
+	}()
 	req, err := http.NewRequestWithContext(ctx, "POST", base+"/v0/host/push", pr)
 	if err != nil {
 		return err
 	}
-	req.Header.Set("Content-Type", "application/octet-stream")
+	req.Header.Set("Content-Type", mw.FormDataContentType())
 	req.Header.Set("X-Croptop-Ipns", site.IPNS)
 	req.Header.Set("X-Croptop-Cid", cid)
 	req.Header.Set("X-Croptop-Seq", strconv.FormatUint(seq, 10))
 	req.Header.Set("X-Croptop-Time", strconv.FormatInt(now, 10))
 	req.Header.Set("X-Croptop-Sig", base64.StdEncoding.EncodeToString(sig))
-	if rec := src.Record(site.ID); len(rec) > 0 {
-		req.Header.Set("X-Croptop-Record", base64.StdEncoding.EncodeToString(rec))
+	if rs, ok := p.Node.(interface{ Record(string) []byte }); ok {
+		if rec := rs.Record(site.ID); len(rec) > 0 {
+			req.Header.Set("X-Croptop-Record", base64.StdEncoding.EncodeToString(rec))
+		}
 	}
 	resp, err := (&http.Client{Timeout: 10 * time.Minute}).Do(req)
 	if err != nil {

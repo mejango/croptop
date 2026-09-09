@@ -5,6 +5,8 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
+	"io"
+	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -72,14 +74,28 @@ func TestClaimPushServe(t *testing.T) {
 		t.Fatalf("second claim: want 409, got %s", resp2.Status)
 	}
 
-	// push the site
-	var stream bytes.Buffer
-	if err := site.WriteBlocks(ctx, root, &stream); err != nil {
-		t.Fatal(err)
+	// push the site as files
+	form := func() (*bytes.Buffer, string) {
+		var buf bytes.Buffer
+		mw := multipart.NewWriter(&buf)
+		filepath.WalkDir(dir, func(path string, d os.DirEntry, err error) error {
+			if d.IsDir() {
+				return nil
+			}
+			rel, _ := filepath.Rel(dir, path)
+			w, _ := mw.CreateFormFile("file:"+filepath.ToSlash(rel), filepath.Base(rel))
+			b, _ := os.ReadFile(path)
+			w.Write(b)
+			return nil
+		})
+		mw.Close()
+		return &buf, mw.FormDataContentType()
 	}
+	body3, ctype := form()
 	psig, _ := site.Keystore().Sign("site1", PushMessage("crop.test", ipnsName, root, 3, now))
-	preq, _ := http.NewRequest("POST", srv.URL+"/v0/host/push", bytes.NewReader(stream.Bytes()))
+	preq, _ := http.NewRequest("POST", srv.URL+"/v0/host/push", body3)
 	preq.Host = "crop.test"
+	preq.Header.Set("Content-Type", ctype)
 	preq.Header.Set("X-Croptop-Ipns", ipnsName)
 	preq.Header.Set("X-Croptop-Cid", root)
 	preq.Header.Set("X-Croptop-Seq", "3")
@@ -123,7 +139,9 @@ func TestClaimPushServe(t *testing.T) {
 	preq.Header.Set("X-Croptop-Seq", "2")
 	psig2, _ := site.Keystore().Sign("site1", PushMessage("crop.test", ipnsName, root, 2, now))
 	preq.Header.Set("X-Croptop-Sig", base64.StdEncoding.EncodeToString(psig2))
-	preq.Body = http.NoBody
+	body4, ctype4 := form()
+	preq.Body = io.NopCloser(body4)
+	preq.Header.Set("Content-Type", ctype4)
 	if r, _ := http.DefaultClient.Do(preq); r.StatusCode != 409 {
 		t.Fatalf("stale push: want 409, got %s", r.Status)
 	}

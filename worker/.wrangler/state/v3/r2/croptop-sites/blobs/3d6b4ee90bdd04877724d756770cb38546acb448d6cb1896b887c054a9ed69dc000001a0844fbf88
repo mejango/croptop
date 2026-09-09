@@ -1,0 +1,31 @@
+{
+  "articleType" : 0,
+  "attachments" : [
+    "_cover.png",
+    "budget.js",
+    "preview.js"
+  ],
+  "cids" : {
+    "_cover.png" : "QmPFGhF2o5ZLKdCxaEN53nFefxrJK4CcVvywR4AqyHWWsL",
+    "budget.js" : "Qmdx8My13x5Z2c7QWWqYK1kCqrjKsZhKxAf5C98ZhniJ6g",
+    "preview.js" : "QmPcXgwbZoR6M7QNHhoMvRVdeTxT5EpmqoZJwj6itEG3P2"
+  },
+  "content" : "<p>Campaigns say how much they need. Readers should be able to say how they would spend it. Drag a slider; the others rebalance so the total stays whole. Nothing is sent anywhere. Your split is remembered on this device.</p>\n<div id=\"budget\" style=\"border:1px solid var(--foreground-secondary-color);padding:16px;display:grid;gap:14px\"></div>\n<p style=\"font-size:13px;opacity:.6\">How: <code>budget.js</code> attached to this post. Sliders, five bars, <code>localStorage</code>. Fork the idea for a real budget by loading numbers from an attached <code>budget.json</code>.</p>\n<script type=\"module\" src=\"budget.js\"></script>\n",
+  "contentRendered" : "<p>Campaigns say how much they need. Readers should be able to say how they would spend it. Drag a slider; the others rebalance so the total stays whole. Nothing is sent anywhere. Your split is remembered on this device.</p>\n<div id=\"budget\" style=\"border:1px solid var(--foreground-secondary-color);padding:16px;display:grid;gap:14px\"></div>\n<p style=\"font-size:13px;opacity:.6\">How: <code>budget.js</code> attached to this post. Sliders, five bars, <code>localStorage</code>. Fork the idea for a real budget by loading numbers from an attached <code>budget.json</code>.</p>\n<script type=\"module\" src=\"budget.js\"></script>\n",
+  "created" : 810588410.1581299,
+  "externalLink" : "",
+  "hasAudio" : false,
+  "hasVideo" : false,
+  "heroImage" : "https://k51qzi5uqu5dilqjwgdm3zj0g24zaowqfxoargdm1lbj7s4frpwuzqp2tmxm4g.eth.sucks/214DD1F7-572A-491E-82CA-D587DB49AFB4/_cover.png",
+  "heroImageFilename" : "_cover.png",
+  "heroImageHeight" : 512,
+  "heroImageURL" : "https://k51qzi5uqu5dilqjwgdm3zj0g24zaowqfxoargdm1lbj7s4frpwuzqp2tmxm4g.eth.sucks/214DD1F7-572A-491E-82CA-D587DB49AFB4/_cover.png",
+  "heroImageWidth" : 512,
+  "id" : "214DD1F7-572A-491E-82CA-D587DB49AFB4",
+  "link" : "/214DD1F7-572A-491E-82CA-D587DB49AFB4/",
+  "slug" : "",
+  "tags" : {
+
+  },
+  "title" : "Spend it your way"
+}

@@ -1,0 +1,29 @@
+{
+  "articleType" : 0,
+  "attachments" : [
+    "_cover.png",
+    "preview.js"
+  ],
+  "cids" : {
+    "_cover.png" : "Qmaz8NQkZbbVN5MdxoNXrj3cu7mudNdbsY3wPi7sSHDXvS",
+    "preview.js" : "QmZeerAfAV2wkoTysfh98ajMH2ZV6NavSsYkHUf4VvuMZH"
+  },
+  "content" : "<p>Every campaign runs against a clock. This one counts down to the 2026 US midterm election, November 3.</p>\n<div id=\"cd\" style=\"display:grid;grid-template-columns:repeat(4,1fr);gap:8px;text-align:center;border:1px solid var(--foreground-secondary-color);padding:16px\">\n  <div><div id=\"cd-d\" style=\"font-size:40px\">0</div><div style=\"font-size:12px;opacity:.6\">days</div></div>\n  <div><div id=\"cd-h\" style=\"font-size:40px\">0</div><div style=\"font-size:12px;opacity:.6\">hours</div></div>\n  <div><div id=\"cd-m\" style=\"font-size:40px\">0</div><div style=\"font-size:12px;opacity:.6\">minutes</div></div>\n  <div><div id=\"cd-s\" style=\"font-size:40px\">0</div><div style=\"font-size:12px;opacity:.6\">seconds</div></div>\n</div>\n<p style=\"font-size:13px;opacity:.6\">How: eight lines inline. Change the date and it counts down to anything.</p>\n<script type=\"module\">\nconst target = new Date(\"2026-11-03T12:00:00-05:00\");\nconst tick = () => { let s = Math.max(0, Math.floor((target - Date.now()) / 1000));\n  for (const [id, div] of [[\"cd-d\", 86400], [\"cd-h\", 3600], [\"cd-m\", 60], [\"cd-s\", 1]]) { document.getElementById(id).textContent = Math.floor(s / div); s %= div; } };\ntick(); setInterval(tick, 1000);\n</script>\n",
+  "contentRendered" : "<p>Every campaign runs against a clock. This one counts down to the 2026 US midterm election, November 3.</p>\n<div id=\"cd\" style=\"display:grid;grid-template-columns:repeat(4,1fr);gap:8px;text-align:center;border:1px solid var(--foreground-secondary-color);padding:16px\">\n  <div><div id=\"cd-d\" style=\"font-size:40px\">0</div><div style=\"font-size:12px;opacity:.6\">days</div></div>\n  <div><div id=\"cd-h\" style=\"font-size:40px\">0</div><div style=\"font-size:12px;opacity:.6\">hours</div></div>\n  <div><div id=\"cd-m\" style=\"font-size:40px\">0</div><div style=\"font-size:12px;opacity:.6\">minutes</div></div>\n  <div><div id=\"cd-s\" style=\"font-size:40px\">0</div><div style=\"font-size:12px;opacity:.6\">seconds</div></div>\n</div>\n<p style=\"font-size:13px;opacity:.6\">How: eight lines inline. Change the date and it counts down to anything.</p>\n<script type=\"module\">\nconst target = new Date(\"2026-11-03T12:00:00-05:00\");\nconst tick = () => { let s = Math.max(0, Math.floor((target - Date.now()) / 1000));\n  for (const [id, div] of [[\"cd-d\", 86400], [\"cd-h\", 3600], [\"cd-m\", 60], [\"cd-s\", 1]]) { document.getElementById(id).textContent = Math.floor(s / div); s %= div; } };\ntick(); setInterval(tick, 1000);\n</script>\n",
+  "created" : 810588410.0645571,
+  "externalLink" : "",
+  "hasAudio" : false,
+  "hasVideo" : false,
+  "heroImage" : "https://k51qzi5uqu5dilqjwgdm3zj0g24zaowqfxoargdm1lbj7s4frpwuzqp2tmxm4g.eth.sucks/0A5773AE-1409-4234-AF21-2827119F7D67/_cover.png",
+  "heroImageFilename" : "_cover.png",
+  "heroImageHeight" : 512,
+  "heroImageURL" : "https://k51qzi5uqu5dilqjwgdm3zj0g24zaowqfxoargdm1lbj7s4frpwuzqp2tmxm4g.eth.sucks/0A5773AE-1409-4234-AF21-2827119F7D67/_cover.png",
+  "heroImageWidth" : 512,
+  "id" : "0A5773AE-1409-4234-AF21-2827119F7D67",
+  "link" : "/0A5773AE-1409-4234-AF21-2827119F7D67/",
+  "slug" : "",
+  "tags" : {
+
+  },
+  "title" : "The clock every campaign runs against"
+}

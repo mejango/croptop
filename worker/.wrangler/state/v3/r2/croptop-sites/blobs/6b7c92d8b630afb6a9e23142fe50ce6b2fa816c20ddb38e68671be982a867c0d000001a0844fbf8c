@@ -1,0 +1,25 @@
+{
+  "attributes" : [
+    {
+      "trait_type" : "title",
+      "value" : "Spend it your way"
+    },
+    {
+      "trait_type" : "title_sha256",
+      "value" : "9f5483c252f3830df3a8af836e1893b2a3388c40091642ebd013861b88b7211a"
+    },
+    {
+      "trait_type" : "content_sha256",
+      "value" : "1feb0b2a1f8e16d3c9120986df222975145ce47532861fc7ffcf55c50d9c8c36"
+    },
+    {
+      "trait_type" : "created_at",
+      "value" : "1788895610"
+    }
+  ],
+  "description" : "",
+  "external_url" : "https://k51qzi5uqu5dilqjwgdm3zj0g24zaowqfxoargdm1lbj7s4frpwuzqp2tmxm4g.eth.sucks/214DD1F7-572A-491E-82CA-D587DB49AFB4/",
+  "image" : "https://ipfs.io/ipfs/Qmdx8My13x5Z2c7QWWqYK1kCqrjKsZhKxAf5C98ZhniJ6g",
+  "mimeType" : "text/javascript",
+  "name" : "Spend it your way"
+}

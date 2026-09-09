@@ -1,0 +1,22 @@
+{
+  "arbitrumMainnetCollectionAddress" : "",
+  "arbitrumMainnetRPC" : "https://arbitrum-one-rpc.publicnode.com",
+  "arbitrumSepoliaCollectionAddress" : "",
+  "arbitrumSepoliaRPC" : "https://arbitrum-sepolia.gateway.tenderly.co",
+  "baseMainnetCollectionAddress" : "",
+  "baseMainnetRPC" : "https://base-rpc.publicnode.com",
+  "baseSepoliaCollectionAddress" : "",
+  "baseSepoliaRPC" : "https://sepolia.base.org",
+  "collectionCategory" : "0",
+  "curatorAddress" : "",
+  "ethereumMainnetCollectionAddress" : "0x929B6c04fE40fb265Cd0AbB7928826DC965E540D",
+  "ethereumMainnetRPC" : "https://ethereum-rpc.publicnode.com",
+  "ethereumSepoliaCollectionAddress" : "0x929B6c04fE40fb265Cd0AbB7928826DC965E540D",
+  "ethereumSepoliaRPC" : "https://ethereum-sepolia-rpc.publicnode.com",
+  "highlightColor" : "#5498E3",
+  "maintenanceMessage" : "Under maintenance: this site is moving to Juicebox v6. Buying and deploying may not work yet.",
+  "optimismMainnetCollectionAddress" : "",
+  "optimismMainnetRPC" : "https://optimism-rpc.publicnode.com",
+  "optimismSepoliaCollectionAddress" : "",
+  "optimismSepoliaRPC" : "https://sepolia.optimism.io"
+}

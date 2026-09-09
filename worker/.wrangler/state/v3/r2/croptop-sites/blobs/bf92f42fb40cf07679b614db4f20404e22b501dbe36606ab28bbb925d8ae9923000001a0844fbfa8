@@ -1,0 +1,21 @@
+{
+  "attributes" : [
+    {
+      "trait_type" : "title",
+      "value" : "Doop"
+    },
+    {
+      "trait_type" : "title_sha256",
+      "value" : "b98b5ef7e557ecd94251f9ab52b26560f98bd358470c5cbf46a175d5a58e8985"
+    },
+    {
+      "trait_type" : "created_at",
+      "value" : "1788886920"
+    }
+  ],
+  "description" : "",
+  "external_url" : "https://k51qzi5uqu5dilqjwgdm3zj0g24zaowqfxoargdm1lbj7s4frpwuzqp2tmxm4g.eth.sucks/A54AAE12-27B5-4FE1-8654-E5027C4ECC86/",
+  "image" : "https://ipfs.io/ipfs/QmRQr3hVJtc5QR7Mbc889LpxJsfxfCSNt4dT2szbz11Gr1",
+  "mimeType" : "image/png",
+  "name" : "Doop"
+}

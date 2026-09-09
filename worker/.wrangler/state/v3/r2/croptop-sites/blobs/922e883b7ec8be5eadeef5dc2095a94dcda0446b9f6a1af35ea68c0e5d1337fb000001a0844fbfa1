@@ -1,0 +1,25 @@
+{
+  "attributes" : [
+    {
+      "trait_type" : "title",
+      "value" : "Money in motion"
+    },
+    {
+      "trait_type" : "title_sha256",
+      "value" : "094f206fdb54331d17baa86eef449c195a7f740577b047a79cd6ba85c3700c74"
+    },
+    {
+      "trait_type" : "content_sha256",
+      "value" : "5b12336b2708ba6313f54f9419e9c849735472dd1ee014d2c31ff7ab4d4d6a13"
+    },
+    {
+      "trait_type" : "created_at",
+      "value" : "1788895610"
+    }
+  ],
+  "description" : "",
+  "external_url" : "https://k51qzi5uqu5dilqjwgdm3zj0g24zaowqfxoargdm1lbj7s4frpwuzqp2tmxm4g.eth.sucks/791E7E49-6C04-4D90-894F-3A5222D556B8/",
+  "image" : "https://ipfs.io/ipfs/QmecVtgrSYDV3usbtHhYY9qte3Teiz9xhveheyHe8hah9K",
+  "mimeType" : "text/javascript",
+  "name" : "Money in motion"
+}

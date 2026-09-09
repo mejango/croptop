@@ -1,0 +1,78 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta charset="UTF-8">
+    <meta content="True" name="HandheldFriendly">
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=auto">
+    <meta name="theme-color" content="#fff" media="(prefers-color-scheme: light)">
+    <meta name="theme-color" content="#1c1c1e" media="(prefers-color-scheme: dark)">
+    <link rel="stylesheet" href="../assets/style.css?sha256=0163ee8849d6dff51a8eab13f620f9684a2650be978414a301948f99af9a333e&t=1788926166">
+    <link rel="preload" href="../planet.json" as="fetch" type="application/json" crossorigin="anonymous">
+    <title>Spend it your way</title>
+    <script>
+      let userAgentRegex = /Planet\/\S*/;
+      window.PLANET = {
+        visitedFromPlanetClient: !!navigator.userAgent.match(userAgentRegex),
+        assetsPrefix: '../',
+      };
+
+      window.addEventListener('DOMContentLoaded', e => {
+        
+        
+      });
+    </script>
+    <script>
+      let env = {};
+    </script>
+    
+    <link rel="icon" href="../avatar.png?t=1788926166" sizes="144x144">
+    <link rel="shortcut icon" href="../favicon.ico?t=1788926166" type="image/png">
+    
+    
+    
+    
+    <style>
+    :root {
+      
+      --link-color: #5498E3;
+      
+    }
+    </style>
+  </head>
+  <body>
+    
+    <div class="wrapper">
+      <div class="main">
+        
+        
+<div id="body-dom" >
+  <div class="body-content centered-content content-top-offset">
+    <div id="post-header" class="post-header body-header mobile-padding negative-space">
+      <div id="post-title">
+        <span id="post-date">9.8.26</span>
+        <span id="post-name">Spend it your way</span>
+      </div>
+      
+    </div>
+
+    
+
+    
+
+    <div id="post-content" class="mobile-padding">
+    
+      <p>Campaigns say how much they need. Readers should be able to say how they would spend it. Drag a slider; the others rebalance so the total stays whole. Nothing is sent anywhere. Your split is remembered on this device.</p>
+<div id="budget" style="border:1px solid var(--foreground-secondary-color);padding:16px;display:grid;gap:14px"></div>
+<p style="font-size:13px;opacity:.6">How: <code>budget.js</code> attached to this post. Sliders, five bars, <code>localStorage</code>. Fork the idea for a real budget by loading numbers from an attached <code>budget.json</code>.</p>
+<script type="module" src="budget.js"></script>
+
+    
+    </div>
+  </div>
+</div>
+
+      </div>
+    </div>
+    
+  </body>
+</html>

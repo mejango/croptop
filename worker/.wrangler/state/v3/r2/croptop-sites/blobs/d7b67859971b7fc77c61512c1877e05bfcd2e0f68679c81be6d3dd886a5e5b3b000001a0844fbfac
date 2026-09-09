@@ -1,0 +1,15 @@
+Who is reading this
+
+<p>Posts can talk to the reader's wallet. This one asks who you are and shows you your own balance, read-only. Nothing is signed, nothing is sent, nothing leaves your browser.</p>
+<div style="border:1px solid var(--foreground-secondary-color);padding:16px">
+  <button id="wallet-connect" style="font:inherit;padding:8px 14px;cursor:pointer">Connect wallet</button>
+  <div id="wallet-card" hidden>
+    <div style="font-size:12px;opacity:.6">you</div><div id="wallet-address" style="font-size:20px">…</div>
+    <div id="wallet-balance" style="opacity:.8;margin:6px 0 12px">…</div>
+    <button id="wallet-pledge-btn" style="font:inherit;padding:8px 14px;cursor:pointer">Pledge to follow the money</button>
+    <div id="wallet-pledge" style="font-size:13px;margin-top:8px"></div>
+  </div>
+  <div id="wallet-note" style="font-size:13px;opacity:.7;margin-top:8px"></div>
+</div>
+<p style="font-size:13px;opacity:.6">How: <code>wallet.js</code> attached to this post, using <code>croptop.wallet.connect()</code> and a public RPC. The buy button on every post uses the same plumbing to send real transactions.</p>
+<script type="module" src="wallet.js"></script>

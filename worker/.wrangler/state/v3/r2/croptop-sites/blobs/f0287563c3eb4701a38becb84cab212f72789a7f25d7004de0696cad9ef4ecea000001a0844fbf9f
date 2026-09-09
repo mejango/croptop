@@ -1,0 +1,31 @@
+{
+  "articleType" : 0,
+  "attachments" : [
+    "_cover.png",
+    "motion.js",
+    "preview.js"
+  ],
+  "cids" : {
+    "_cover.png" : "QmWBc8J3qzUVMnBcKjLRPYxPPeFQAnMkuPjNx55CDLScqM",
+    "motion.js" : "QmNY9tvHkpP87RtbPmx2MBcttViS8Dqum3cmZUruq8YY7r",
+    "preview.js" : "QmcAu9m1TQgEYDMy7XYSaHauKXbpi7RV4a5umPP5LiSyLQ"
+  },
+  "content" : "<p>Many small donors, one campaign, five ways to spend. A living picture of the thing this site is about. It is drawn fresh in your browser every frame, seeded by this post's id, so everyone sees the same piece and nobody hosts a video.</p>\n<canvas id=\"motion\" style=\"width:100%;height:360px;display:block;background:#0e0e0e;border:1px solid var(--foreground-secondary-color)\"></canvas>\n<p style=\"font-size:13px;opacity:.6\">How: <code>motion.js</code> attached to this post. Plain canvas, <code>requestAnimationFrame</code>, the site's highlight color read from CSS. Pauses when the tab is hidden.</p>\n<script type=\"module\" src=\"motion.js\"></script>\n",
+  "contentRendered" : "<p>Many small donors, one campaign, five ways to spend. A living picture of the thing this site is about. It is drawn fresh in your browser every frame, seeded by this post's id, so everyone sees the same piece and nobody hosts a video.</p>\n<canvas id=\"motion\" style=\"width:100%;height:360px;display:block;background:#0e0e0e;border:1px solid var(--foreground-secondary-color)\"></canvas>\n<p style=\"font-size:13px;opacity:.6\">How: <code>motion.js</code> attached to this post. Plain canvas, <code>requestAnimationFrame</code>, the site's highlight color read from CSS. Pauses when the tab is hidden.</p>\n<script type=\"module\" src=\"motion.js\"></script>\n",
+  "created" : 810588410.203069,
+  "externalLink" : "",
+  "hasAudio" : false,
+  "hasVideo" : false,
+  "heroImage" : "https://k51qzi5uqu5dilqjwgdm3zj0g24zaowqfxoargdm1lbj7s4frpwuzqp2tmxm4g.eth.sucks/791E7E49-6C04-4D90-894F-3A5222D556B8/_cover.png",
+  "heroImageFilename" : "_cover.png",
+  "heroImageHeight" : 512,
+  "heroImageURL" : "https://k51qzi5uqu5dilqjwgdm3zj0g24zaowqfxoargdm1lbj7s4frpwuzqp2tmxm4g.eth.sucks/791E7E49-6C04-4D90-894F-3A5222D556B8/_cover.png",
+  "heroImageWidth" : 512,
+  "id" : "791E7E49-6C04-4D90-894F-3A5222D556B8",
+  "link" : "/791E7E49-6C04-4D90-894F-3A5222D556B8/",
+  "slug" : "",
+  "tags" : {
+
+  },
+  "title" : "Money in motion"
+}

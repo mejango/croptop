@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"html"
+	"io"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -443,13 +444,33 @@ func (h *Host) push(w http.ResponseWriter, r *http.Request) {
 	if b64 := r.Header.Get("X-Croptop-Record"); b64 != "" {
 		rec, _ = base64.StdEncoding.DecodeString(b64)
 	}
-	n, err := h.Engine.ReadBlocks(r.Context(), r.Body, maxPush)
-	if err != nil {
-		http.Error(w, "reading blocks: "+err.Error(), 400)
+	h.mu.Lock()
+	if e := h.reg.Keys[ipnsName]; e != nil && seq < e.Sequence {
+		h.mu.Unlock()
+		http.Error(w, fmt.Sprintf("host already has sequence %d", e.Sequence), 409)
 		return
 	}
-	if ok, err := h.Engine.HasTree(r.Context(), c); err != nil || !ok {
-		http.Error(w, "the stream did not contain the whole site", 400)
+	h.mu.Unlock()
+	// the files land in a temp dir and are added like any site; the root must
+	// hash to the cid the request was signed for
+	tmp, err := os.MkdirTemp("", "croptop-push-")
+	if err != nil {
+		http.Error(w, err.Error(), 500)
+		return
+	}
+	defer os.RemoveAll(tmp)
+	n, err := saveMultipart(r, tmp)
+	if err != nil {
+		http.Error(w, "reading files: "+err.Error(), 400)
+		return
+	}
+	got, err := h.Engine.AddDir(r.Context(), tmp)
+	if err != nil {
+		http.Error(w, "adding files: "+err.Error(), 500)
+		return
+	}
+	if got != c {
+		http.Error(w, fmt.Sprintf("files hash to %s, not %s", got, c), 400)
 		return
 	}
 	h.mu.Lock()
@@ -491,4 +512,43 @@ func writeJSON(w http.ResponseWriter, code int, v any) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(code)
 	json.NewEncoder(w).Encode(v)
+}
+
+// saveMultipart writes each "file:<path>" part to dir at that path. The path
+// rides in the field name because Go's multipart reader strips directories
+// from file names.
+func saveMultipart(r *http.Request, dir string) (int, error) {
+	r.Body = http.MaxBytesReader(nil, r.Body, maxPush)
+	mr, err := r.MultipartReader()
+	if err != nil {
+		return 0, err
+	}
+	n := 0
+	for {
+		part, err := mr.NextPart()
+		if err == io.EOF {
+			return n, nil
+		}
+		if err != nil {
+			return n, err
+		}
+		if !strings.HasPrefix(part.FormName(), "file:") {
+			continue
+		}
+		rel := filepath.Clean("/" + filepath.FromSlash(strings.TrimPrefix(part.FormName(), "file:")))
+		dst := filepath.Join(dir, rel)
+		if err := os.MkdirAll(filepath.Dir(dst), 0o755); err != nil {
+			return n, err
+		}
+		f, err := os.Create(dst)
+		if err != nil {
+			return n, err
+		}
+		_, err = io.Copy(f, part)
+		f.Close()
+		if err != nil {
+			return n, err
+		}
+		n++
+	}
 }

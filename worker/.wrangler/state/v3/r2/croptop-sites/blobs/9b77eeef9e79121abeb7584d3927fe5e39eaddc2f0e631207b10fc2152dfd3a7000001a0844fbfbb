@@ -1,0 +1,27 @@
+{
+  "articleType" : 0,
+  "attachments" : [
+    "_cover.png"
+  ],
+  "cids" : {
+    "_cover.png" : "QmecMZmmxKo2MSeZr4kACrQ86SmrtyCvpvyc9rDCUtP2om"
+  },
+  "content" : "# Follo.Money (Follo)\n\n### Follow the money\n\nFund politics, and see how funding is used.\n\n1. Campaigns say how much they need, over time. \n2. People donate to campaigns. \n3. Everyone can see expenditures transparently. \n\n### How it works:\n- Anyone can create a campaign by giving it a name and a timed initial spending limit.\n- People donate to campaigns, knowing the campaign cant use more than what they’ve agreed to, for the specified amount of time.\n- Donors keep access to a portion of a campaign's surplus funds. \n- Keep in mind a campaign can change its spending after the initial limit’s duration, all surplus funds become accessible, the owner decides if and when to set another timed spending limit.\n\n### Why it works:\n- The public sector doesn’t benefit from private transactions. Winning politicians are doing things more transparently, more authentically. \n- People either prefer to be able to see where their money goes, or they're indifferent about it. No one strongly prefers their elected officials keep things from them.\n- The status quo is ActBlue (https://secure.actblue.com/donate/zohran-mamdani-transition-1/). It is a dead simple payment experience.\n- We've finally got the right tools to make this type of thing happen without relying on bankers.\n- The public sector should use efficient payment rails owned by the public sector.\n\n\n### Who's it for:\nZohran. As Zohran continues asking for money, given his politics, he should prefer a system that allows him to be upfront about how much funds are needed, and his movement should prefer transparency and authenticity...\n\n...so long as its also a dead simple experience for donors and campaign owners. The money has to flow.\n\n\n",
+  "contentRendered" : "<h1>Follo.Money (Follo)</h1>\n<h3>Follow the money</h3>\n<p>Fund politics, and see how funding is used.</p>\n<ol>\n<li>Campaigns say how much they need, over time.</li>\n<li>People donate to campaigns.</li>\n<li>Everyone can see expenditures transparently.</li>\n</ol>\n<h3>How it works:</h3>\n<ul>\n<li>Anyone can create a campaign by giving it a name and a timed initial spending limit.</li>\n<li>People donate to campaigns, knowing the campaign cant use more than what they’ve agreed to, for the specified amount of time.</li>\n<li>Donors keep access to a portion of a campaign's surplus funds.</li>\n<li>Keep in mind a campaign can change its spending after the initial limit’s duration, all surplus funds become accessible, the owner decides if and when to set another timed spending limit.</li>\n</ul>\n<h3>Why it works:</h3>\n<ul>\n<li>The public sector doesn’t benefit from private transactions. Winning politicians are doing things more transparently, more authentically.</li>\n<li>People either prefer to be able to see where their money goes, or they're indifferent about it. No one strongly prefers their elected officials keep things from them.</li>\n<li>The status quo is ActBlue (<a href=\"https://secure.actblue.com/donate/zohran-mamdani-transition-1/\">https://secure.actblue.com/donate/zohran-mamdani-transition-1/</a>). It is a dead simple payment experience.</li>\n<li>We've finally got the right tools to make this type of thing happen without relying on bankers.</li>\n<li>The public sector should use efficient payment rails owned by the public sector.</li>\n</ul>\n<h3>Who's it for:</h3>\n<p>Zohran. As Zohran continues asking for money, given his politics, he should prefer a system that allows him to be upfront about how much funds are needed, and his movement should prefer transparency and authenticity...</p>\n<p>...so long as its also a dead simple experience for donors and campaign owners. The money has to flow.</p>\n",
+  "created" : 784089060.917195,
+  "externalLink" : "",
+  "hasAudio" : false,
+  "hasVideo" : false,
+  "heroImage" : "https://k51qzi5uqu5dilqjwgdm3zj0g24zaowqfxoargdm1lbj7s4frpwuzqp2tmxm4g.eth.sucks/E96490CE-796F-4B4B-ACAC-1EA1D6EE6812/_cover.png",
+  "heroImageFilename" : "_cover.png",
+  "heroImageHeight" : 1024,
+  "heroImageURL" : "https://k51qzi5uqu5dilqjwgdm3zj0g24zaowqfxoargdm1lbj7s4frpwuzqp2tmxm4g.eth.sucks/E96490CE-796F-4B4B-ACAC-1EA1D6EE6812/_cover.png",
+  "heroImageWidth" : 1024,
+  "id" : "E96490CE-796F-4B4B-ACAC-1EA1D6EE6812",
+  "link" : "/E96490CE-796F-4B4B-ACAC-1EA1D6EE6812/",
+  "slug" : "",
+  "tags" : {
+
+  },
+  "title" : "Follow.Money"
+}

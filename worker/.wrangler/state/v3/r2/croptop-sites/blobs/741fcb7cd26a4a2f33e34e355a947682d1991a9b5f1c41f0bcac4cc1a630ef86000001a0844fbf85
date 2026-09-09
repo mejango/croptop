@@ -1,0 +1,25 @@
+{
+  "attributes" : [
+    {
+      "trait_type" : "title",
+      "value" : "The clock every campaign runs against"
+    },
+    {
+      "trait_type" : "title_sha256",
+      "value" : "e84fc378eb21e61a6be00d3d9cd2cd8a40aee27caa47245415788fe531e311f5"
+    },
+    {
+      "trait_type" : "content_sha256",
+      "value" : "596b3044679070f4a1a668af295541fae8cc2b56ecb24bfafe0b52329213170e"
+    },
+    {
+      "trait_type" : "created_at",
+      "value" : "1788895610"
+    }
+  ],
+  "description" : "",
+  "external_url" : "https://k51qzi5uqu5dilqjwgdm3zj0g24zaowqfxoargdm1lbj7s4frpwuzqp2tmxm4g.eth.sucks/0A5773AE-1409-4234-AF21-2827119F7D67/",
+  "image" : "https://ipfs.io/ipfs/Qmaz8NQkZbbVN5MdxoNXrj3cu7mudNdbsY3wPi7sSHDXvS",
+  "mimeType" : "image/png",
+  "name" : "The clock every campaign runs against"
+}

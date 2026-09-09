@@ -1,0 +1,6 @@
+Money in motion
+
+<p>Many small donors, one campaign, five ways to spend. A living picture of the thing this site is about. It is drawn fresh in your browser every frame, seeded by this post's id, so everyone sees the same piece and nobody hosts a video.</p>
+<canvas id="motion" style="width:100%;height:360px;display:block;background:#0e0e0e;border:1px solid var(--foreground-secondary-color)"></canvas>
+<p style="font-size:13px;opacity:.6">How: <code>motion.js</code> attached to this post. Plain canvas, <code>requestAnimationFrame</code>, the site's highlight color read from CSS. Pauses when the tab is hidden.</p>
+<script type="module" src="motion.js"></script>

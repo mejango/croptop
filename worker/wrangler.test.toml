@@ -1,0 +1,19 @@
+# staging: the same Worker answering only for test.crop.top
+name = "croptop-host-test"
+main = "src/index.js"
+compatibility_date = "2026-09-01"
+workers_dev = false
+routes = [{ pattern = "test.crop.top/*", zone_name = "crop.top" }]
+
+[vars]
+DOMAIN = "test.crop.top"
+ROOT = "croptop.eth"
+UPSTREAMS = "eth.sucks,eth.shop"
+
+[[r2_buckets]]
+binding = "SITES"
+bucket_name = "croptop-sites"
+
+[[kv_namespaces]]
+binding = "REGISTRY"
+id = "a938230508a54c0eab93246de54c20a2"

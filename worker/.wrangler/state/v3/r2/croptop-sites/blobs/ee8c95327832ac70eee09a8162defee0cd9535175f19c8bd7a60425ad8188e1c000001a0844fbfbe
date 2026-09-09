@@ -1,0 +1,25 @@
+{
+  "attributes" : [
+    {
+      "trait_type" : "title",
+      "value" : "Follow.Money"
+    },
+    {
+      "trait_type" : "title_sha256",
+      "value" : "be47af113a650dc8a0bce0031c8f0232362c670d8030b835ec1adcee4e55b408"
+    },
+    {
+      "trait_type" : "content_sha256",
+      "value" : "b3a29c7a819f6b5d2b21c6c98a3cf65c58a5248334b2c3814b498f0733bbfe3d"
+    },
+    {
+      "trait_type" : "created_at",
+      "value" : "1762396260"
+    }
+  ],
+  "description" : "Follo.Money (Follo) Follow the money Fund politics, and see how funding is used. Campaigns say how much they need, over time. People donate to campaigns. Everyone can see expenditures transparently. How it works: Anyone can create a campaign by giving it a name and a timed initia...",
+  "external_url" : "https://k51qzi5uqu5dilqjwgdm3zj0g24zaowqfxoargdm1lbj7s4frpwuzqp2tmxm4g.eth.sucks/E96490CE-796F-4B4B-ACAC-1EA1D6EE6812/",
+  "image" : "https://ipfs.io/ipfs/QmecMZmmxKo2MSeZr4kACrQ86SmrtyCvpvyc9rDCUtP2om",
+  "mimeType" : "image/png",
+  "name" : "Follow.Money"
+}

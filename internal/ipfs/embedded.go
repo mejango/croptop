@@ -454,6 +454,9 @@ func (e *Embedded) provideTree(root cid.Cid) {
 	e.Log(fmt.Sprintf("provided %d blocks under %s (%d failed) in %s", len(cids)-int(failed), root, failed, time.Since(start).Round(time.Second)))
 }
 
+// BlockService exposes the node's block service for gateway serving.
+func (e *Embedded) BlockService() blockservice.BlockService { return e.bserv }
+
 // FindProviders lists peers announcing the CID, up to 20 within 20 seconds.
 func (e *Embedded) FindProviders(ctx context.Context, c string) ([]string, error) {
 	if e.dht == nil {

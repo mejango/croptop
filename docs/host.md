@@ -1,7 +1,38 @@
 # Running a host
 
+A host is a gateway, a pin store, and a name registry for one domain. Two
+implementations speak the same protocol:
+
+- `croptop host`, a Go process with the embedded IPFS engine, for anyone with a
+  server. It also serves blocks to the IPFS network.
+- `worker/`, a Cloudflare Worker with R2 and KV, which is what crop.top runs.
+  No server at all; pushed sites live in R2 and anything else is fetched from a
+  public gateway.
+
+## Cloudflare (what crop.top uses)
+
+```sh
+cd worker
+export CLOUDFLARE_API_TOKEN=... CLOUDFLARE_ACCOUNT_ID=...
+npx -p node@22 -p wrangler wrangler kv namespace create croptop-registry   # put the id in wrangler.toml
+npx -p node@22 -p wrangler wrangler r2 bucket create croptop-sites
+npx -p node@22 -p wrangler wrangler deploy
+```
+
+The token needs Workers Scripts, Workers Routes, KV and R2 edit on the account
+and the zone. `wrangler.toml` attaches the routes `crop.top/*` and
+`*.crop.top/*`, so the zone's DNS only needs proxied records for `crop.top` and
+`*.crop.top` pointing anywhere. A cron trigger re-publishes every pushed IPNS
+record to the delegated routing endpoint every half hour.
+
+Local development: `wrangler dev --local` rewrites every request's host to the
+zone name, so `.dev.vars` sets `SIGNING_HOST=localhost` to make signatures from
+a local console verify. Never set that in production.
+
+## Go (your own server)
+
 `croptop host` turns a server into a gateway, a pin host, and a name registry
-for one domain. crop.top runs it. Anyone can run one for their own domain.
+for one domain.
 
 ## What it serves
 

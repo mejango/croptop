@@ -1,0 +1,244 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<rss version="2.0"
+    xmlns:content="http://purl.org/rss/1.0/modules/content/"
+    xmlns:wfw="http://wellformedweb.org/CommentAPI/"
+    xmlns:dc="http://purl.org/dc/elements/1.1/"
+    xmlns:atom="http://www.w3.org/2005/Atom"
+    xmlns:sy="http://purl.org/rss/1.0/modules/syndication/"
+    xmlns:slash="http://purl.org/rss/1.0/modules/slash/"
+    xmlns:itunes="http://www.itunes.com/dtds/podcast-1.0.dtd"
+    >
+<channel>
+    <title>FOLLO</title>
+    <atom:link href="https://follo.eth.sucks/rss.xml" rel="self" type="application/rss+xml" />
+    <link>https://follo.eth.sucks/</link>
+    <description><![CDATA[
+    <p>Follow the money</p>
+
+    ]]></description>
+    
+    
+    <item>
+        <title>This site, so far</title>
+        <link>https://follo.eth.sucks/2DD17D5A-DFEF-4F7D-A8C8-039AA3AB8DE9/</link>
+        <guid>https://follo.eth.sucks/2DD17D5A-DFEF-4F7D-A8C8-039AA3AB8DE9/</guid>
+        <pubDate>Tue, 08 Sep 2026 16:26:50 -0300</pubDate>
+        
+        <itunes:image href="https://k51qzi5uqu5dilqjwgdm3zj0g24zaowqfxoargdm1lbj7s4frpwuzqp2tmxm4g.eth.sucks/2DD17D5A-DFEF-4F7D-A8C8-039AA3AB8DE9/_cover.png" />    
+        
+        
+        <description><![CDATA[
+            <p>A widget can read the whole site it lives in. This one draws every post on this site as a timeline, straight from <code>planet.json</code>, and updates itself every time the site is published.</p>
+<div id="timeline" style="border:1px solid var(--foreground-secondary-color);padding:16px">loading…</div>
+<p style="font-size:13px;opacity:.6">How: twenty lines inline in the post, using <code>croptop.site()</code>. The same call can build an archive page, a tag cloud, or "you might also like".</p>
+<script type="module">
+croptop.ready(({ site }) => {
+  const el = document.getElementById("timeline");
+  const posts = [...site.articles].sort((a, b) => a.created - b.created);
+  const toDate = (t) => new Date((t + 978307200) * 1000);
+  const first = toDate(posts[0].created), last = toDate(posts[posts.length - 1].created);
+  const span = Math.max(1, last - first);
+  el.innerHTML = `<div style="font-size:13px;opacity:.7">${posts.length} posts between ${first.toLocaleDateString()} and ${last.toLocaleDateString()}</div>
+    <div style="position:relative;height:56px;margin:14px 0;border-bottom:1px solid var(--foreground-secondary-color)"></div><ol style="margin:0;padding-left:18px;font-size:14px;line-height:1.7"></ol>`;
+  const track = el.children[1], list = el.children[2];
+  posts.forEach((p) => {
+    const x = (toDate(p.created) - first) / span * 100;
+    const dot = document.createElement("a"); dot.href = croptop.prefix + p.id + "/"; dot.title = p.title || "untitled";
+    dot.style.cssText = `position:absolute;left:calc(${x}% - 6px);bottom:-6px;width:12px;height:12px;border-radius:50%;background:${p.id === croptop.postId ? "#3bb273" : "var(--link-color)"}`;
+    track.appendChild(dot);
+    const li = document.createElement("li"); li.innerHTML = `<a href="${croptop.prefix}${p.id}/">${p.title || "untitled"}</a> <span style="opacity:.5">${toDate(p.created).toLocaleDateString()}</span>`;
+    list.appendChild(li);
+  });
+});
+</script>
+
+        ]]></description>
+    </item>
+    
+    <item>
+        <title>Who is reading this</title>
+        <link>https://follo.eth.sucks/D4917B9F-6155-49FF-B9BF-F5CC584C8393/</link>
+        <guid>https://follo.eth.sucks/D4917B9F-6155-49FF-B9BF-F5CC584C8393/</guid>
+        <pubDate>Tue, 08 Sep 2026 16:26:50 -0300</pubDate>
+        
+        <itunes:image href="https://k51qzi5uqu5dilqjwgdm3zj0g24zaowqfxoargdm1lbj7s4frpwuzqp2tmxm4g.eth.sucks/D4917B9F-6155-49FF-B9BF-F5CC584C8393/_cover.png" />    
+        
+        
+        <description><![CDATA[
+            <p>Posts can talk to the reader's wallet. This one asks who you are and shows you your own balance, read-only. Nothing is signed, nothing is sent, nothing leaves your browser.</p>
+<div style="border:1px solid var(--foreground-secondary-color);padding:16px">
+  <button id="wallet-connect" style="font:inherit;padding:8px 14px;cursor:pointer">Connect wallet</button>
+  <div id="wallet-card" hidden>
+    <div style="font-size:12px;opacity:.6">you</div><div id="wallet-address" style="font-size:20px">…</div>
+    <div id="wallet-balance" style="opacity:.8;margin:6px 0 12px">…</div>
+    <button id="wallet-pledge-btn" style="font:inherit;padding:8px 14px;cursor:pointer">Pledge to follow the money</button>
+    <div id="wallet-pledge" style="font-size:13px;margin-top:8px"></div>
+  </div>
+  <div id="wallet-note" style="font-size:13px;opacity:.7;margin-top:8px"></div>
+</div>
+<p style="font-size:13px;opacity:.6">How: <code>wallet.js</code> attached to this post, using <code>croptop.wallet.connect()</code> and a public RPC. The buy button on every post uses the same plumbing to send real transactions.</p>
+<script type="module" src="wallet.js"></script>
+
+        ]]></description>
+    </item>
+    
+    <item>
+        <title>Money in motion</title>
+        <link>https://follo.eth.sucks/791E7E49-6C04-4D90-894F-3A5222D556B8/</link>
+        <guid>https://follo.eth.sucks/791E7E49-6C04-4D90-894F-3A5222D556B8/</guid>
+        <pubDate>Tue, 08 Sep 2026 16:26:50 -0300</pubDate>
+        
+        <itunes:image href="https://k51qzi5uqu5dilqjwgdm3zj0g24zaowqfxoargdm1lbj7s4frpwuzqp2tmxm4g.eth.sucks/791E7E49-6C04-4D90-894F-3A5222D556B8/_cover.png" />    
+        
+        
+        <description><![CDATA[
+            <p>Many small donors, one campaign, five ways to spend. A living picture of the thing this site is about. It is drawn fresh in your browser every frame, seeded by this post's id, so everyone sees the same piece and nobody hosts a video.</p>
+<canvas id="motion" style="width:100%;height:360px;display:block;background:#0e0e0e;border:1px solid var(--foreground-secondary-color)"></canvas>
+<p style="font-size:13px;opacity:.6">How: <code>motion.js</code> attached to this post. Plain canvas, <code>requestAnimationFrame</code>, the site's highlight color read from CSS. Pauses when the tab is hidden.</p>
+<script type="module" src="motion.js"></script>
+
+        ]]></description>
+    </item>
+    
+    <item>
+        <title>Spend it your way</title>
+        <link>https://follo.eth.sucks/214DD1F7-572A-491E-82CA-D587DB49AFB4/</link>
+        <guid>https://follo.eth.sucks/214DD1F7-572A-491E-82CA-D587DB49AFB4/</guid>
+        <pubDate>Tue, 08 Sep 2026 16:26:50 -0300</pubDate>
+        
+        <itunes:image href="https://k51qzi5uqu5dilqjwgdm3zj0g24zaowqfxoargdm1lbj7s4frpwuzqp2tmxm4g.eth.sucks/214DD1F7-572A-491E-82CA-D587DB49AFB4/_cover.png" />    
+        
+        
+        <description><![CDATA[
+            <p>Campaigns say how much they need. Readers should be able to say how they would spend it. Drag a slider; the others rebalance so the total stays whole. Nothing is sent anywhere. Your split is remembered on this device.</p>
+<div id="budget" style="border:1px solid var(--foreground-secondary-color);padding:16px;display:grid;gap:14px"></div>
+<p style="font-size:13px;opacity:.6">How: <code>budget.js</code> attached to this post. Sliders, five bars, <code>localStorage</code>. Fork the idea for a real budget by loading numbers from an attached <code>budget.json</code>.</p>
+<script type="module" src="budget.js"></script>
+
+        ]]></description>
+    </item>
+    
+    <item>
+        <title>What Ethereum is doing right now</title>
+        <link>https://follo.eth.sucks/5B3D5249-BBCC-4F72-8AE4-B87652434E35/</link>
+        <guid>https://follo.eth.sucks/5B3D5249-BBCC-4F72-8AE4-B87652434E35/</guid>
+        <pubDate>Tue, 08 Sep 2026 16:26:50 -0300</pubDate>
+        
+        <itunes:image href="https://k51qzi5uqu5dilqjwgdm3zj0g24zaowqfxoargdm1lbj7s4frpwuzqp2tmxm4g.eth.sucks/5B3D5249-BBCC-4F72-8AE4-B87652434E35/_cover.png" />    
+        
+        
+        <description><![CDATA[
+            <p>Money moves on Ethereum every twelve seconds. This post asks a public node directly, from your browser, with nothing in between. No server, no API key, no tracking.</p>
+<div id="gas" style="border:1px solid var(--foreground-secondary-color);padding:16px;display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:12px;font-family:var(--font-family,inherit)">
+  <div><div style="font-size:12px;opacity:.6">latest block</div><div id="gas-block" style="font-size:22px">…</div></div>
+  <div><div style="font-size:12px;opacity:.6">gas price</div><div id="gas-fee" style="font-size:22px">…</div></div>
+  <div><div style="font-size:12px;opacity:.6">in that block</div><div id="gas-txs" style="font-size:22px">…</div></div>
+  <div><div style="font-size:12px;opacity:.6">ETH</div><div id="gas-eth" style="font-size:22px">…</div></div>
+  <div style="grid-column:1/-1"><canvas id="gas-spark" style="width:100%;height:60px;display:block"></canvas></div>
+  <div style="grid-column:1/-1;font-size:13px;opacity:.7"><span id="gas-transfer"></span> <span id="gas-status">connecting…</span></div>
+</div>
+<p style="font-size:13px;opacity:.6">How: a 40-line <code>gas.js</code> attached to this post, using the <code>ethers</code> the template already ships. View source, copy it, change the RPC.</p>
+<script type="module" src="gas.js"></script>
+
+        ]]></description>
+    </item>
+    
+    <item>
+        <title>The clock every campaign runs against</title>
+        <link>https://follo.eth.sucks/0A5773AE-1409-4234-AF21-2827119F7D67/</link>
+        <guid>https://follo.eth.sucks/0A5773AE-1409-4234-AF21-2827119F7D67/</guid>
+        <pubDate>Tue, 08 Sep 2026 16:26:50 -0300</pubDate>
+        
+        <itunes:image href="https://k51qzi5uqu5dilqjwgdm3zj0g24zaowqfxoargdm1lbj7s4frpwuzqp2tmxm4g.eth.sucks/0A5773AE-1409-4234-AF21-2827119F7D67/_cover.png" />    
+        
+        
+        <description><![CDATA[
+            <p>Every campaign runs against a clock. This one counts down to the 2026 US midterm election, November 3.</p>
+<div id="cd" style="display:grid;grid-template-columns:repeat(4,1fr);gap:8px;text-align:center;border:1px solid var(--foreground-secondary-color);padding:16px">
+  <div><div id="cd-d" style="font-size:40px">0</div><div style="font-size:12px;opacity:.6">days</div></div>
+  <div><div id="cd-h" style="font-size:40px">0</div><div style="font-size:12px;opacity:.6">hours</div></div>
+  <div><div id="cd-m" style="font-size:40px">0</div><div style="font-size:12px;opacity:.6">minutes</div></div>
+  <div><div id="cd-s" style="font-size:40px">0</div><div style="font-size:12px;opacity:.6">seconds</div></div>
+</div>
+<p style="font-size:13px;opacity:.6">How: eight lines inline. Change the date and it counts down to anything.</p>
+<script type="module">
+const target = new Date("2026-11-03T12:00:00-05:00");
+const tick = () => { let s = Math.max(0, Math.floor((target - Date.now()) / 1000));
+  for (const [id, div] of [["cd-d", 86400], ["cd-h", 3600], ["cd-m", 60], ["cd-s", 1]]) { document.getElementById(id).textContent = Math.floor(s / div); s %= div; } };
+tick(); setInterval(tick, 1000);
+</script>
+
+        ]]></description>
+    </item>
+    
+    <item>
+        <title>Doop</title>
+        <link>https://follo.eth.sucks/A54AAE12-27B5-4FE1-8654-E5027C4ECC86/</link>
+        <guid>https://follo.eth.sucks/A54AAE12-27B5-4FE1-8654-E5027C4ECC86/</guid>
+        <pubDate>Tue, 08 Sep 2026 14:02:00 -0300</pubDate>
+        
+        <itunes:image href="https://k51qzi5uqu5dilqjwgdm3zj0g24zaowqfxoargdm1lbj7s4frpwuzqp2tmxm4g.eth.sucks/A54AAE12-27B5-4FE1-8654-E5027C4ECC86/_cover.png" />    
+        
+        
+        <description><![CDATA[
+            
+        ]]></description>
+    </item>
+    
+    <item>
+        <title></title>
+        <link>https://follo.eth.sucks/F1A786BB-D875-4DC6-A0A1-FB9C07BB46B5/</link>
+        <guid>https://follo.eth.sucks/F1A786BB-D875-4DC6-A0A1-FB9C07BB46B5/</guid>
+        <pubDate>Wed, 05 Nov 2025 23:56:54 -0300</pubDate>
+        
+        <itunes:image href="https://k51qzi5uqu5dilqjwgdm3zj0g24zaowqfxoargdm1lbj7s4frpwuzqp2tmxm4g.eth.sucks/F1A786BB-D875-4DC6-A0A1-FB9C07BB46B5/Screenshot%202025-11-05%20at%2023.56.49.png" />    
+        
+        
+        <description><![CDATA[
+            <img width="450" alt="Screenshot 2025-11-05 at 23.56.49" src="https://follo.eth.sucks/F1A786BB-D875-4DC6-A0A1-FB9C07BB46B5/Screenshot 2025-11-05 at 23.56.49.png">
+
+        ]]></description>
+    </item>
+    
+    <item>
+        <title>Follow.Money</title>
+        <link>https://follo.eth.sucks/E96490CE-796F-4B4B-ACAC-1EA1D6EE6812/</link>
+        <guid>https://follo.eth.sucks/E96490CE-796F-4B4B-ACAC-1EA1D6EE6812/</guid>
+        <pubDate>Wed, 05 Nov 2025 23:31:00 -0300</pubDate>
+        
+        <itunes:image href="https://k51qzi5uqu5dilqjwgdm3zj0g24zaowqfxoargdm1lbj7s4frpwuzqp2tmxm4g.eth.sucks/E96490CE-796F-4B4B-ACAC-1EA1D6EE6812/_cover.png" />    
+        
+        
+        <description><![CDATA[
+            <h1>Follo.Money (Follo)</h1>
+<h3>Follow the money</h3>
+<p>Fund politics, and see how funding is used.</p>
+<ol>
+<li>Campaigns say how much they need, over time.</li>
+<li>People donate to campaigns.</li>
+<li>Everyone can see expenditures transparently.</li>
+</ol>
+<h3>How it works:</h3>
+<ul>
+<li>Anyone can create a campaign by giving it a name and a timed initial spending limit.</li>
+<li>People donate to campaigns, knowing the campaign cant use more than what they’ve agreed to, for the specified amount of time.</li>
+<li>Donors keep access to a portion of a campaign's surplus funds.</li>
+<li>Keep in mind a campaign can change its spending after the initial limit’s duration, all surplus funds become accessible, the owner decides if and when to set another timed spending limit.</li>
+</ul>
+<h3>Why it works:</h3>
+<ul>
+<li>The public sector doesn’t benefit from private transactions. Winning politicians are doing things more transparently, more authentically.</li>
+<li>People either prefer to be able to see where their money goes, or they're indifferent about it. No one strongly prefers their elected officials keep things from them.</li>
+<li>The status quo is ActBlue (<a href="https://secure.actblue.com/donate/zohran-mamdani-transition-1/">https://secure.actblue.com/donate/zohran-mamdani-transition-1/</a>). It is a dead simple payment experience.</li>
+<li>We've finally got the right tools to make this type of thing happen without relying on bankers.</li>
+<li>The public sector should use efficient payment rails owned by the public sector.</li>
+</ul>
+<h3>Who's it for:</h3>
+<p>Zohran. As Zohran continues asking for money, given his politics, he should prefer a system that allows him to be upfront about how much funds are needed, and his movement should prefer transparency and authenticity...</p>
+<p>...so long as its also a dead simple experience for donors and campaign owners. The money has to flow.</p>
+
+        ]]></description>
+    </item>
+    
+</channel>
+</rss>

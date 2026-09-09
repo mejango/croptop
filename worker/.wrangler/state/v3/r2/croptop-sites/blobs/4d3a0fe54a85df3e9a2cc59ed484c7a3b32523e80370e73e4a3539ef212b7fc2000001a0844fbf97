@@ -1,0 +1,31 @@
+{
+  "articleType" : 0,
+  "attachments" : [
+    "_cover.png",
+    "gas.js",
+    "preview.js"
+  ],
+  "cids" : {
+    "_cover.png" : "QmTUa2WkPqgc7ELESiwszS6nKVw15wK8k8tUyJ5cUXzVxk",
+    "gas.js" : "QmeMStopm6yebYRwcetkMQNwispySkBWKM9MKLbrBFEK3s",
+    "preview.js" : "QmTrUsbBwoVCnm3s9S2qk9e9GyK1D79Uf9JipqaR7WiWa1"
+  },
+  "content" : "<p>Money moves on Ethereum every twelve seconds. This post asks a public node directly, from your browser, with nothing in between. No server, no API key, no tracking.</p>\n<div id=\"gas\" style=\"border:1px solid var(--foreground-secondary-color);padding:16px;display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:12px;font-family:var(--font-family,inherit)\">\n  <div><div style=\"font-size:12px;opacity:.6\">latest block</div><div id=\"gas-block\" style=\"font-size:22px\">…</div></div>\n  <div><div style=\"font-size:12px;opacity:.6\">gas price</div><div id=\"gas-fee\" style=\"font-size:22px\">…</div></div>\n  <div><div style=\"font-size:12px;opacity:.6\">in that block</div><div id=\"gas-txs\" style=\"font-size:22px\">…</div></div>\n  <div><div style=\"font-size:12px;opacity:.6\">ETH</div><div id=\"gas-eth\" style=\"font-size:22px\">…</div></div>\n  <div style=\"grid-column:1/-1\"><canvas id=\"gas-spark\" style=\"width:100%;height:60px;display:block\"></canvas></div>\n  <div style=\"grid-column:1/-1;font-size:13px;opacity:.7\"><span id=\"gas-transfer\"></span> <span id=\"gas-status\">connecting…</span></div>\n</div>\n<p style=\"font-size:13px;opacity:.6\">How: a 40-line <code>gas.js</code> attached to this post, using the <code>ethers</code> the template already ships. View source, copy it, change the RPC.</p>\n<script type=\"module\" src=\"gas.js\"></script>\n",
+  "contentRendered" : "<p>Money moves on Ethereum every twelve seconds. This post asks a public node directly, from your browser, with nothing in between. No server, no API key, no tracking.</p>\n<div id=\"gas\" style=\"border:1px solid var(--foreground-secondary-color);padding:16px;display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:12px;font-family:var(--font-family,inherit)\">\n  <div><div style=\"font-size:12px;opacity:.6\">latest block</div><div id=\"gas-block\" style=\"font-size:22px\">…</div></div>\n  <div><div style=\"font-size:12px;opacity:.6\">gas price</div><div id=\"gas-fee\" style=\"font-size:22px\">…</div></div>\n  <div><div style=\"font-size:12px;opacity:.6\">in that block</div><div id=\"gas-txs\" style=\"font-size:22px\">…</div></div>\n  <div><div style=\"font-size:12px;opacity:.6\">ETH</div><div id=\"gas-eth\" style=\"font-size:22px\">…</div></div>\n  <div style=\"grid-column:1/-1\"><canvas id=\"gas-spark\" style=\"width:100%;height:60px;display:block\"></canvas></div>\n  <div style=\"grid-column:1/-1;font-size:13px;opacity:.7\"><span id=\"gas-transfer\"></span> <span id=\"gas-status\">connecting…</span></div>\n</div>\n<p style=\"font-size:13px;opacity:.6\">How: a 40-line <code>gas.js</code> attached to this post, using the <code>ethers</code> the template already ships. View source, copy it, change the RPC.</p>\n<script type=\"module\" src=\"gas.js\"></script>\n",
+  "created" : 810588410.1153381,
+  "externalLink" : "",
+  "hasAudio" : false,
+  "hasVideo" : false,
+  "heroImage" : "https://k51qzi5uqu5dilqjwgdm3zj0g24zaowqfxoargdm1lbj7s4frpwuzqp2tmxm4g.eth.sucks/5B3D5249-BBCC-4F72-8AE4-B87652434E35/_cover.png",
+  "heroImageFilename" : "_cover.png",
+  "heroImageHeight" : 512,
+  "heroImageURL" : "https://k51qzi5uqu5dilqjwgdm3zj0g24zaowqfxoargdm1lbj7s4frpwuzqp2tmxm4g.eth.sucks/5B3D5249-BBCC-4F72-8AE4-B87652434E35/_cover.png",
+  "heroImageWidth" : 512,
+  "id" : "5B3D5249-BBCC-4F72-8AE4-B87652434E35",
+  "link" : "/5B3D5249-BBCC-4F72-8AE4-B87652434E35/",
+  "slug" : "",
+  "tags" : {
+
+  },
+  "title" : "What Ethereum is doing right now"
+}

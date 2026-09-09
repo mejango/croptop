@@ -1,0 +1,87 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta charset="UTF-8">
+    <meta content="True" name="HandheldFriendly">
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=auto">
+    <meta name="theme-color" content="#fff" media="(prefers-color-scheme: light)">
+    <meta name="theme-color" content="#1c1c1e" media="(prefers-color-scheme: dark)">
+    <link rel="stylesheet" href="../assets/style.css?sha256=0163ee8849d6dff51a8eab13f620f9684a2650be978414a301948f99af9a333e&t=1788926166">
+    <link rel="preload" href="../planet.json" as="fetch" type="application/json" crossorigin="anonymous">
+    <title>Who is reading this</title>
+    <script>
+      let userAgentRegex = /Planet\/\S*/;
+      window.PLANET = {
+        visitedFromPlanetClient: !!navigator.userAgent.match(userAgentRegex),
+        assetsPrefix: '../',
+      };
+
+      window.addEventListener('DOMContentLoaded', e => {
+        
+        
+      });
+    </script>
+    <script>
+      let env = {};
+    </script>
+    
+    <link rel="icon" href="../avatar.png?t=1788926166" sizes="144x144">
+    <link rel="shortcut icon" href="../favicon.ico?t=1788926166" type="image/png">
+    
+    
+    
+    
+    <style>
+    :root {
+      
+      --link-color: #5498E3;
+      
+    }
+    </style>
+  </head>
+  <body>
+    
+    <div class="wrapper">
+      <div class="main">
+        
+        
+<div id="body-dom" >
+  <div class="body-content centered-content content-top-offset">
+    <div id="post-header" class="post-header body-header mobile-padding negative-space">
+      <div id="post-title">
+        <span id="post-date">9.8.26</span>
+        <span id="post-name">Who is reading this</span>
+      </div>
+      
+    </div>
+
+    
+
+    
+
+    <div id="post-content" class="mobile-padding">
+    
+      <p>Posts can talk to the reader's wallet. This one asks who you are and shows you your own balance, read-only. Nothing is signed, nothing is sent, nothing leaves your browser.</p>
+<div style="border:1px solid var(--foreground-secondary-color);padding:16px">
+  <button id="wallet-connect" style="font:inherit;padding:8px 14px;cursor:pointer">Connect wallet</button>
+  <div id="wallet-card" hidden>
+    <div style="font-size:12px;opacity:.6">you</div><div id="wallet-address" style="font-size:20px">…</div>
+    <div id="wallet-balance" style="opacity:.8;margin:6px 0 12px">…</div>
+    <button id="wallet-pledge-btn" style="font:inherit;padding:8px 14px;cursor:pointer">Pledge to follow the money</button>
+    <div id="wallet-pledge" style="font-size:13px;margin-top:8px"></div>
+  </div>
+  <div id="wallet-note" style="font-size:13px;opacity:.7;margin-top:8px"></div>
+</div>
+<p style="font-size:13px;opacity:.6">How: <code>wallet.js</code> attached to this post, using <code>croptop.wallet.connect()</code> and a public RPC. The buy button on every post uses the same plumbing to send real transactions.</p>
+<script type="module" src="wallet.js"></script>
+
+    
+    </div>
+  </div>
+</div>
+
+      </div>
+    </div>
+    
+  </body>
+</html>

@@ -1,0 +1,97 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta charset="UTF-8">
+    <meta content="True" name="HandheldFriendly">
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=auto">
+    <meta name="theme-color" content="#fff" media="(prefers-color-scheme: light)">
+    <meta name="theme-color" content="#1c1c1e" media="(prefers-color-scheme: dark)">
+    <link rel="stylesheet" href="../assets/style.css?sha256=0163ee8849d6dff51a8eab13f620f9684a2650be978414a301948f99af9a333e&t=1788926166">
+    <link rel="preload" href="../planet.json" as="fetch" type="application/json" crossorigin="anonymous">
+    <title>This site, so far</title>
+    <script>
+      let userAgentRegex = /Planet\/\S*/;
+      window.PLANET = {
+        visitedFromPlanetClient: !!navigator.userAgent.match(userAgentRegex),
+        assetsPrefix: '../',
+      };
+
+      window.addEventListener('DOMContentLoaded', e => {
+        
+        
+      });
+    </script>
+    <script>
+      let env = {};
+    </script>
+    
+    <link rel="icon" href="../avatar.png?t=1788926166" sizes="144x144">
+    <link rel="shortcut icon" href="../favicon.ico?t=1788926166" type="image/png">
+    
+    
+    
+    
+    <style>
+    :root {
+      
+      --link-color: #5498E3;
+      
+    }
+    </style>
+  </head>
+  <body>
+    
+    <div class="wrapper">
+      <div class="main">
+        
+        
+<div id="body-dom" >
+  <div class="body-content centered-content content-top-offset">
+    <div id="post-header" class="post-header body-header mobile-padding negative-space">
+      <div id="post-title">
+        <span id="post-date">9.8.26</span>
+        <span id="post-name">This site, so far</span>
+      </div>
+      
+    </div>
+
+    
+
+    
+
+    <div id="post-content" class="mobile-padding">
+    
+      <p>A widget can read the whole site it lives in. This one draws every post on this site as a timeline, straight from <code>planet.json</code>, and updates itself every time the site is published.</p>
+<div id="timeline" style="border:1px solid var(--foreground-secondary-color);padding:16px">loading…</div>
+<p style="font-size:13px;opacity:.6">How: twenty lines inline in the post, using <code>croptop.site()</code>. The same call can build an archive page, a tag cloud, or "you might also like".</p>
+<script type="module">
+croptop.ready(({ site }) => {
+  const el = document.getElementById("timeline");
+  const posts = [...site.articles].sort((a, b) => a.created - b.created);
+  const toDate = (t) => new Date((t + 978307200) * 1000);
+  const first = toDate(posts[0].created), last = toDate(posts[posts.length - 1].created);
+  const span = Math.max(1, last - first);
+  el.innerHTML = `<div style="font-size:13px;opacity:.7">${posts.length} posts between ${first.toLocaleDateString()} and ${last.toLocaleDateString()}</div>
+    <div style="position:relative;height:56px;margin:14px 0;border-bottom:1px solid var(--foreground-secondary-color)"></div><ol style="margin:0;padding-left:18px;font-size:14px;line-height:1.7"></ol>`;
+  const track = el.children[1], list = el.children[2];
+  posts.forEach((p) => {
+    const x = (toDate(p.created) - first) / span * 100;
+    const dot = document.createElement("a"); dot.href = croptop.prefix + p.id + "/"; dot.title = p.title || "untitled";
+    dot.style.cssText = `position:absolute;left:calc(${x}% - 6px);bottom:-6px;width:12px;height:12px;border-radius:50%;background:${p.id === croptop.postId ? "#3bb273" : "var(--link-color)"}`;
+    track.appendChild(dot);
+    const li = document.createElement("li"); li.innerHTML = `<a href="${croptop.prefix}${p.id}/">${p.title || "untitled"}</a> <span style="opacity:.5">${toDate(p.created).toLocaleDateString()}</span>`;
+    list.appendChild(li);
+  });
+});
+</script>
+
+    
+    </div>
+  </div>
+</div>
+
+      </div>
+    </div>
+    
+  </body>
+</html>

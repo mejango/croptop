@@ -1,0 +1,31 @@
+{
+  "articleType" : 0,
+  "attachments" : [
+    "_cover.png",
+    "preview.js",
+    "wallet.js"
+  ],
+  "cids" : {
+    "_cover.png" : "QmYeiEZmbPF5URJr8ZptH8UzqFvFwo7a6mTwwBTx8FH6gP",
+    "preview.js" : "QmaEovxaF7gd7VM2WV5f4EdvWHDNjJ2hh8rDnx69qmxmA5",
+    "wallet.js" : "QmfQa74gv9vakteNT43yM6D9DngJQsfaQcWBjofGFEiPHW"
+  },
+  "content" : "<p>Posts can talk to the reader's wallet. This one asks who you are and shows you your own balance, read-only. Nothing is signed, nothing is sent, nothing leaves your browser.</p>\n<div style=\"border:1px solid var(--foreground-secondary-color);padding:16px\">\n  <button id=\"wallet-connect\" style=\"font:inherit;padding:8px 14px;cursor:pointer\">Connect wallet</button>\n  <div id=\"wallet-card\" hidden>\n    <div style=\"font-size:12px;opacity:.6\">you</div><div id=\"wallet-address\" style=\"font-size:20px\">…</div>\n    <div id=\"wallet-balance\" style=\"opacity:.8;margin:6px 0 12px\">…</div>\n    <button id=\"wallet-pledge-btn\" style=\"font:inherit;padding:8px 14px;cursor:pointer\">Pledge to follow the money</button>\n    <div id=\"wallet-pledge\" style=\"font-size:13px;margin-top:8px\"></div>\n  </div>\n  <div id=\"wallet-note\" style=\"font-size:13px;opacity:.7;margin-top:8px\"></div>\n</div>\n<p style=\"font-size:13px;opacity:.6\">How: <code>wallet.js</code> attached to this post, using <code>croptop.wallet.connect()</code> and a public RPC. The buy button on every post uses the same plumbing to send real transactions.</p>\n<script type=\"module\" src=\"wallet.js\"></script>\n",
+  "contentRendered" : "<p>Posts can talk to the reader's wallet. This one asks who you are and shows you your own balance, read-only. Nothing is signed, nothing is sent, nothing leaves your browser.</p>\n<div style=\"border:1px solid var(--foreground-secondary-color);padding:16px\">\n  <button id=\"wallet-connect\" style=\"font:inherit;padding:8px 14px;cursor:pointer\">Connect wallet</button>\n  <div id=\"wallet-card\" hidden>\n    <div style=\"font-size:12px;opacity:.6\">you</div><div id=\"wallet-address\" style=\"font-size:20px\">…</div>\n    <div id=\"wallet-balance\" style=\"opacity:.8;margin:6px 0 12px\">…</div>\n    <button id=\"wallet-pledge-btn\" style=\"font:inherit;padding:8px 14px;cursor:pointer\">Pledge to follow the money</button>\n    <div id=\"wallet-pledge\" style=\"font-size:13px;margin-top:8px\"></div>\n  </div>\n  <div id=\"wallet-note\" style=\"font-size:13px;opacity:.7;margin-top:8px\"></div>\n</div>\n<p style=\"font-size:13px;opacity:.6\">How: <code>wallet.js</code> attached to this post, using <code>croptop.wallet.connect()</code> and a public RPC. The buy button on every post uses the same plumbing to send real transactions.</p>\n<script type=\"module\" src=\"wallet.js\"></script>\n",
+  "created" : 810588410.2456691,
+  "externalLink" : "",
+  "hasAudio" : false,
+  "hasVideo" : false,
+  "heroImage" : "https://k51qzi5uqu5dilqjwgdm3zj0g24zaowqfxoargdm1lbj7s4frpwuzqp2tmxm4g.eth.sucks/D4917B9F-6155-49FF-B9BF-F5CC584C8393/_cover.png",
+  "heroImageFilename" : "_cover.png",
+  "heroImageHeight" : 512,
+  "heroImageURL" : "https://k51qzi5uqu5dilqjwgdm3zj0g24zaowqfxoargdm1lbj7s4frpwuzqp2tmxm4g.eth.sucks/D4917B9F-6155-49FF-B9BF-F5CC584C8393/_cover.png",
+  "heroImageWidth" : 512,
+  "id" : "D4917B9F-6155-49FF-B9BF-F5CC584C8393",
+  "link" : "/D4917B9F-6155-49FF-B9BF-F5CC584C8393/",
+  "slug" : "",
+  "tags" : {
+
+  },
+  "title" : "Who is reading this"
+}

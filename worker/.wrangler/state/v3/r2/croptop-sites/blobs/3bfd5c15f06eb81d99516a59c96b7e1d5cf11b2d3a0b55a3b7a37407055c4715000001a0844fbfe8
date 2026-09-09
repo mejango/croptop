@@ -1,0 +1,292 @@
+{
+  "about" : "Follow the money",
+  "acceptsDonation" : false,
+  "articles" : [
+    {
+      "articleType" : 0,
+      "attachments" : [
+        "_cover.png",
+        "preview.js"
+      ],
+      "cids" : {
+        "_cover.png" : "QmeFx1e9pM8otXJgVdsKwhNMNzsmj7vcXNi6UEMMjK5CSs",
+        "preview.js" : "QmbG97Ed5qnHniz9R34GrTK9VbTKmrpi4zYzK3DQd2EaTk"
+      },
+      "content" : "<p>A widget can read the whole site it lives in. This one draws every post on this site as a timeline, straight from <code>planet.json</code>, and updates itself every time the site is published.</p>\n<div id=\"timeline\" style=\"border:1px solid var(--foreground-secondary-color);padding:16px\">loading…</div>\n<p style=\"font-size:13px;opacity:.6\">How: twenty lines inline in the post, using <code>croptop.site()</code>. The same call can build an archive page, a tag cloud, or \"you might also like\".</p>\n<script type=\"module\">\ncroptop.ready(({ site }) => {\n  const el = document.getElementById(\"timeline\");\n  const posts = [...site.articles].sort((a, b) => a.created - b.created);\n  const toDate = (t) => new Date((t + 978307200) * 1000);\n  const first = toDate(posts[0].created), last = toDate(posts[posts.length - 1].created);\n  const span = Math.max(1, last - first);\n  el.innerHTML = `<div style=\"font-size:13px;opacity:.7\">${posts.length} posts between ${first.toLocaleDateString()} and ${last.toLocaleDateString()}</div>\n    <div style=\"position:relative;height:56px;margin:14px 0;border-bottom:1px solid var(--foreground-secondary-color)\"></div><ol style=\"margin:0;padding-left:18px;font-size:14px;line-height:1.7\"></ol>`;\n  const track = el.children[1], list = el.children[2];\n  posts.forEach((p) => {\n    const x = (toDate(p.created) - first) / span * 100;\n    const dot = document.createElement(\"a\"); dot.href = croptop.prefix + p.id + \"/\"; dot.title = p.title || \"untitled\";\n    dot.style.cssText = `position:absolute;left:calc(${x}% - 6px);bottom:-6px;width:12px;height:12px;border-radius:50%;background:${p.id === croptop.postId ? \"#3bb273\" : \"var(--link-color)\"}`;\n    track.appendChild(dot);\n    const li = document.createElement(\"li\"); li.innerHTML = `<a href=\"${croptop.prefix}${p.id}/\">${p.title || \"untitled\"}</a> <span style=\"opacity:.5\">${toDate(p.created).toLocaleDateString()}</span>`;\n    list.appendChild(li);\n  });\n});\n</script>\n",
+      "contentRendered" : "<p>A widget can read the whole site it lives in. This one draws every post on this site as a timeline, straight from <code>planet.json</code>, and updates itself every time the site is published.</p>\n<div id=\"timeline\" style=\"border:1px solid var(--foreground-secondary-color);padding:16px\">loading…</div>\n<p style=\"font-size:13px;opacity:.6\">How: twenty lines inline in the post, using <code>croptop.site()</code>. The same call can build an archive page, a tag cloud, or \"you might also like\".</p>\n<script type=\"module\">\ncroptop.ready(({ site }) => {\n  const el = document.getElementById(\"timeline\");\n  const posts = [...site.articles].sort((a, b) => a.created - b.created);\n  const toDate = (t) => new Date((t + 978307200) * 1000);\n  const first = toDate(posts[0].created), last = toDate(posts[posts.length - 1].created);\n  const span = Math.max(1, last - first);\n  el.innerHTML = `<div style=\"font-size:13px;opacity:.7\">${posts.length} posts between ${first.toLocaleDateString()} and ${last.toLocaleDateString()}</div>\n    <div style=\"position:relative;height:56px;margin:14px 0;border-bottom:1px solid var(--foreground-secondary-color)\"></div><ol style=\"margin:0;padding-left:18px;font-size:14px;line-height:1.7\"></ol>`;\n  const track = el.children[1], list = el.children[2];\n  posts.forEach((p) => {\n    const x = (toDate(p.created) - first) / span * 100;\n    const dot = document.createElement(\"a\"); dot.href = croptop.prefix + p.id + \"/\"; dot.title = p.title || \"untitled\";\n    dot.style.cssText = `position:absolute;left:calc(${x}% - 6px);bottom:-6px;width:12px;height:12px;border-radius:50%;background:${p.id === croptop.postId ? \"#3bb273\" : \"var(--link-color)\"}`;\n    track.appendChild(dot);\n    const li = document.createElement(\"li\"); li.innerHTML = `<a href=\"${croptop.prefix}${p.id}/\">${p.title || \"untitled\"}</a> <span style=\"opacity:.5\">${toDate(p.created).toLocaleDateString()}</span>`;\n    list.appendChild(li);\n  });\n});\n</script>\n",
+      "created" : 810588410.2907362,
+      "externalLink" : "",
+      "hasAudio" : false,
+      "hasVideo" : false,
+      "heroImage" : "https://k51qzi5uqu5dilqjwgdm3zj0g24zaowqfxoargdm1lbj7s4frpwuzqp2tmxm4g.eth.sucks/2DD17D5A-DFEF-4F7D-A8C8-039AA3AB8DE9/_cover.png",
+      "heroImageFilename" : "_cover.png",
+      "heroImageHeight" : 512,
+      "heroImageURL" : "https://k51qzi5uqu5dilqjwgdm3zj0g24zaowqfxoargdm1lbj7s4frpwuzqp2tmxm4g.eth.sucks/2DD17D5A-DFEF-4F7D-A8C8-039AA3AB8DE9/_cover.png",
+      "heroImageWidth" : 512,
+      "id" : "2DD17D5A-DFEF-4F7D-A8C8-039AA3AB8DE9",
+      "link" : "/2DD17D5A-DFEF-4F7D-A8C8-039AA3AB8DE9/",
+      "slug" : "",
+      "tags" : {
+
+      },
+      "title" : "This site, so far"
+    },
+    {
+      "articleType" : 0,
+      "attachments" : [
+        "_cover.png",
+        "preview.js",
+        "wallet.js"
+      ],
+      "cids" : {
+        "_cover.png" : "QmYeiEZmbPF5URJr8ZptH8UzqFvFwo7a6mTwwBTx8FH6gP",
+        "preview.js" : "QmaEovxaF7gd7VM2WV5f4EdvWHDNjJ2hh8rDnx69qmxmA5",
+        "wallet.js" : "QmfQa74gv9vakteNT43yM6D9DngJQsfaQcWBjofGFEiPHW"
+      },
+      "content" : "<p>Posts can talk to the reader's wallet. This one asks who you are and shows you your own balance, read-only. Nothing is signed, nothing is sent, nothing leaves your browser.</p>\n<div style=\"border:1px solid var(--foreground-secondary-color);padding:16px\">\n  <button id=\"wallet-connect\" style=\"font:inherit;padding:8px 14px;cursor:pointer\">Connect wallet</button>\n  <div id=\"wallet-card\" hidden>\n    <div style=\"font-size:12px;opacity:.6\">you</div><div id=\"wallet-address\" style=\"font-size:20px\">…</div>\n    <div id=\"wallet-balance\" style=\"opacity:.8;margin:6px 0 12px\">…</div>\n    <button id=\"wallet-pledge-btn\" style=\"font:inherit;padding:8px 14px;cursor:pointer\">Pledge to follow the money</button>\n    <div id=\"wallet-pledge\" style=\"font-size:13px;margin-top:8px\"></div>\n  </div>\n  <div id=\"wallet-note\" style=\"font-size:13px;opacity:.7;margin-top:8px\"></div>\n</div>\n<p style=\"font-size:13px;opacity:.6\">How: <code>wallet.js</code> attached to this post, using <code>croptop.wallet.connect()</code> and a public RPC. The buy button on every post uses the same plumbing to send real transactions.</p>\n<script type=\"module\" src=\"wallet.js\"></script>\n",
+      "contentRendered" : "<p>Posts can talk to the reader's wallet. This one asks who you are and shows you your own balance, read-only. Nothing is signed, nothing is sent, nothing leaves your browser.</p>\n<div style=\"border:1px solid var(--foreground-secondary-color);padding:16px\">\n  <button id=\"wallet-connect\" style=\"font:inherit;padding:8px 14px;cursor:pointer\">Connect wallet</button>\n  <div id=\"wallet-card\" hidden>\n    <div style=\"font-size:12px;opacity:.6\">you</div><div id=\"wallet-address\" style=\"font-size:20px\">…</div>\n    <div id=\"wallet-balance\" style=\"opacity:.8;margin:6px 0 12px\">…</div>\n    <button id=\"wallet-pledge-btn\" style=\"font:inherit;padding:8px 14px;cursor:pointer\">Pledge to follow the money</button>\n    <div id=\"wallet-pledge\" style=\"font-size:13px;margin-top:8px\"></div>\n  </div>\n  <div id=\"wallet-note\" style=\"font-size:13px;opacity:.7;margin-top:8px\"></div>\n</div>\n<p style=\"font-size:13px;opacity:.6\">How: <code>wallet.js</code> attached to this post, using <code>croptop.wallet.connect()</code> and a public RPC. The buy button on every post uses the same plumbing to send real transactions.</p>\n<script type=\"module\" src=\"wallet.js\"></script>\n",
+      "created" : 810588410.2456691,
+      "externalLink" : "",
+      "hasAudio" : false,
+      "hasVideo" : false,
+      "heroImage" : "https://k51qzi5uqu5dilqjwgdm3zj0g24zaowqfxoargdm1lbj7s4frpwuzqp2tmxm4g.eth.sucks/D4917B9F-6155-49FF-B9BF-F5CC584C8393/_cover.png",
+      "heroImageFilename" : "_cover.png",
+      "heroImageHeight" : 512,
+      "heroImageURL" : "https://k51qzi5uqu5dilqjwgdm3zj0g24zaowqfxoargdm1lbj7s4frpwuzqp2tmxm4g.eth.sucks/D4917B9F-6155-49FF-B9BF-F5CC584C8393/_cover.png",
+      "heroImageWidth" : 512,
+      "id" : "D4917B9F-6155-49FF-B9BF-F5CC584C8393",
+      "link" : "/D4917B9F-6155-49FF-B9BF-F5CC584C8393/",
+      "slug" : "",
+      "tags" : {
+
+      },
+      "title" : "Who is reading this"
+    },
+    {
+      "articleType" : 0,
+      "attachments" : [
+        "_cover.png",
+        "motion.js",
+        "preview.js"
+      ],
+      "cids" : {
+        "_cover.png" : "QmWBc8J3qzUVMnBcKjLRPYxPPeFQAnMkuPjNx55CDLScqM",
+        "motion.js" : "QmNY9tvHkpP87RtbPmx2MBcttViS8Dqum3cmZUruq8YY7r",
+        "preview.js" : "QmcAu9m1TQgEYDMy7XYSaHauKXbpi7RV4a5umPP5LiSyLQ"
+      },
+      "content" : "<p>Many small donors, one campaign, five ways to spend. A living picture of the thing this site is about. It is drawn fresh in your browser every frame, seeded by this post's id, so everyone sees the same piece and nobody hosts a video.</p>\n<canvas id=\"motion\" style=\"width:100%;height:360px;display:block;background:#0e0e0e;border:1px solid var(--foreground-secondary-color)\"></canvas>\n<p style=\"font-size:13px;opacity:.6\">How: <code>motion.js</code> attached to this post. Plain canvas, <code>requestAnimationFrame</code>, the site's highlight color read from CSS. Pauses when the tab is hidden.</p>\n<script type=\"module\" src=\"motion.js\"></script>\n",
+      "contentRendered" : "<p>Many small donors, one campaign, five ways to spend. A living picture of the thing this site is about. It is drawn fresh in your browser every frame, seeded by this post's id, so everyone sees the same piece and nobody hosts a video.</p>\n<canvas id=\"motion\" style=\"width:100%;height:360px;display:block;background:#0e0e0e;border:1px solid var(--foreground-secondary-color)\"></canvas>\n<p style=\"font-size:13px;opacity:.6\">How: <code>motion.js</code> attached to this post. Plain canvas, <code>requestAnimationFrame</code>, the site's highlight color read from CSS. Pauses when the tab is hidden.</p>\n<script type=\"module\" src=\"motion.js\"></script>\n",
+      "created" : 810588410.203069,
+      "externalLink" : "",
+      "hasAudio" : false,
+      "hasVideo" : false,
+      "heroImage" : "https://k51qzi5uqu5dilqjwgdm3zj0g24zaowqfxoargdm1lbj7s4frpwuzqp2tmxm4g.eth.sucks/791E7E49-6C04-4D90-894F-3A5222D556B8/_cover.png",
+      "heroImageFilename" : "_cover.png",
+      "heroImageHeight" : 512,
+      "heroImageURL" : "https://k51qzi5uqu5dilqjwgdm3zj0g24zaowqfxoargdm1lbj7s4frpwuzqp2tmxm4g.eth.sucks/791E7E49-6C04-4D90-894F-3A5222D556B8/_cover.png",
+      "heroImageWidth" : 512,
+      "id" : "791E7E49-6C04-4D90-894F-3A5222D556B8",
+      "link" : "/791E7E49-6C04-4D90-894F-3A5222D556B8/",
+      "slug" : "",
+      "tags" : {
+
+      },
+      "title" : "Money in motion"
+    },
+    {
+      "articleType" : 0,
+      "attachments" : [
+        "_cover.png",
+        "budget.js",
+        "preview.js"
+      ],
+      "cids" : {
+        "_cover.png" : "QmPFGhF2o5ZLKdCxaEN53nFefxrJK4CcVvywR4AqyHWWsL",
+        "budget.js" : "Qmdx8My13x5Z2c7QWWqYK1kCqrjKsZhKxAf5C98ZhniJ6g",
+        "preview.js" : "QmPcXgwbZoR6M7QNHhoMvRVdeTxT5EpmqoZJwj6itEG3P2"
+      },
+      "content" : "<p>Campaigns say how much they need. Readers should be able to say how they would spend it. Drag a slider; the others rebalance so the total stays whole. Nothing is sent anywhere. Your split is remembered on this device.</p>\n<div id=\"budget\" style=\"border:1px solid var(--foreground-secondary-color);padding:16px;display:grid;gap:14px\"></div>\n<p style=\"font-size:13px;opacity:.6\">How: <code>budget.js</code> attached to this post. Sliders, five bars, <code>localStorage</code>. Fork the idea for a real budget by loading numbers from an attached <code>budget.json</code>.</p>\n<script type=\"module\" src=\"budget.js\"></script>\n",
+      "contentRendered" : "<p>Campaigns say how much they need. Readers should be able to say how they would spend it. Drag a slider; the others rebalance so the total stays whole. Nothing is sent anywhere. Your split is remembered on this device.</p>\n<div id=\"budget\" style=\"border:1px solid var(--foreground-secondary-color);padding:16px;display:grid;gap:14px\"></div>\n<p style=\"font-size:13px;opacity:.6\">How: <code>budget.js</code> attached to this post. Sliders, five bars, <code>localStorage</code>. Fork the idea for a real budget by loading numbers from an attached <code>budget.json</code>.</p>\n<script type=\"module\" src=\"budget.js\"></script>\n",
+      "created" : 810588410.1581299,
+      "externalLink" : "",
+      "hasAudio" : false,
+      "hasVideo" : false,
+      "heroImage" : "https://k51qzi5uqu5dilqjwgdm3zj0g24zaowqfxoargdm1lbj7s4frpwuzqp2tmxm4g.eth.sucks/214DD1F7-572A-491E-82CA-D587DB49AFB4/_cover.png",
+      "heroImageFilename" : "_cover.png",
+      "heroImageHeight" : 512,
+      "heroImageURL" : "https://k51qzi5uqu5dilqjwgdm3zj0g24zaowqfxoargdm1lbj7s4frpwuzqp2tmxm4g.eth.sucks/214DD1F7-572A-491E-82CA-D587DB49AFB4/_cover.png",
+      "heroImageWidth" : 512,
+      "id" : "214DD1F7-572A-491E-82CA-D587DB49AFB4",
+      "link" : "/214DD1F7-572A-491E-82CA-D587DB49AFB4/",
+      "slug" : "",
+      "tags" : {
+
+      },
+      "title" : "Spend it your way"
+    },
+    {
+      "articleType" : 0,
+      "attachments" : [
+        "_cover.png",
+        "gas.js",
+        "preview.js"
+      ],
+      "cids" : {
+        "_cover.png" : "QmTUa2WkPqgc7ELESiwszS6nKVw15wK8k8tUyJ5cUXzVxk",
+        "gas.js" : "QmeMStopm6yebYRwcetkMQNwispySkBWKM9MKLbrBFEK3s",
+        "preview.js" : "QmTrUsbBwoVCnm3s9S2qk9e9GyK1D79Uf9JipqaR7WiWa1"
+      },
+      "content" : "<p>Money moves on Ethereum every twelve seconds. This post asks a public node directly, from your browser, with nothing in between. No server, no API key, no tracking.</p>\n<div id=\"gas\" style=\"border:1px solid var(--foreground-secondary-color);padding:16px;display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:12px;font-family:var(--font-family,inherit)\">\n  <div><div style=\"font-size:12px;opacity:.6\">latest block</div><div id=\"gas-block\" style=\"font-size:22px\">…</div></div>\n  <div><div style=\"font-size:12px;opacity:.6\">gas price</div><div id=\"gas-fee\" style=\"font-size:22px\">…</div></div>\n  <div><div style=\"font-size:12px;opacity:.6\">in that block</div><div id=\"gas-txs\" style=\"font-size:22px\">…</div></div>\n  <div><div style=\"font-size:12px;opacity:.6\">ETH</div><div id=\"gas-eth\" style=\"font-size:22px\">…</div></div>\n  <div style=\"grid-column:1/-1\"><canvas id=\"gas-spark\" style=\"width:100%;height:60px;display:block\"></canvas></div>\n  <div style=\"grid-column:1/-1;font-size:13px;opacity:.7\"><span id=\"gas-transfer\"></span> <span id=\"gas-status\">connecting…</span></div>\n</div>\n<p style=\"font-size:13px;opacity:.6\">How: a 40-line <code>gas.js</code> attached to this post, using the <code>ethers</code> the template already ships. View source, copy it, change the RPC.</p>\n<script type=\"module\" src=\"gas.js\"></script>\n",
+      "contentRendered" : "<p>Money moves on Ethereum every twelve seconds. This post asks a public node directly, from your browser, with nothing in between. No server, no API key, no tracking.</p>\n<div id=\"gas\" style=\"border:1px solid var(--foreground-secondary-color);padding:16px;display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:12px;font-family:var(--font-family,inherit)\">\n  <div><div style=\"font-size:12px;opacity:.6\">latest block</div><div id=\"gas-block\" style=\"font-size:22px\">…</div></div>\n  <div><div style=\"font-size:12px;opacity:.6\">gas price</div><div id=\"gas-fee\" style=\"font-size:22px\">…</div></div>\n  <div><div style=\"font-size:12px;opacity:.6\">in that block</div><div id=\"gas-txs\" style=\"font-size:22px\">…</div></div>\n  <div><div style=\"font-size:12px;opacity:.6\">ETH</div><div id=\"gas-eth\" style=\"font-size:22px\">…</div></div>\n  <div style=\"grid-column:1/-1\"><canvas id=\"gas-spark\" style=\"width:100%;height:60px;display:block\"></canvas></div>\n  <div style=\"grid-column:1/-1;font-size:13px;opacity:.7\"><span id=\"gas-transfer\"></span> <span id=\"gas-status\">connecting…</span></div>\n</div>\n<p style=\"font-size:13px;opacity:.6\">How: a 40-line <code>gas.js</code> attached to this post, using the <code>ethers</code> the template already ships. View source, copy it, change the RPC.</p>\n<script type=\"module\" src=\"gas.js\"></script>\n",
+      "created" : 810588410.1153381,
+      "externalLink" : "",
+      "hasAudio" : false,
+      "hasVideo" : false,
+      "heroImage" : "https://k51qzi5uqu5dilqjwgdm3zj0g24zaowqfxoargdm1lbj7s4frpwuzqp2tmxm4g.eth.sucks/5B3D5249-BBCC-4F72-8AE4-B87652434E35/_cover.png",
+      "heroImageFilename" : "_cover.png",
+      "heroImageHeight" : 512,
+      "heroImageURL" : "https://k51qzi5uqu5dilqjwgdm3zj0g24zaowqfxoargdm1lbj7s4frpwuzqp2tmxm4g.eth.sucks/5B3D5249-BBCC-4F72-8AE4-B87652434E35/_cover.png",
+      "heroImageWidth" : 512,
+      "id" : "5B3D5249-BBCC-4F72-8AE4-B87652434E35",
+      "link" : "/5B3D5249-BBCC-4F72-8AE4-B87652434E35/",
+      "slug" : "",
+      "tags" : {
+
+      },
+      "title" : "What Ethereum is doing right now"
+    },
+    {
+      "articleType" : 0,
+      "attachments" : [
+        "_cover.png",
+        "preview.js"
+      ],
+      "cids" : {
+        "_cover.png" : "Qmaz8NQkZbbVN5MdxoNXrj3cu7mudNdbsY3wPi7sSHDXvS",
+        "preview.js" : "QmZeerAfAV2wkoTysfh98ajMH2ZV6NavSsYkHUf4VvuMZH"
+      },
+      "content" : "<p>Every campaign runs against a clock. This one counts down to the 2026 US midterm election, November 3.</p>\n<div id=\"cd\" style=\"display:grid;grid-template-columns:repeat(4,1fr);gap:8px;text-align:center;border:1px solid var(--foreground-secondary-color);padding:16px\">\n  <div><div id=\"cd-d\" style=\"font-size:40px\">0</div><div style=\"font-size:12px;opacity:.6\">days</div></div>\n  <div><div id=\"cd-h\" style=\"font-size:40px\">0</div><div style=\"font-size:12px;opacity:.6\">hours</div></div>\n  <div><div id=\"cd-m\" style=\"font-size:40px\">0</div><div style=\"font-size:12px;opacity:.6\">minutes</div></div>\n  <div><div id=\"cd-s\" style=\"font-size:40px\">0</div><div style=\"font-size:12px;opacity:.6\">seconds</div></div>\n</div>\n<p style=\"font-size:13px;opacity:.6\">How: eight lines inline. Change the date and it counts down to anything.</p>\n<script type=\"module\">\nconst target = new Date(\"2026-11-03T12:00:00-05:00\");\nconst tick = () => { let s = Math.max(0, Math.floor((target - Date.now()) / 1000));\n  for (const [id, div] of [[\"cd-d\", 86400], [\"cd-h\", 3600], [\"cd-m\", 60], [\"cd-s\", 1]]) { document.getElementById(id).textContent = Math.floor(s / div); s %= div; } };\ntick(); setInterval(tick, 1000);\n</script>\n",
+      "contentRendered" : "<p>Every campaign runs against a clock. This one counts down to the 2026 US midterm election, November 3.</p>\n<div id=\"cd\" style=\"display:grid;grid-template-columns:repeat(4,1fr);gap:8px;text-align:center;border:1px solid var(--foreground-secondary-color);padding:16px\">\n  <div><div id=\"cd-d\" style=\"font-size:40px\">0</div><div style=\"font-size:12px;opacity:.6\">days</div></div>\n  <div><div id=\"cd-h\" style=\"font-size:40px\">0</div><div style=\"font-size:12px;opacity:.6\">hours</div></div>\n  <div><div id=\"cd-m\" style=\"font-size:40px\">0</div><div style=\"font-size:12px;opacity:.6\">minutes</div></div>\n  <div><div id=\"cd-s\" style=\"font-size:40px\">0</div><div style=\"font-size:12px;opacity:.6\">seconds</div></div>\n</div>\n<p style=\"font-size:13px;opacity:.6\">How: eight lines inline. Change the date and it counts down to anything.</p>\n<script type=\"module\">\nconst target = new Date(\"2026-11-03T12:00:00-05:00\");\nconst tick = () => { let s = Math.max(0, Math.floor((target - Date.now()) / 1000));\n  for (const [id, div] of [[\"cd-d\", 86400], [\"cd-h\", 3600], [\"cd-m\", 60], [\"cd-s\", 1]]) { document.getElementById(id).textContent = Math.floor(s / div); s %= div; } };\ntick(); setInterval(tick, 1000);\n</script>\n",
+      "created" : 810588410.0645571,
+      "externalLink" : "",
+      "hasAudio" : false,
+      "hasVideo" : false,
+      "heroImage" : "https://k51qzi5uqu5dilqjwgdm3zj0g24zaowqfxoargdm1lbj7s4frpwuzqp2tmxm4g.eth.sucks/0A5773AE-1409-4234-AF21-2827119F7D67/_cover.png",
+      "heroImageFilename" : "_cover.png",
+      "heroImageHeight" : 512,
+      "heroImageURL" : "https://k51qzi5uqu5dilqjwgdm3zj0g24zaowqfxoargdm1lbj7s4frpwuzqp2tmxm4g.eth.sucks/0A5773AE-1409-4234-AF21-2827119F7D67/_cover.png",
+      "heroImageWidth" : 512,
+      "id" : "0A5773AE-1409-4234-AF21-2827119F7D67",
+      "link" : "/0A5773AE-1409-4234-AF21-2827119F7D67/",
+      "slug" : "",
+      "tags" : {
+
+      },
+      "title" : "The clock every campaign runs against"
+    },
+    {
+      "articleType" : 0,
+      "attachments" : [
+        "_cover.png"
+      ],
+      "cids" : {
+        "_cover.png" : "QmRQr3hVJtc5QR7Mbc889LpxJsfxfCSNt4dT2szbz11Gr1"
+      },
+      "content" : "",
+      "contentRendered" : "",
+      "created" : 810579720,
+      "externalLink" : "",
+      "hasAudio" : false,
+      "hasVideo" : false,
+      "heroImage" : "https://k51qzi5uqu5dilqjwgdm3zj0g24zaowqfxoargdm1lbj7s4frpwuzqp2tmxm4g.eth.sucks/A54AAE12-27B5-4FE1-8654-E5027C4ECC86/_cover.png",
+      "heroImageFilename" : "_cover.png",
+      "heroImageHeight" : 512,
+      "heroImageURL" : "https://k51qzi5uqu5dilqjwgdm3zj0g24zaowqfxoargdm1lbj7s4frpwuzqp2tmxm4g.eth.sucks/A54AAE12-27B5-4FE1-8654-E5027C4ECC86/_cover.png",
+      "heroImageWidth" : 512,
+      "id" : "A54AAE12-27B5-4FE1-8654-E5027C4ECC86",
+      "link" : "/A54AAE12-27B5-4FE1-8654-E5027C4ECC86/",
+      "slug" : "",
+      "tags" : {
+
+      },
+      "title" : "Doop"
+    },
+    {
+      "articleType" : 0,
+      "attachments" : [
+        "Screenshot 2025-11-05 at 23.56.49.png"
+      ],
+      "cids" : {
+        "Screenshot 2025-11-05 at 23.56.49.png" : "QmaEjj2kdv1hJRn1b6j2YDwQMBUv6xMdTfS2LyMF7C4oVP"
+      },
+      "content" : "<img width=\"450\" alt=\"Screenshot 2025-11-05 at 23.56.49\" src=\"Screenshot 2025-11-05 at 23.56.49.png\">\n\n\n",
+      "contentRendered" : "<img width=\"450\" alt=\"Screenshot 2025-11-05 at 23.56.49\" src=\"Screenshot 2025-11-05 at 23.56.49.png\">\n",
+      "created" : 784090614.741585,
+      "externalLink" : "",
+      "hasAudio" : false,
+      "hasVideo" : false,
+      "heroImage" : "https://k51qzi5uqu5dilqjwgdm3zj0g24zaowqfxoargdm1lbj7s4frpwuzqp2tmxm4g.eth.sucks/F1A786BB-D875-4DC6-A0A1-FB9C07BB46B5/Screenshot%202025-11-05%20at%2023.56.49.png",
+      "heroImageFilename" : "Screenshot 2025-11-05 at 23.56.49.png",
+      "heroImageHeight" : 428,
+      "heroImageURL" : "https://k51qzi5uqu5dilqjwgdm3zj0g24zaowqfxoargdm1lbj7s4frpwuzqp2tmxm4g.eth.sucks/F1A786BB-D875-4DC6-A0A1-FB9C07BB46B5/Screenshot%202025-11-05%20at%2023.56.49.png",
+      "heroImageWidth" : 900,
+      "id" : "F1A786BB-D875-4DC6-A0A1-FB9C07BB46B5",
+      "link" : "/F1A786BB-D875-4DC6-A0A1-FB9C07BB46B5/",
+      "slug" : "",
+      "tags" : {
+
+      },
+      "title" : ""
+    },
+    {
+      "articleType" : 0,
+      "attachments" : [
+        "_cover.png"
+      ],
+      "cids" : {
+        "_cover.png" : "QmecMZmmxKo2MSeZr4kACrQ86SmrtyCvpvyc9rDCUtP2om"
+      },
+      "content" : "# Follo.Money (Follo)\n\n### Follow the money\n\nFund politics, and see how funding is used.\n\n1. Campaigns say how much they need, over time. \n2. People donate to campaigns. \n3. Everyone can see expenditures transparently. \n\n### How it works:\n- Anyone can create a campaign by giving it a name and a timed initial spending limit.\n- People donate to campaigns, knowing the campaign cant use more than what they’ve agreed to, for the specified amount of time.\n- Donors keep access to a portion of a campaign's surplus funds. \n- Keep in mind a campaign can change its spending after the initial limit’s duration, all surplus funds become accessible, the owner decides if and when to set another timed spending limit.\n\n### Why it works:\n- The public sector doesn’t benefit from private transactions. Winning politicians are doing things more transparently, more authentically. \n- People either prefer to be able to see where their money goes, or they're indifferent about it. No one strongly prefers their elected officials keep things from them.\n- The status quo is ActBlue (https://secure.actblue.com/donate/zohran-mamdani-transition-1/). It is a dead simple payment experience.\n- We've finally got the right tools to make this type of thing happen without relying on bankers.\n- The public sector should use efficient payment rails owned by the public sector.\n\n\n### Who's it for:\nZohran. As Zohran continues asking for money, given his politics, he should prefer a system that allows him to be upfront about how much funds are needed, and his movement should prefer transparency and authenticity...\n\n...so long as its also a dead simple experience for donors and campaign owners. The money has to flow.\n\n\n",
+      "contentRendered" : "<h1>Follo.Money (Follo)</h1>\n<h3>Follow the money</h3>\n<p>Fund politics, and see how funding is used.</p>\n<ol>\n<li>Campaigns say how much they need, over time.</li>\n<li>People donate to campaigns.</li>\n<li>Everyone can see expenditures transparently.</li>\n</ol>\n<h3>How it works:</h3>\n<ul>\n<li>Anyone can create a campaign by giving it a name and a timed initial spending limit.</li>\n<li>People donate to campaigns, knowing the campaign cant use more than what they’ve agreed to, for the specified amount of time.</li>\n<li>Donors keep access to a portion of a campaign's surplus funds.</li>\n<li>Keep in mind a campaign can change its spending after the initial limit’s duration, all surplus funds become accessible, the owner decides if and when to set another timed spending limit.</li>\n</ul>\n<h3>Why it works:</h3>\n<ul>\n<li>The public sector doesn’t benefit from private transactions. Winning politicians are doing things more transparently, more authentically.</li>\n<li>People either prefer to be able to see where their money goes, or they're indifferent about it. No one strongly prefers their elected officials keep things from them.</li>\n<li>The status quo is ActBlue (<a href=\"https://secure.actblue.com/donate/zohran-mamdani-transition-1/\">https://secure.actblue.com/donate/zohran-mamdani-transition-1/</a>). It is a dead simple payment experience.</li>\n<li>We've finally got the right tools to make this type of thing happen without relying on bankers.</li>\n<li>The public sector should use efficient payment rails owned by the public sector.</li>\n</ul>\n<h3>Who's it for:</h3>\n<p>Zohran. As Zohran continues asking for money, given his politics, he should prefer a system that allows him to be upfront about how much funds are needed, and his movement should prefer transparency and authenticity...</p>\n<p>...so long as its also a dead simple experience for donors and campaign owners. The money has to flow.</p>\n",
+      "created" : 784089060.917195,
+      "externalLink" : "",
+      "hasAudio" : false,
+      "hasVideo" : false,
+      "heroImage" : "https://k51qzi5uqu5dilqjwgdm3zj0g24zaowqfxoargdm1lbj7s4frpwuzqp2tmxm4g.eth.sucks/E96490CE-796F-4B4B-ACAC-1EA1D6EE6812/_cover.png",
+      "heroImageFilename" : "_cover.png",
+      "heroImageHeight" : 1024,
+      "heroImageURL" : "https://k51qzi5uqu5dilqjwgdm3zj0g24zaowqfxoargdm1lbj7s4frpwuzqp2tmxm4g.eth.sucks/E96490CE-796F-4B4B-ACAC-1EA1D6EE6812/_cover.png",
+      "heroImageWidth" : 1024,
+      "id" : "E96490CE-796F-4B4B-ACAC-1EA1D6EE6812",
+      "link" : "/E96490CE-796F-4B4B-ACAC-1EA1D6EE6812/",
+      "slug" : "",
+      "tags" : {
+
+      },
+      "title" : "Follow.Money"
+    }
+  ],
+  "created" : 784089041.796655,
+  "discordLink" : "",
+  "farcasterEnabled" : false,
+  "githubUsername" : "",
+  "id" : "5F8AD658-1B43-4856-B953-6B9CB6850C2E",
+  "ipns" : "k51qzi5uqu5dilqjwgdm3zj0g24zaowqfxoargdm1lbj7s4frpwuzqp2tmxm4g",
+  "juiceboxEnabled" : false,
+  "mastodonUsername" : "",
+  "name" : "FOLLO",
+  "plausibleAPIServer" : "plausible.io",
+  "plausibleDomain" : "",
+  "plausibleEnabled" : false,
+  "podcastCategories" : {
+
+  },
+  "podcastExplicit" : false,
+  "podcastLanguage" : "en",
+  "tags" : {
+
+  },
+  "telegramUsername" : "",
+  "twitterUsername" : "",
+  "updated" : 810618355.2330172
+}

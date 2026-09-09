@@ -1,0 +1,25 @@
+{
+  "attributes" : [
+    {
+      "trait_type" : "title",
+      "value" : "What Ethereum is doing right now"
+    },
+    {
+      "trait_type" : "title_sha256",
+      "value" : "eccf28ed7733de78e1fa6119950eba65f45333d2ecca76a397fa8d7335a3ec9e"
+    },
+    {
+      "trait_type" : "content_sha256",
+      "value" : "e0d10fe84e1a130c2b45348fbc533534771073245d511b57d478f6cdfd92285a"
+    },
+    {
+      "trait_type" : "created_at",
+      "value" : "1788895610"
+    }
+  ],
+  "description" : "",
+  "external_url" : "https://k51qzi5uqu5dilqjwgdm3zj0g24zaowqfxoargdm1lbj7s4frpwuzqp2tmxm4g.eth.sucks/5B3D5249-BBCC-4F72-8AE4-B87652434E35/",
+  "image" : "https://ipfs.io/ipfs/QmZcs6uZkTaEVAF3YNX9UwCzL3U2Wmc2LwDug9UymMYAYz",
+  "mimeType" : "text/javascript",
+  "name" : "What Ethereum is doing right now"
+}

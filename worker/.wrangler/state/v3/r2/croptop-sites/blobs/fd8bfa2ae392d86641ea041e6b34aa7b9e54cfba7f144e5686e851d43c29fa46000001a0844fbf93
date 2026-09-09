@@ -1,0 +1,25 @@
+{
+  "attributes" : [
+    {
+      "trait_type" : "title",
+      "value" : "This site, so far"
+    },
+    {
+      "trait_type" : "title_sha256",
+      "value" : "0c24cd340572c5e9c8a7fc60ea7c82e9524a774687470977521d4f74fd39bb75"
+    },
+    {
+      "trait_type" : "content_sha256",
+      "value" : "ab402d4360c4260d569c3deed04ff5c48c85f3794a09f12976eab97f4f62c481"
+    },
+    {
+      "trait_type" : "created_at",
+      "value" : "1788895610"
+    }
+  ],
+  "description" : "",
+  "external_url" : "https://k51qzi5uqu5dilqjwgdm3zj0g24zaowqfxoargdm1lbj7s4frpwuzqp2tmxm4g.eth.sucks/2DD17D5A-DFEF-4F7D-A8C8-039AA3AB8DE9/",
+  "image" : "https://ipfs.io/ipfs/QmeFx1e9pM8otXJgVdsKwhNMNzsmj7vcXNi6UEMMjK5CSs",
+  "mimeType" : "image/png",
+  "name" : "This site, so far"
+}
