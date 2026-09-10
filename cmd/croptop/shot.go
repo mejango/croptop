@@ -115,7 +115,7 @@ func installShotShortcut(key string) error {
       <key>ActionBundlePath</key><string>/System/Library/Automator/Run Shell Script.action</string>
       <key>ActionName</key><string>Run Shell Script</string>
       <key>ActionParameters</key><dict>
-        <key>COMMAND_STRING</key><string>%s shot &gt;/dev/null 2&gt;&amp;1 &amp;</string>
+        <key>COMMAND_STRING</key><string>%s shot &gt;/dev/null 2&gt;&amp;1</string>
         <key>CheckedForUserDefaultShell</key><true/>
         <key>inputMethod</key><integer>1</integer>
         <key>shell</key><string>/bin/sh</string>
@@ -148,6 +148,8 @@ func installShotShortcut(key string) error {
   </dict>
 </dict></plist>
 `, exe)
+	// The command stays in the foreground: Automator ends the action's process group when the
+	// script returns, which killed a backgrounded croptop before screencapture could open.
 	if err := os.WriteFile(filepath.Join(dir, "Info.plist"), []byte(info), 0o644); err != nil {
 		return err
 	}
