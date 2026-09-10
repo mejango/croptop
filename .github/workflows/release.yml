@@ -28,14 +28,19 @@ jobs:
   macos-app:
     needs: goreleaser
     runs-on: macos-latest
+    # Secrets reach steps as env, since the secrets context is not allowed in step `if`.
+    env:
+      MACOS_CERT_P12: ${{ secrets.MACOS_CERT_P12 }}
+      MACOS_CERT_PASSWORD: ${{ secrets.MACOS_CERT_PASSWORD }}
+      AC_API_KEY_P8: ${{ secrets.AC_API_KEY_P8 }}
+      AC_API_KEY_ID: ${{ secrets.AC_API_KEY_ID }}
+      AC_API_ISSUER_ID: ${{ secrets.AC_API_ISSUER_ID }}
     steps:
       - uses: actions/checkout@v4
       # Import the Developer ID Application cert into a throwaway keychain, if configured.
       - name: Import signing certificate
-        if: ${{ secrets.MACOS_CERT_P12 != '' }}
+        if: ${{ env.MACOS_CERT_P12 != '' }}
         env:
-          MACOS_CERT_P12: ${{ secrets.MACOS_CERT_P12 }}
-          MACOS_CERT_PASSWORD: ${{ secrets.MACOS_CERT_PASSWORD }}
           KEYCHAIN_PASSWORD: ${{ github.run_id }}
         run: |
           KC="$RUNNER_TEMP/croptop.keychain-db"
@@ -52,14 +57,10 @@ jobs:
           echo "signing as: $ID"
       # Write the App Store Connect key notarytool uses, if configured.
       - name: Set up notarization
-        if: ${{ secrets.AC_API_KEY_P8 != '' }}
-        env:
-          AC_API_KEY_P8: ${{ secrets.AC_API_KEY_P8 }}
+        if: ${{ env.AC_API_KEY_P8 != '' }}
         run: |
           echo "$AC_API_KEY_P8" | base64 --decode > "$RUNNER_TEMP/AuthKey.p8"
           echo "AC_API_KEY_PATH=$RUNNER_TEMP/AuthKey.p8" >> "$GITHUB_ENV"
-          echo "AC_API_KEY_ID=${{ secrets.AC_API_KEY_ID }}" >> "$GITHUB_ENV"
-          echo "AC_API_ISSUER_ID=${{ secrets.AC_API_ISSUER_ID }}" >> "$GITHUB_ENV"
       - name: Build Croptop.app and Croptop.dmg
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
