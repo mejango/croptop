@@ -66,9 +66,17 @@ func hostDomain(base string) (string, error) {
 	return strings.ToLower(u.Hostname()), nil
 }
 
+// Hosts behind Cloudflare accept at most 100 MB per request, so a site goes
+// up in batches, and a single file bigger than that stays on IPFS only.
+const (
+	pushBatch   = 64 << 20
+	pushMaxFile = 95 << 20
+)
+
 // Push uploads the published site's files to its host so the host serves
-// them at once and keeps the IPNS record alive. The host checks that the
-// files hash to cid before it believes the sequence.
+// them at once and keeps the IPNS record alive. Files go in batches under
+// the request size hosts accept; each batch carries the same signature and
+// the last one is marked final. The host checks that the files hash to cid.
 func (p *Publisher) Push(ctx context.Context, site *store.Site, cid string, seq uint64) error {
 	base := HostOf(site)
 	if base == "" {
@@ -83,55 +91,105 @@ func (p *Publisher) Push(ctx context.Context, site *store.Site, cid string, seq 
 	if err != nil {
 		return err
 	}
-	dir := p.Store.PublicDir(site.ID)
-	pr, pw := io.Pipe()
-	mw := multipart.NewWriter(pw)
-	go func() {
-		err := filepath.WalkDir(dir, func(path string, d fs.DirEntry, err error) error {
-			if err != nil || d.IsDir() {
-				return err
-			}
-			rel, _ := filepath.Rel(dir, path)
-			part, err := mw.CreateFormFile("file:"+filepath.ToSlash(rel), filepath.Base(rel))
-			if err != nil {
-				return err
-			}
-			f, err := os.Open(path)
-			if err != nil {
-				return err
-			}
-			defer f.Close()
-			_, err = io.Copy(part, f)
-			return err
-		})
-		if err == nil {
-			err = mw.Close()
-		}
-		pw.CloseWithError(err)
-	}()
-	req, err := http.NewRequestWithContext(ctx, "POST", base+"/v0/host/push", pr)
-	if err != nil {
-		return err
-	}
-	req.Header.Set("Content-Type", mw.FormDataContentType())
-	req.Header.Set("X-Croptop-Ipns", site.IPNS)
-	req.Header.Set("X-Croptop-Cid", cid)
-	req.Header.Set("X-Croptop-Seq", strconv.FormatUint(seq, 10))
-	req.Header.Set("X-Croptop-Time", strconv.FormatInt(now, 10))
-	req.Header.Set("X-Croptop-Sig", base64.StdEncoding.EncodeToString(sig))
+	var record string
 	if rs, ok := p.Node.(interface{ Record(string) []byte }); ok {
 		if rec := rs.Record(site.ID); len(rec) > 0 {
-			req.Header.Set("X-Croptop-Record", base64.StdEncoding.EncodeToString(rec))
+			record = base64.StdEncoding.EncodeToString(rec)
 		}
 	}
-	resp, err := (&http.Client{Timeout: 10 * time.Minute}).Do(req)
+	dir := p.Store.PublicDir(site.ID)
+	type file struct {
+		rel  string
+		size int64
+	}
+	var files []file
+	err = filepath.WalkDir(dir, func(path string, d fs.DirEntry, err error) error {
+		if err != nil || d.IsDir() {
+			return err
+		}
+		info, err := d.Info()
+		if err != nil {
+			return err
+		}
+		rel, _ := filepath.Rel(dir, path)
+		if info.Size() > pushMaxFile {
+			p.log("%s is %d MB, more than the host accepts in one request; it stays on IPFS only", rel, info.Size()>>20)
+			return nil
+		}
+		files = append(files, file{filepath.ToSlash(rel), info.Size()})
+		return nil
+	})
 	if err != nil {
 		return err
 	}
-	defer resp.Body.Close()
-	body, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
-	if resp.StatusCode != 200 {
-		return fmt.Errorf("%s: %s", resp.Status, strings.TrimSpace(string(body)))
+	var batches [][]file
+	var cur []file
+	var curSize int64
+	for _, f := range files {
+		if len(cur) > 0 && curSize+f.size > pushBatch {
+			batches = append(batches, cur)
+			cur, curSize = nil, 0
+		}
+		cur = append(cur, f)
+		curSize += f.size
+	}
+	if len(cur) > 0 {
+		batches = append(batches, cur)
+	}
+	for i, batch := range batches {
+		pr, pw := io.Pipe()
+		mw := multipart.NewWriter(pw)
+		go func() {
+			var err error
+			for _, f := range batch {
+				part, e := mw.CreateFormFile("file:"+f.rel, filepath.Base(f.rel))
+				if e != nil {
+					err = e
+					break
+				}
+				fh, e := os.Open(filepath.Join(dir, filepath.FromSlash(f.rel)))
+				if e != nil {
+					err = e
+					break
+				}
+				_, e = io.Copy(part, fh)
+				fh.Close()
+				if e != nil {
+					err = e
+					break
+				}
+			}
+			if err == nil {
+				err = mw.Close()
+			}
+			pw.CloseWithError(err)
+		}()
+		req, err := http.NewRequestWithContext(ctx, "POST", base+"/v0/host/push", pr)
+		if err != nil {
+			return err
+		}
+		req.Header.Set("Content-Type", mw.FormDataContentType())
+		req.Header.Set("X-Croptop-Ipns", site.IPNS)
+		req.Header.Set("X-Croptop-Cid", cid)
+		req.Header.Set("X-Croptop-Seq", strconv.FormatUint(seq, 10))
+		req.Header.Set("X-Croptop-Time", strconv.FormatInt(now, 10))
+		req.Header.Set("X-Croptop-Sig", base64.StdEncoding.EncodeToString(sig))
+		req.Header.Set("X-Croptop-Part", fmt.Sprintf("%d/%d", i+1, len(batches)))
+		if record != "" {
+			req.Header.Set("X-Croptop-Record", record)
+		}
+		resp, err := (&http.Client{Timeout: 10 * time.Minute}).Do(req)
+		if err != nil {
+			return err
+		}
+		body, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
+		resp.Body.Close()
+		if resp.StatusCode != 200 {
+			return fmt.Errorf("part %d of %d: %s: %s", i+1, len(batches), resp.Status, strings.TrimSpace(string(body)))
+		}
+	}
+	if len(batches) > 1 {
+		p.log("pushed %s in %d parts", site.Name, len(batches))
 	}
 	return nil
 }

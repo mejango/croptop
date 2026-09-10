@@ -515,27 +515,43 @@ func (h *Host) push(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	h.mu.Unlock()
-	// the files land in a temp dir and are added like any site; the root must
-	// hash to the cid the request was signed for
-	tmp, err := os.MkdirTemp("", "croptop-push-")
-	if err != nil {
+	// The files land in a staging dir for this cid; a big site arrives in
+	// "i/n" parts. On the last part they are added like any site and the root
+	// must hash to the cid the request was signed for. If a file was too big
+	// for the sender to carry, the missing blocks are fetched from the
+	// network, which verifies the tree by construction.
+	stage := filepath.Join(h.DataDir, "host", "staging", c)
+	if err := os.MkdirAll(stage, 0o755); err != nil {
 		http.Error(w, err.Error(), 500)
 		return
 	}
-	defer os.RemoveAll(tmp)
-	n, err := saveMultipart(r, tmp)
+	n, err := saveMultipart(r, stage)
 	if err != nil {
 		http.Error(w, "reading files: "+err.Error(), 400)
 		return
 	}
-	got, err := h.Engine.AddDir(r.Context(), tmp)
+	var partNo, partCount int
+	fmt.Sscanf(r.Header.Get("X-Croptop-Part"), "%d/%d", &partNo, &partCount)
+	if partCount > 0 && partNo < partCount {
+		writeJSON(w, 200, map[string]any{"part": partNo, "of": partCount, "files": n})
+		return
+	}
+	defer os.RemoveAll(stage)
+	got, err := h.Engine.AddDir(r.Context(), stage)
 	if err != nil {
 		http.Error(w, "adding files: "+err.Error(), 500)
 		return
 	}
 	if got != c {
-		http.Error(w, fmt.Sprintf("files hash to %s, not %s", got, c), 400)
-		return
+		h.log("push %s: files hash to %s, fetching the rest of %s from the network", ipnsName, got, c)
+		fctx, cancel := context.WithTimeout(r.Context(), 10*time.Minute)
+		err = h.Engine.Get(fctx, "/ipfs/"+c, filepath.Join(stage, "..", c+".fetch"))
+		cancel()
+		os.RemoveAll(filepath.Join(stage, "..", c+".fetch"))
+		if err != nil {
+			http.Error(w, fmt.Sprintf("files hash to %s, not %s, and the rest could not be fetched: %v", got, c, err), 400)
+			return
+		}
 	}
 	h.mu.Lock()
 	e := h.reg.Keys[ipnsName]

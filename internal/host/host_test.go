@@ -212,12 +212,52 @@ func TestClaimPushServe(t *testing.T) {
 		t.Fatalf("untrusted forward: want 403, got %v %v", err, fr)
 	}
 	h.Trust = nil
+	// a push may arrive in parts: the first is held, the last commits
+	partBody := func(files map[string]string) (*bytes.Buffer, string) {
+		var buf bytes.Buffer
+		mw := multipart.NewWriter(&buf)
+		for rel, path := range files {
+			w, _ := mw.CreateFormFile("file:"+rel, filepath.Base(rel))
+			b, _ := os.ReadFile(path)
+			w.Write(b)
+		}
+		mw.Close()
+		return &buf, mw.FormDataContentType()
+	}
+	psig5, _ := site.Keystore().Sign("site1", PushMessage("crop.test", ipnsName, root, 5, now))
+	send := func(part string, files map[string]string) *http.Response {
+		b, ct := partBody(files)
+		rq, _ := http.NewRequest("POST", srv.URL+"/v0/host/push", b)
+		rq.Host = "crop.test"
+		rq.Header.Set("Content-Type", ct)
+		rq.Header.Set("X-Croptop-Ipns", ipnsName)
+		rq.Header.Set("X-Croptop-Cid", root)
+		rq.Header.Set("X-Croptop-Seq", "5")
+		rq.Header.Set("X-Croptop-Time", strconv.FormatInt(now, 10))
+		rq.Header.Set("X-Croptop-Sig", base64.StdEncoding.EncodeToString(psig5))
+		rq.Header.Set("X-Croptop-Part", part)
+		resp, _ := http.DefaultClient.Do(rq)
+		return resp
+	}
+	if r1 := send("1/2", map[string]string{"planet.json": filepath.Join(dir, "planet.json")}); r1.StatusCode != 200 {
+		t.Fatalf("part 1: %s", r1.Status)
+	}
+	if e := h.reg.Keys[ipnsName]; e.Sequence != 4 {
+		t.Fatalf("part 1 must not commit, sequence is %d", e.Sequence)
+	}
+	if r2 := send("2/2", map[string]string{"post/index.html": filepath.Join(dir, "post", "index.html")}); r2.StatusCode != 200 {
+		b, _ := readAll(r2)
+		t.Fatalf("part 2: %s %s", r2.Status, b)
+	}
+	if e := h.reg.Keys[ipnsName]; e.Sequence != 5 {
+		t.Fatalf("part 2 must commit, sequence is %d", e.Sequence)
+	}
 	// registry survives a restart
 	h2 := &Host{Domain: "crop.test", DataDir: h.DataDir, Engine: h.Engine}
 	if err := h2.Start(); err != nil {
 		t.Fatal(err)
 	}
-	if h2.reg.Names["probe"] != ipnsName || h2.reg.Keys[ipnsName].Sequence != 4 {
+	if h2.reg.Names["probe"] != ipnsName || h2.reg.Keys[ipnsName].Sequence != 5 {
 		t.Fatal("registry not persisted")
 	}
 }

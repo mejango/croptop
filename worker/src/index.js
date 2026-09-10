@@ -149,7 +149,11 @@ async function serveSite(request, env, cid, path, base) {
   if (request.method !== "GET" && request.method !== "HEAD") return text("method not allowed", 405);
   const pushed = await env.REGISTRY.get("pushed:" + cid);
   if (pushed) return serveFromR2(request, env, cid, path, base);
-  // not pushed here: pass the request through to an upstream gateway by CID
+  return serveUpstream(request, env, cid, path);
+}
+
+// serveUpstream passes a request through to an upstream gateway by CID.
+async function serveUpstream(request, env, cid, path) {
   let last = null;
   for (const up of upstreams(env)) {
     try {
@@ -177,7 +181,7 @@ async function serveFromR2(request, env, cid, path, base) {
     const idx = await env.SITES.head(`sites/${cid}${path}/index.html`);
     if (idx) return Response.redirect(new URL(base + path + "/", request.url).toString(), 301);
   }
-  if (!obj) return text("not found", 404);
+  if (!obj) return serveUpstream(request, env, cid, path);
   const h = new Headers();
   h.set("content-type", contentType(key));
   h.set("etag", `"${obj.httpEtag.replace(/"/g, "")}"`);
@@ -312,12 +316,17 @@ async function push(request, url, env, ctx) {
     n++;
   }
   if (n === 0) return text("no files", 400);
+  // a site bigger than one request arrives as "i/n" parts; the last one commits
+  const [partNo, partCount] = (h("Part") || "1/1").split("/").map(Number);
+  const final = !partCount || partNo >= partCount;
   const e = existing || { ipns };
-  e.cid = cid; e.sequence = seq; e.updated = new Date().toISOString();
-  if (h("Record")) e.record = h("Record");
-  await saveEntry(env, e);
-  await env.REGISTRY.put("pushed:" + cid, "1");
-  if (e.record) ctx.waitUntil(republish(ipns, e.record));
+  if (final) {
+    e.cid = cid; e.sequence = seq; e.updated = new Date().toISOString();
+    if (h("Record")) e.record = h("Record");
+    await saveEntry(env, e);
+    await env.REGISTRY.put("pushed:" + cid, "1");
+    if (e.record) ctx.waitUntil(republish(ipns, e.record));
+  }
   await env.REGISTRY.put("lastpush:" + ipns, JSON.stringify(Object.fromEntries(["Ipns", "Cid", "Seq", "Time", "Sig", "Record"].map((k) => ["X-Croptop-" + k, request.headers.get("X-Croptop-" + k) || ""]))), { expirationTtl: 3600 });
   // replicate to the node so the IPFS network gets the site from a reachable
   // peer, not from the author's laptop; it re-adds the files and checks the cid
@@ -354,7 +363,7 @@ async function forwardPush(env, request, form, signedHost) {
     for (const [field, value] of form.entries()) if (field.startsWith("file:") && typeof value !== "string") fd.append(field, new Blob([toBase64(await value.arrayBuffer())]), value.name);
     // base64, because a firewall in front of the node reads a site's scripts as an attack
     const headers = { ...UA, "X-Croptop-Signed-Host": signedHost, "X-Croptop-Encoding": "base64" };
-    for (const k of ["Ipns", "Cid", "Seq", "Time", "Sig", "Record"]) { const v = request.headers.get("X-Croptop-" + k); if (v) headers["X-Croptop-" + k] = v; }
+    for (const k of ["Ipns", "Cid", "Seq", "Time", "Sig", "Record", "Part"]) { const v = request.headers.get("X-Croptop-" + k); if (v) headers["X-Croptop-" + k] = v; }
     console.log("node push start", Object.keys(headers).join(","), [...fd.keys()].length + " files");
     const r = await fetch(`${env.NODE}/v0/host/push`, { method: "POST", headers, body: fd });
     console.log("node push result", r.status, r.headers.get("server") || "", r.headers.get("content-type") || "", (await r.text()).slice(0, 200));
