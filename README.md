@@ -175,7 +175,7 @@ closed. See `docs/host.md`.
 
 ```
 croptop                        run the console (default)
-croptop import-planet          copy sites and keys from the Croptop Mac app
+croptop import-planet          copy sites and keys from the Croptop Mac app; run again any time to merge posts made there since
 croptop adopt <name> --key f   take over a published site
 croptop sync <site>            merge the network's version, then publish
 croptop publish <site>         render, add to IPFS, update the IPNS name

@@ -44,7 +44,27 @@ func TestImportPlanet(t *testing.T) {
 	if name, _ := ks.Name(fixtureID); name != wantName {
 		t.Fatalf("key not imported: %s vs %s", name, wantName)
 	}
-	if _, err := ImportPlanet(st, ks, container, false, nil); err == nil || !strings.Contains(err.Error(), fixtureID) {
+	// A second import without --force merges posts the app wrote since, and leaves the rest alone.
+	newPost := filepath.Join(container, "Documents", "Planet", "My", fixtureID, "Articles", "NEW-POST.json")
+	if err := os.WriteFile(newPost, []byte(`{"id":"NEW-POST","title":"later","content":"","created":1,"articleType":0,"link":"/NEW-POST/","attachments":["a.png"]}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	os.MkdirAll(filepath.Join(container, "Documents", "Planet", "Public", fixtureID, "NEW-POST"), 0o755)
+	os.WriteFile(filepath.Join(container, "Documents", "Planet", "Public", fixtureID, "NEW-POST", "a.png"), []byte("png"), 0o644)
+	if ids, err := ImportPlanet(st, ks, container, false, nil); err != nil || len(ids) != 1 {
+		t.Fatalf("merge: ids=%v err=%v", ids, err)
+	}
+	if p, err := st.Post(fixtureID, "NEW-POST"); err != nil || p.Title != "later" {
+		t.Fatalf("merged post missing: %v %v", p, err)
+	}
+	if _, err := os.Stat(filepath.Join(st.PostDir(fixtureID, "NEW-POST"), "a.png")); err != nil {
+		t.Fatalf("merged attachment missing: %v", err)
+	}
+	if ids, err := ImportPlanet(st, ks, container, false, nil); err != nil || len(ids) != 0 {
+		t.Fatalf("second merge should be a no-op: ids=%v err=%v", ids, err)
+	}
+	_ = strings.Contains
+	if false {
 		t.Fatalf("second import should refuse: %v", err)
 	}
 	if _, err := ImportPlanet(st, ks, container, true, nil); err != nil {

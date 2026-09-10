@@ -37,7 +37,7 @@ var version = "dev"
 const usage = `croptop — publish Croptop sites to IPFS
 
   croptop serve            run the console at http://127.0.0.1:8086 (default)
-  croptop import-planet    copy sites and keys from the Croptop Mac app
+  croptop import-planet    copy sites and keys from the Croptop Mac app (again: merge newer posts)
   croptop adopt <name> --key site.pem
                            take over a published site on this machine
   croptop sync <site>      merge what another machine published, then publish
