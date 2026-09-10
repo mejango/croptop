@@ -95,12 +95,36 @@
   /* ---------- views ---------- */
   const views = {};
 
+  // Home is the feed: every post from the sites this node follows, newest first.
   views.home = async () => {
     const m = $("#main");
-    m.replaceChildren(h("div", { class: "head" }, h("div", {}, h("h1", {}, "Your sites"), h("p", {}, "Pick a site on the left, start a new one, or adopt one you already publish elsewhere with its key."))));
-    if (!state.sites.length) {
-      m.append(h("div", { class: "empty" }, "No sites yet. ", h("a", { href: "#/new" }, h("u", {}, "Start one")), " or ", h("a", { href: "#/adopt" }, h("u", {}, "adopt an existing site")), "."));
-    }
+    const list = h("div", { class: "feed" });
+    const refresh = h("button", { class: "btn quiet", type: "button", onclick: async (e) => {
+      e.target.disabled = true; e.target.textContent = "Checking…";
+      try { for (const f of state.following) await api("POST", `/v0/croptop/following/${f.ipns}/refresh`, {}); await loadSites(); await load(); toast("Checked every site you follow."); }
+      catch (err) { toast(err.message, true); } finally { e.target.disabled = false; e.target.textContent = "Check for new posts"; }
+    } }, "Check for new posts");
+    m.replaceChildren(h("div", { class: "head" }, h("div", {}, h("h1", {}, "Feed"), h("p", {}, "Posts from the sites you follow. Your node keeps a copy of each and helps host it.")), h("div", { class: "actions" }, refresh, h("a", { class: "btn", href: "#/follow" }, "Follow a site"))), list);
+    const load = async () => {
+      const items = await api("GET", "/v0/croptop/feed?limit=60");
+      list.replaceChildren();
+      if (!items.length) {
+        const suggest = (name) => h("button", { class: "btn", type: "button", onclick: async (e) => { e.target.disabled = true; try { await api("POST", "/v0/croptop/following", { name }); await loadSites(); await load(); } catch (err) { toast(err.message, true); e.target.disabled = false; } } }, "Follow " + name);
+        list.append(h("div", { class: "empty" }, state.following.length ? "Nothing yet. The sites you follow have no posts your node has fetched; try checking for new posts." : "You are not following anyone yet. A few to start with: ", ...(state.following.length ? [] : [h("div", { class: "row", style: "margin-top:10px" }, suggest("croptop.eth"), suggest("follo.eth"), suggest("jango.eth"))])));
+        if (!state.sites.length) list.append(h("div", { class: "empty" }, "No sites of your own yet either. ", h("a", { href: "#/new" }, h("u", {}, "Start one")), " or ", h("a", { href: "#/adopt" }, h("u", {}, "adopt an existing site")), "."));
+        return;
+      }
+      for (const it of items) {
+        const card = h("article", { class: "item" });
+        const who = h("a", { class: "who", href: "#/f/" + it.ipns }, h("img", { src: `/f/${it.ipns}/avatar.png`, alt: "", onerror: (e) => { e.target.hidden = true; } }), h("span", {}, it.site), h("small", {}, when(it.created).toLocaleString()));
+        card.append(who, h("h2", {}, h("a", { href: it.link, target: "_blank", rel: "noopener" }, it.title || "Untitled")));
+        if (it.preview) card.append(h("iframe", { class: "feed-preview", src: `/f/${it.ipns}/?preview=${it.id}`, sandbox: "allow-scripts allow-same-origin", loading: "lazy", title: it.title || "preview", tabindex: "-1" }));
+        else if (it.summary) card.append(h("p", {}, it.summary));
+        card.append(h("div", { class: "links" }, h("a", { href: it.link, target: "_blank", rel: "noopener" }, "Open here"), it.url ? h("a", { href: it.url, target: "_blank", rel: "noopener" }, it.url.replace("https://", "")) : null));
+        list.append(card);
+      }
+    };
+    await load();
   };
 
   views.new = async () => {

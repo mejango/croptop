@@ -4,8 +4,15 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"github.com/mejango/croptop/internal/gateway"
+	"github.com/mejango/croptop/internal/render"
+	"github.com/mejango/croptop/internal/store"
 	"net/http"
 	"os"
+	"path/filepath"
+	"regexp"
+	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -14,6 +21,64 @@ import (
 
 // routesFollow: following other sites, and the hosts view for owned sites.
 func (s *Server) routesFollow(mux *http.ServeMux) {
+	// The feed: every feed post from every followed site, newest first, read
+	// from the copies this node keeps. Pages stay out, as on the sites themselves.
+	mux.HandleFunc("GET /v0/croptop/feed", func(w http.ResponseWriter, r *http.Request) {
+		limit := 50
+		if n, err := strconv.Atoi(r.URL.Query().Get("limit")); err == nil && n > 0 && n <= 500 {
+			limit = n
+		}
+		entries, _ := s.Follow.List()
+		type item struct {
+			IPNS    string          `json:"ipns"`
+			Site    string          `json:"site"`
+			ID      string          `json:"id"`
+			Title   string          `json:"title"`
+			Summary string          `json:"summary"`
+			Link    string          `json:"link"`
+			URL     string          `json:"url"`
+			Created store.AppleTime `json:"created"`
+			Preview bool            `json:"preview"`
+			Pinned  bool            `json:"pinned"`
+		}
+		items := []item{}
+		for _, e := range entries {
+			b, err := os.ReadFile(filepath.Join(s.Follow.SiteDir(e.IPNS), "planet.json"))
+			if err != nil {
+				continue
+			}
+			var pub struct {
+				Name     string              `json:"name"`
+				Articles []render.PublicPost `json:"articles"`
+			}
+			if json.Unmarshal(b, &pub) != nil {
+				continue
+			}
+			site := pub.Name
+			if site == "" {
+				site = e.Title
+			}
+			base := "https://" + e.IPNS + "." + gateway.Get("crop.top").Domain + "/"
+			if strings.HasSuffix(e.Name, ".eth") {
+				base = "https://" + strings.TrimSuffix(e.Name, ".eth") + "." + gateway.Get("crop.top").Domain + "/"
+			}
+			for _, a := range pub.Articles {
+				if a.ArticleType != 0 {
+					continue
+				}
+				items = append(items, item{
+					IPNS: e.IPNS, Site: site, ID: a.ID, Title: strings.TrimSpace(a.Title), Summary: plainText(a.Content, 240),
+					Link: "/f/" + e.IPNS + "/" + a.ID + "/", URL: base + a.ID + "/", Created: a.Created,
+					Preview: hasPreview(a), Pinned: a.Pinned != nil,
+				})
+			}
+		}
+		sort.SliceStable(items, func(i, j int) bool { return items[i].Created > items[j].Created })
+		if len(items) > limit {
+			items = items[:limit]
+		}
+		writeJSON(w, 200, items)
+	})
 	mux.HandleFunc("GET /v0/croptop/following", func(w http.ResponseWriter, r *http.Request) {
 		list, err := s.Follow.List()
 		if err != nil {
@@ -109,4 +174,39 @@ func (s *Server) routesFollow(mux *http.ServeMux) {
 		}
 		writeJSON(w, 200, map[string]any{"cid": *site.LastPublishedCID, "count": len(peers), "peers": peers, "self": info.PeerID})
 	})
+}
+
+var (
+	tagRe      = regexp.MustCompile(`(?s)<script.*?</script>|<style.*?</style>|<[^>]+>`)
+	mdRe       = regexp.MustCompile("[#*_`>]+|!?\\[([^\\]]*)\\]\\([^)]*\\)")
+	spaceRe    = regexp.MustCompile(`\s+`)
+	punctRe    = regexp.MustCompile(`\s+([.,;:!?])`)
+	previewTag = regexp.MustCompile(`<script[^>]+type=["']croptop/preview["']`)
+)
+
+// plainText is the first n characters of a post's content without markup.
+func plainText(content string, n int) string {
+	t := tagRe.ReplaceAllString(content, " ")
+	t = mdRe.ReplaceAllString(t, "$1")
+	t = strings.TrimSpace(spaceRe.ReplaceAllString(t, " "))
+	t = punctRe.ReplaceAllString(t, "$1")
+	if len(t) > n {
+		if i := strings.LastIndex(t[:n], " "); i > n/2 {
+			t = t[:i]
+		} else {
+			t = t[:n]
+		}
+		t += "…"
+	}
+	return t
+}
+
+// hasPreview mirrors croptop.hasPreview in the template.
+func hasPreview(a render.PublicPost) bool {
+	for _, att := range a.Attachments {
+		if att == "preview.js" {
+			return true
+		}
+	}
+	return previewTag.MatchString(a.Content)
 }

@@ -155,3 +155,14 @@ textarea.code[disabled] { color: var(--muted); }
 .node .update { margin-top: 8px; padding: 6px 8px; background: #fff0fa; border: 2px solid var(--ink); }
 .node .update a { font-weight: 700; }
 .node .quit { margin-top: 10px; opacity: .6; font-size: 12px; }
+
+.feed-link { display: block; padding: 6px 12px; margin: 0 8px 8px; border: 2px solid var(--ink); font-weight: 700; }
+.feed { display: grid; gap: 18px; max-width: 720px; }
+.feed .item { border: 2px solid var(--ink); background: var(--paper); padding: 14px 16px; }
+.feed .who { display: flex; align-items: center; gap: 10px; font-size: 13px; margin-bottom: 6px; }
+.feed .who img { width: 24px; height: 24px; object-fit: cover; border: 1px solid var(--ink); }
+.feed .who small { opacity: .6; margin-left: auto; }
+.feed h2 { font-size: 20px; margin: 0 0 8px; }
+.feed p { margin: 0 0 10px; line-height: 1.5; }
+.feed .links { display: flex; gap: 14px; font-size: 13px; opacity: .75; }
+.feed iframe.feed-preview { width: 100%; height: 300px; border: 1px solid var(--ink); display: block; margin-bottom: 10px; background: var(--paper); }
