@@ -1,6 +1,7 @@
 package publish
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -58,7 +59,13 @@ func (p *Publisher) Adopt(ctx context.Context, nameOrENS string, pemBytes []byte
 	if ks.Has(head.ID) {
 		return "", fmt.Errorf("a key for %s already exists on this machine", head.ID)
 	}
-	if err := ks.ImportPEM(head.ID, pemBytes); err != nil {
+	// Planet's .site export ships the key as kubo's raw keystore bytes; the
+	// console and croptop's own export use PEM
+	importKey := ks.ImportPEM
+	if !bytes.Contains(pemBytes, []byte("-----BEGIN")) {
+		importKey = ks.ImportRaw
+	}
+	if err := importKey(head.ID, pemBytes); err != nil {
 		return "", err
 	}
 	derived, err := ks.Name(head.ID)
