@@ -136,11 +136,21 @@ func installLaunchd(args []string, dataDir string) error {
 	if err := os.WriteFile(plist, []byte(body), 0o644); err != nil {
 		return err
 	}
-	exec.Command("launchctl", "bootout", "gui/"+uid()+"/"+serviceLabel).Run() // replace an older one quietly
-	if out, err := exec.Command("launchctl", "bootstrap", "gui/"+uid(), plist).CombinedOutput(); err != nil {
-		return fmt.Errorf("launchctl bootstrap: %s", strings.TrimSpace(string(out)))
+	// Replace an older definition quietly. bootout returns before the service is gone, and a
+	// bootstrap that races it fails with "Input/output error", so wait for it to disappear.
+	exec.Command("launchctl", "bootout", "gui/"+uid()+"/"+serviceLabel).Run()
+	for i := 0; i < 40 && exec.Command("launchctl", "print", "gui/"+uid()+"/"+serviceLabel).Run() == nil; i++ {
+		time.Sleep(250 * time.Millisecond)
 	}
-	return nil
+	var out []byte
+	var err error
+	for i := 0; i < 5; i++ {
+		if out, err = exec.Command("launchctl", "bootstrap", "gui/"+uid(), plist).CombinedOutput(); err == nil {
+			return nil
+		}
+		time.Sleep(time.Second)
+	}
+	return fmt.Errorf("launchctl bootstrap: %s", strings.TrimSpace(string(out)))
 }
 
 func systemdUnit() string {
