@@ -94,6 +94,8 @@ label.inline { display: inline-flex; align-items: center; gap: 6px; }
 label { display: grid; gap: 6px; font-size: 14px; }
 label span.help { color: var(--muted); font-size: 13px; }
 input[type=text], input[type=password], input[type=datetime-local], textarea, select { border: 2px solid var(--ink); padding: 8px 10px; background: var(--paper); width: 100%; }
+/* a select is as wide as its longest option, with the chevron given its own room on the right */
+select { width: auto; max-width: 100%; justify-self: start; appearance: none; -webkit-appearance: none; padding-right: 36px; background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 12 12'%3E%3Cpath d='M2.5 4.5l3.5 3.5 3.5-3.5' fill='none' stroke='%23171717' stroke-width='2'/%3E%3C/svg%3E"); background-repeat: no-repeat; background-position: right 12px center; background-size: 12px 12px; }
 textarea { min-height: 220px; font-family: ui-monospace, Menlo, monospace; font-size: 14px; line-height: 1.5; }
 textarea.pem { min-height: 140px; font-size: 12px; }
 fieldset { border: 2px solid var(--rule); padding: 12px 14px; display: grid; gap: 12px; margin: 0; }
