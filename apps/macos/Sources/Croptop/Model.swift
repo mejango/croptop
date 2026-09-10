@@ -115,8 +115,8 @@ final class AppModel: ObservableObject {
     }
 
     func update() {
-        updating = true
-        Task { try? await api.update(); toast("Updating and restarting…") }
+        // The signed app cannot replace itself; open the download.
+        if let u = URL(string: "https://crop.top/install") { NSAppOpen(u) }
     }
 
     func toast(_ text: String, error: Bool = false) {
@@ -126,3 +126,5 @@ final class AppModel: ObservableObject {
     }
     func show(_ error: Error) { toast(error.localizedDescription, error: true) }
 }
+
+@MainActor func NSAppOpen(_ u: URL) { NSWorkspace.shared.open(u) }

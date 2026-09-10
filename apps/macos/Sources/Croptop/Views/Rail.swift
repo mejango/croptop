@@ -93,8 +93,8 @@ struct UpdateBanner: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
             Text("Croptop \(version) is out.").font(Theme.body(14))
-            Button(model.updating ? "Updating…" : "Update and restart") { model.update() }
-                .buttonStyle(BorderedButton()).disabled(model.updating)
+            Button("Get the update") { model.update() }
+                .buttonStyle(BorderedButton())
         }
         .padding(10)
         .frame(maxWidth: .infinity, alignment: .leading)

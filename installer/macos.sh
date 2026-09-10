@@ -45,9 +45,49 @@ cat > "$APP/Contents/Info.plist" <<PLIST
 </dict></plist>
 PLIST
 plutil -lint "$APP/Contents/Info.plist"
-codesign --force --deep -s - "$APP"
-mkdir -p "$OUT"; cp -R "$APP" "$OUT/Croptop.app"
+
+# Signing. With MACOS_SIGN_IDENTITY set (a "Developer ID Application" identity),
+# sign for distribution with hardened runtime and a secure timestamp; otherwise
+# ad-hoc sign so dev builds still run locally. Sign the nested Go engine first,
+# then seal the app bundle (no --deep, which is deprecated).
+ENTITLEMENTS="$HERE/Croptop.entitlements"
+if [ -n "${MACOS_SIGN_IDENTITY:-}" ]; then
+  codesign --force --options runtime --timestamp --entitlements "$ENTITLEMENTS" --sign "$MACOS_SIGN_IDENTITY" "$APP/Contents/Resources/croptop"
+  codesign --force --options runtime --timestamp --entitlements "$ENTITLEMENTS" --sign "$MACOS_SIGN_IDENTITY" "$APP"
+  codesign --verify --strict --verbose=2 "$APP"
+else
+  codesign --force --deep -s - "$APP"
+fi
+
+mkdir -p "$OUT"
 # a dmg with the app and a link to Applications
 DMGDIR="$WORK/dmg"; mkdir -p "$DMGDIR"; cp -R "$APP" "$DMGDIR/"; ln -s /Applications "$DMGDIR/Applications"
 hdiutil create -volname Croptop -srcfolder "$DMGDIR" -ov -format UDZO "$OUT/Croptop.dmg" >/dev/null
+
+# Notarization. notarytool authenticates with either an App Store Connect API
+# key (AC_API_KEY_PATH/AC_API_KEY_ID/AC_API_ISSUER_ID) or a stored keychain
+# profile (NOTARY_PROFILE). Notarize the app first and staple it (so first
+# launch works offline), then notarize and staple the dmg wrapper.
+notarize() { # $1 = file to submit
+  if [ -n "${AC_API_KEY_PATH:-}" ]; then
+    xcrun notarytool submit "$1" --key "$AC_API_KEY_PATH" --key-id "$AC_API_KEY_ID" --issuer "$AC_API_ISSUER_ID" --wait
+  else
+    xcrun notarytool submit "$1" --keychain-profile "$NOTARY_PROFILE" --wait
+  fi
+}
+if [ -n "${MACOS_SIGN_IDENTITY:-}" ] && { [ -n "${AC_API_KEY_PATH:-}" ] || [ -n "${NOTARY_PROFILE:-}" ]; }; then
+  ditto -c -k --keepParent "$APP" "$WORK/Croptop.zip"
+  notarize "$WORK/Croptop.zip"
+  xcrun stapler staple "$APP"
+  # rebuild the dmg from the now-stapled app, then notarize and staple the dmg
+  rm -rf "$DMGDIR"; mkdir -p "$DMGDIR"; cp -R "$APP" "$DMGDIR/"; ln -s /Applications "$DMGDIR/Applications"
+  hdiutil create -volname Croptop -srcfolder "$DMGDIR" -ov -format UDZO "$OUT/Croptop.dmg" >/dev/null
+  notarize "$OUT/Croptop.dmg"
+  xcrun stapler staple "$OUT/Croptop.dmg"
+  spctl --assess --type open --context context:primary-signature --verbose=2 "$OUT/Croptop.dmg" || true
+  echo "signed and notarized $OUT/Croptop.dmg"
+else
+  echo "built unsigned $OUT/Croptop.dmg (set MACOS_SIGN_IDENTITY and notary credentials to sign)"
+fi
+cp -R "$APP" "$OUT/Croptop.app"
 echo "built $OUT/Croptop.app and $OUT/Croptop.dmg"

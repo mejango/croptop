@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <!-- Hardened runtime for Developer ID / notarization. No App Sandbox: the app
+       runs a bundled Go node that binds a local port and writes the data dir.
+       The node is a separate signed executable in Contents/Resources, launched
+       by the app; nothing here needs JIT or unsigned memory. -->
+</dict>
+</plist>

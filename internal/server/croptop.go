@@ -7,6 +7,8 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -25,12 +27,13 @@ func (s *Server) routesCroptop(mux *http.ServeMux) {
 		info, err := s.Node.Info(ctx)
 		latest := s.latestRelease()
 		writeJSON(w, 200, map[string]any{
-			"version":  s.Version,
-			"latest":   latest,
-			"update":   update.Newer(s.Version, latest),
-			"dataDir":  s.DataDir,
-			"listen":   s.Cfg.Listen,
-			"passcode": s.Cfg.HasPasscode(),
+			"version":   s.Version,
+			"latest":    latest,
+			"update":    update.Newer(s.Version, latest),
+			"appBundle": appBundle(),
+			"dataDir":   s.DataDir,
+			"listen":    s.Cfg.Listen,
+			"passcode":  s.Cfg.HasPasscode(),
 			"ipfs": map[string]any{
 				"running": s.Node.Running() && err == nil, "peers": info.Peers, "peerID": info.PeerID,
 				"version": info.Version, "lastError": s.Node.LastError(),
@@ -274,6 +277,19 @@ func (s *Server) routesCroptop(mux *http.ServeMux) {
 }
 
 // latestRelease is the newest release tag, checked at most hourly.
+// appBundle reports whether this node runs inside a macOS .app, where the app,
+// not the node, applies updates.
+func appBundle() bool {
+	exe, err := os.Executable()
+	if err != nil {
+		return false
+	}
+	if r, err := filepath.EvalSymlinks(exe); err == nil {
+		exe = r
+	}
+	return update.InsideAppBundle(exe)
+}
+
 func (s *Server) latestRelease() string {
 	s.relMu.Lock()
 	defer s.relMu.Unlock()

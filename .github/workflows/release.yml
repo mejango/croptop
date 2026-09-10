@@ -30,6 +30,36 @@ jobs:
     runs-on: macos-latest
     steps:
       - uses: actions/checkout@v4
+      # Import the Developer ID Application cert into a throwaway keychain, if configured.
+      - name: Import signing certificate
+        if: ${{ secrets.MACOS_CERT_P12 != '' }}
+        env:
+          MACOS_CERT_P12: ${{ secrets.MACOS_CERT_P12 }}
+          MACOS_CERT_PASSWORD: ${{ secrets.MACOS_CERT_PASSWORD }}
+          KEYCHAIN_PASSWORD: ${{ github.run_id }}
+        run: |
+          KC="$RUNNER_TEMP/croptop.keychain-db"
+          security create-keychain -p "$KEYCHAIN_PASSWORD" "$KC"
+          security set-keychain-settings -lut 21600 "$KC"
+          security unlock-keychain -p "$KEYCHAIN_PASSWORD" "$KC"
+          echo "$MACOS_CERT_P12" | base64 --decode > "$RUNNER_TEMP/cert.p12"
+          security import "$RUNNER_TEMP/cert.p12" -k "$KC" -P "$MACOS_CERT_PASSWORD" -T /usr/bin/codesign
+          rm -f "$RUNNER_TEMP/cert.p12"
+          security list-keychains -d user -s "$KC" login.keychain-db
+          security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "$KEYCHAIN_PASSWORD" "$KC"
+          ID=$(security find-identity -v -p codesigning "$KC" | grep "Developer ID Application" | head -1 | sed -E 's/.*"(.*)"/\1/')
+          echo "MACOS_SIGN_IDENTITY=$ID" >> "$GITHUB_ENV"
+          echo "signing as: $ID"
+      # Write the App Store Connect key notarytool uses, if configured.
+      - name: Set up notarization
+        if: ${{ secrets.AC_API_KEY_P8 != '' }}
+        env:
+          AC_API_KEY_P8: ${{ secrets.AC_API_KEY_P8 }}
+        run: |
+          echo "$AC_API_KEY_P8" | base64 --decode > "$RUNNER_TEMP/AuthKey.p8"
+          echo "AC_API_KEY_PATH=$RUNNER_TEMP/AuthKey.p8" >> "$GITHUB_ENV"
+          echo "AC_API_KEY_ID=${{ secrets.AC_API_KEY_ID }}" >> "$GITHUB_ENV"
+          echo "AC_API_ISSUER_ID=${{ secrets.AC_API_ISSUER_ID }}" >> "$GITHUB_ENV"
       - name: Build Croptop.app and Croptop.dmg
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}

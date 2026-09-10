@@ -9,6 +9,7 @@ import (
 	"github.com/mejango/croptop/internal/store"
 	"net/http"
 	"os"
+	"path"
 	"path/filepath"
 	"regexp"
 	"sort"
@@ -40,6 +41,7 @@ func (s *Server) routesFollow(mux *http.ServeMux) {
 			Created store.AppleTime `json:"created"`
 			Preview bool            `json:"preview"`
 			Pinned  bool            `json:"pinned"`
+			Hero    string          `json:"hero,omitempty"` // an image to show with the item, served under Link
 		}
 		items := []item{}
 		for _, e := range entries {
@@ -69,7 +71,7 @@ func (s *Server) routesFollow(mux *http.ServeMux) {
 				items = append(items, item{
 					IPNS: e.IPNS, Site: site, ID: a.ID, Title: strings.TrimSpace(a.Title), Summary: plainText(a.Content, 240),
 					Link: "/f/" + e.IPNS + "/" + a.ID + "/", URL: base + a.ID + "/", Created: a.Created,
-					Preview: hasPreview(a), Pinned: a.Pinned != nil,
+					Preview: hasPreview(a), Pinned: a.Pinned != nil, Hero: heroOf(a),
 				})
 			}
 		}
@@ -209,4 +211,21 @@ func hasPreview(a render.PublicPost) bool {
 		}
 	}
 	return previewTag.MatchString(a.Content)
+}
+
+// heroOf is the post's hero image, or its first image attachment.
+func heroOf(a render.PublicPost) string {
+	if a.HeroImageFilename != nil && *a.HeroImageFilename != "" {
+		return *a.HeroImageFilename
+	}
+	if a.HeroImage != nil && *a.HeroImage != "" { // published planet.json carries it as a URL
+		return path.Base(*a.HeroImage)
+	}
+	for _, name := range a.Attachments {
+		switch strings.ToLower(filepath.Ext(name)) {
+		case ".png", ".jpg", ".jpeg", ".gif", ".webp":
+			return name
+		}
+	}
+	return ""
 }

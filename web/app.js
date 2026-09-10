@@ -56,16 +56,21 @@
     const ipfs = state.status.ipfs;
     n.append(h("b", { class: ipfs.running ? "" : "off" }, ipfs.running ? "IPFS on" : "IPFS off"), `, ${ipfs.peers} peers`, h("br"), `croptop ${state.status.version}`);
     if (state.status.update) {
-      n.append(h("div", { class: "update" }, `${state.status.latest} is out. `, h("a", { href: "#", onclick: async (e) => {
-        e.preventDefault(); e.target.textContent = "Updating…";
-        try {
-          await api("POST", "/v0/croptop/update", {});
-          n.replaceChildren("Restarting…");
-          // the process swaps itself out; wait for the new one and reload
-          for (let i = 0; i < 60; i++) { await new Promise((r) => setTimeout(r, 1000)); try { const st = await api("GET", "/v0/croptop/status"); if (st.version !== state.status.version) { location.reload(); return; } } catch {} }
-          toast("The update finished but the console did not come back. Start croptop again.", true);
-        } catch (err) { toast(err.message, true); e.target.textContent = "Update"; }
-      } }, "Update")));
+      // Inside the signed Mac app, the node cannot replace itself; send people to the download.
+      if (state.status.appBundle) {
+        n.append(h("div", { class: "update" }, `${state.status.latest} is out. `, h("a", { href: "https://crop.top/install", target: "_blank" }, "Download")));
+      } else {
+        n.append(h("div", { class: "update" }, `${state.status.latest} is out. `, h("a", { href: "#", onclick: async (e) => {
+          e.preventDefault(); e.target.textContent = "Updating…";
+          try {
+            await api("POST", "/v0/croptop/update", {});
+            n.replaceChildren("Restarting…");
+            // the process swaps itself out; wait for the new one and reload
+            for (let i = 0; i < 60; i++) { await new Promise((r) => setTimeout(r, 1000)); try { const st = await api("GET", "/v0/croptop/status"); if (st.version !== state.status.version) { location.reload(); return; } } catch {} }
+            toast("The update finished but the console did not come back. Start croptop again.", true);
+          } catch (err) { toast(err.message, true); e.target.textContent = "Update"; }
+        } }, "Update")));
+      }
     }
     n.append(h("div", { class: "quit" }, h("a", { href: "#", onclick: async (e) => {
       e.preventDefault();

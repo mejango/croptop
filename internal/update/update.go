@@ -2,6 +2,7 @@
 package update
 
 import (
+	"errors"
 	"archive/tar"
 	"archive/zip"
 	"bytes"
@@ -85,6 +86,15 @@ func parts(v string) [3]int {
 }
 
 // Apply downloads the release for this platform, checks its sha256 against
+// errAppBundle is returned when the running binary lives inside a macOS .app;
+// replacing it would break the app's code signature, so the whole app updates instead.
+var errAppBundle = errors.New("the Croptop app updates itself; download the newest version from https://crop.top")
+
+// InsideAppBundle reports whether exe lives inside a macOS application bundle.
+func InsideAppBundle(exe string) bool {
+	return strings.Contains(exe, ".app/Contents/")
+}
+
 // checksums.txt, and swaps it in for the running executable. It returns the
 // executable path; the caller restarts.
 func Apply(ctx context.Context, r *Release, log func(string)) (string, error) {
@@ -94,6 +104,9 @@ func Apply(ctx context.Context, r *Release, log func(string)) (string, error) {
 	}
 	if exe, err = filepath.EvalSymlinks(exe); err != nil {
 		return "", err
+	}
+	if InsideAppBundle(exe) {
+		return "", errAppBundle
 	}
 	ext := ".tar.gz"
 	if runtime.GOOS == "windows" {
