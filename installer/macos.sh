@@ -2,11 +2,9 @@
 # Builds Croptop.app (universal) and Croptop.dmg from the two darwin archives
 # of a release. Usage: installer/macos.sh <version> <dir with the tar.gz files> <out dir>
 #
-# The app is a small native window (installer/CroptopApp/main.swift) around the
-# web console. It starts the node when it opens, stops it when it quits, and
-# turns files dropped on it into posts. The Go binary lives in
+# The app is the native SwiftUI client in apps/macos. The Go engine lives in
 # Contents/Resources/croptop (a different directory from the executable, since
-# the file system is case-insensitive).
+# the file system is case-insensitive), the brand fonts in Resources/fonts.
 set -eu
 VER=$1; IN=$2; OUT=$3
 HERE=$(cd "$(dirname "$0")" && pwd)
@@ -14,10 +12,9 @@ WORK=$(mktemp -d)
 for a in amd64 arm64; do mkdir -p "$WORK/$a"; tar -xzf "$IN/croptop_${VER}_darwin_${a}.tar.gz" -C "$WORK/$a" croptop; done
 APP="$WORK/Croptop.app"
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
-for t in arm64 x86_64; do
-  swiftc -O -swift-version 5 -target "$t-apple-macos12.0" -o "$WORK/Croptop-$t" "$HERE/CroptopApp/main.swift" -framework Cocoa -framework WebKit
-done
-lipo -create -output "$APP/Contents/MacOS/Croptop" "$WORK/Croptop-arm64" "$WORK/Croptop-x86_64"
+swift build -c release --arch arm64 --arch x86_64 --package-path "$HERE/../apps/macos" --scratch-path "$WORK/swift"
+cp "$WORK/swift/apple/Products/Release/Croptop" "$APP/Contents/MacOS/Croptop"
+mkdir -p "$APP/Contents/Resources/fonts" && cp "$HERE/fonts/"*.ttf "$APP/Contents/Resources/fonts/"
 lipo -create -output "$APP/Contents/Resources/croptop" "$WORK/amd64/croptop" "$WORK/arm64/croptop"
 chmod +x "$APP/Contents/MacOS/Croptop" "$APP/Contents/Resources/croptop"
 lipo -info "$APP/Contents/Resources/croptop"
@@ -34,7 +31,7 @@ cat > "$APP/Contents/Info.plist" <<PLIST
   <key>CFBundleExecutable</key><string>Croptop</string>
   <key>CFBundleIconFile</key><string>Croptop</string>
   <key>CFBundlePackageType</key><string>APPL</string>
-  <key>LSMinimumSystemVersion</key><string>12.0</string>
+  <key>LSMinimumSystemVersion</key><string>13.0</string>
   <key>NSHighResolutionCapable</key><true/>
   <key>NSAppTransportSecurity</key><dict><key>NSAllowsLocalNetworking</key><true/></dict>
   <key>CFBundleDocumentTypes</key><array><dict>
