@@ -18,8 +18,8 @@ lipo -info "$APP/Contents/Resources/croptop"
 # the droplet's own icons are named droplet.icns / applet.icns; ours replaces them
 for i in droplet applet; do [ -f "$APP/Contents/Resources/$i.icns" ] && cp "$HERE/Croptop.icns" "$APP/Contents/Resources/$i.icns"; done
 PB=/usr/libexec/PlistBuddy; PL="$APP/Contents/Info.plist"
-$PB -c "Set :CFBundleName Croptop" "$PL"
-$PB -c "Set :CFBundleIdentifier top.crop.croptop" "$PL"
+$PB -c "Add :CFBundleName string Croptop" "$PL" || $PB -c "Set :CFBundleName Croptop" "$PL"
+$PB -c "Add :CFBundleIdentifier string top.crop.croptop" "$PL" || $PB -c "Set :CFBundleIdentifier top.crop.croptop" "$PL"
 $PB -c "Add :CFBundleShortVersionString string $VER" "$PL" || $PB -c "Set :CFBundleShortVersionString $VER" "$PL"
 $PB -c "Add :CFBundleVersion string $VER" "$PL" || $PB -c "Set :CFBundleVersion $VER" "$PL"
 $PB -c "Add :CFBundleDisplayName string Croptop" "$PL" || true
@@ -35,6 +35,8 @@ $PB -c "Add :CFBundleDocumentTypes array" \
   -c "Add :CFBundleDocumentTypes:0:LSItemContentTypes:2 string public.audio" \
   -c "Add :CFBundleDocumentTypes:0:LSItemContentTypes:3 string public.data" "$PL"
 plutil -lint "$PL"
+# osacompile signs the applet; our edits broke that signature, so sign ad hoc again or macOS calls the app damaged
+codesign --force --deep -s - "$APP"
 mkdir -p "$OUT"; cp -R "$APP" "$OUT/Croptop.app"
 # a dmg with the app and a link to Applications
 DMGDIR="$WORK/dmg"; mkdir -p "$DMGDIR"; cp -R "$APP" "$DMGDIR/"; ln -s /Applications "$DMGDIR/Applications"
