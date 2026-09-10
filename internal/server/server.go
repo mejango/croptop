@@ -55,6 +55,7 @@ func (s *Server) Handler() http.Handler {
 	s.routesCroptop(mux)
 	s.routesFollow(mux)
 	s.routesTemplate(mux)
+	s.quickRoutes(mux)
 
 	// UI
 	mux.HandleFunc("GET /{$}", func(w http.ResponseWriter, r *http.Request) {

@@ -228,3 +228,8 @@ downloaded binary under `.data/kubo` and skip otherwise.
 ## License
 
 MIT. The bundled Press Start 2P font is under the SIL Open Font License.
+
+## Quick posts from a screenshot
+
+`croptop shot` grabs part of the screen and opens the console with a small form: pick the site, add a title, a few words and tags, then post (or post and publish). On macOS, `croptop shot install` adds a "Croptop Shot" Quick Action bound to Command Shift C. On Linux bind `croptop shot` to a key in your desktop's keyboard settings.
+

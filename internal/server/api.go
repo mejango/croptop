@@ -350,6 +350,9 @@ func (s *Server) createPost(w http.ResponseWriter, r *http.Request) {
 		ArticleType: 0, Link: "/" + id + "/", Attachments: []string{}, CIDs: map[string]string{},
 		Tags: parseTags(r.FormValue("tags")), Summary: &empty, Slug: &empty,
 	}
+	if v := strings.TrimSpace(r.FormValue("heroImage")); v != "" {
+		post.HeroImage = &v
+	}
 	if err := s.saveAttachments(site.ID, post, r.MultipartForm, "append"); err != nil {
 		writeErr(w, 500, err)
 		return

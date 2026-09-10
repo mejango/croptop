@@ -95,6 +95,48 @@
   /* ---------- views ---------- */
   const views = {};
 
+  // Quick post: a screenshot from `croptop shot` plus a title, a few words, tags, and the site it goes to.
+  views.quick = async (shot) => {
+    const m = $("#main");
+    const mine = state.sites.filter((s) => !s.archived);
+    if (!mine.length) { m.replaceChildren(h("div", { class: "empty" }, "No site to post to yet. ", h("a", { href: "#/new" }, h("u", {}, "Start one")), ".")); return; }
+    const lastSite = (() => { try { return localStorage.getItem("croptop.quickSite"); } catch { return null; } })();
+    const siteSel = h("select", { name: "site" }, ...mine.map((s) => h("option", { value: s.id, selected: s.id === lastSite ? "" : null }, s.name)));
+    const title = h("input", { type: "text", name: "title", placeholder: "Title (optional)", autofocus: "" });
+    const words = h("textarea", { name: "content", placeholder: "A few words (optional, markdown)", style: "min-height:90px" });
+    const tags = h("input", { type: "text", name: "tags", placeholder: "tags, comma separated" });
+    const img = h("img", { src: `/v0/croptop/quick/${shot}`, alt: "screenshot", style: "max-width:100%;max-height:45vh;object-fit:contain;border:2px solid var(--ink);display:block" });
+    const submit = async (publish) => {
+      const btns = [...form.querySelectorAll("button")]; btns.forEach((b) => { b.disabled = true; });
+      try {
+        const id = siteSel.value;
+        try { localStorage.setItem("croptop.quickSite", id); } catch {}
+        const blob = await (await fetch(`/v0/croptop/quick/${shot}`)).blob();
+        const fd = new FormData();
+        const name = "screenshot-" + new Date().toISOString().slice(0, 19).replace(/[:T]/g, "-") + ".png";
+        // Same shape the Mac app writes: the image inline at the top, and as the hero image for grids and previews.
+        fd.set("title", title.value); fd.set("content", `<img alt="${title.value || "screenshot"}" src="${name}">\n\n${words.value}`); fd.set("tags", tags.value);
+        fd.set("heroImage", name);
+        fd.append("attachments", blob, name);
+        const post = await api("POST", `/v0/planets/my/${id}/articles`, fd, true);
+        await fetch(`/v0/croptop/quick/${shot}`, { method: "DELETE" });
+        if (publish) { toast("Posted. Publishing…"); await api("POST", `/v0/croptop/sites/${id}/publish`, {}); toast("Published."); }
+        else toast("Posted. Publish the site when you're ready.");
+        location.hash = `#/site/${id}/post/${post.id}`;
+      } catch (err) { toast(err.message, true); btns.forEach((b) => { b.disabled = false; }); }
+    };
+    const form = h("form", { class: "sheet quick", onsubmit: (e) => { e.preventDefault(); submit(false); } },
+      img,
+      h("label", {}, "Post to", siteSel),
+      h("label", {}, "Title", title),
+      h("label", {}, "Words", words),
+      h("label", {}, "Tags", tags),
+      h("div", { class: "row" }, h("button", { class: "btn hot", type: "submit" }, "Post"), h("button", { class: "btn", type: "button", onclick: () => submit(true) }, "Post and publish"), h("a", { class: "btn quiet", href: "#/", onclick: () => fetch(`/v0/croptop/quick/${shot}`, { method: "DELETE" }) }, "Discard")));
+    form.addEventListener("keydown", (e) => { if ((e.metaKey || e.ctrlKey) && e.key === "Enter") { e.preventDefault(); submit(e.shiftKey); } });
+    m.replaceChildren(h("div", { class: "head" }, h("div", {}, h("h1", {}, "Quick post"), h("p", {}, "Command Enter posts, Command Shift Enter posts and publishes."))), form);
+    title.focus();
+  };
+
   // Home is the feed: every post from the sites this node follows, newest first.
   views.home = async () => {
     const m = $("#main");
@@ -622,6 +664,7 @@
       if (parts[0] === "new") return views.new();
       if (parts[0] === "adopt") return views.adopt();
       if (parts[0] === "follow") return views.follow();
+      if (parts[0] === "quick" && parts[1]) return views.quick(parts[1]);
       if (parts[0] === "f" && parts[1]) return views.followed(parts[1]);
       if (parts[0] === "site" && parts[1]) {
         if (parts[2] === "post" && parts[3]) return views.post(parts[1], parts[3], q);

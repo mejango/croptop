@@ -166,3 +166,5 @@ textarea.code[disabled] { color: var(--muted); }
 .feed p { margin: 0 0 10px; line-height: 1.5; }
 .feed .links { display: flex; gap: 14px; font-size: 13px; opacity: .75; }
 .feed iframe.feed-preview { width: 100%; height: 300px; border: 1px solid var(--ink); display: block; margin-bottom: 10px; background: var(--paper); }
+
+.sheet.quick { max-width: 720px; }
