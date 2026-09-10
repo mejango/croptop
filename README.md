@@ -231,6 +231,6 @@ MIT. The bundled Press Start 2P font is under the SIL Open Font License.
 
 ## The app, quick posts, and keeping the node on
 
-On macOS, Croptop.app lives in the Dock. While it is open the console and your IPFS node run; quit it and they stop. Drop images, video or audio on its icon and the console opens on a new post with them attached: pick the site, add a title, a few words and tags, then post, or post and publish. Click the icon to open the console. Keep it in the Dock (right-click, Options, Keep in Dock) and add it to your Login Items if you want the node up from login on.
+On macOS, Croptop.app is a window around the console. While it is open your IPFS node runs; quit it and the node stops. Drop images, video or audio on its Dock icon or into the window and it opens a new post with them attached: pick the site, add a title, a few words and tags, then post, or post and publish. Click the icon to open the console. Keep it in the Dock (right-click, Options, Keep in Dock) and add it to your Login Items if you want the node up from login on.
 
 From a terminal, `croptop post photo.jpg clip.mp4` does the same. For a machine without the app (a server, Linux), `croptop service install` keeps the console running from login on through launchd or a systemd user unit; `croptop service status` and `uninstall` do what they say. The app and the service do not mix: opening the app removes the service and takes over.
