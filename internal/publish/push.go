@@ -67,10 +67,11 @@ func hostDomain(base string) (string, error) {
 }
 
 // Hosts behind Cloudflare accept at most 100 MB per request, so a site goes
-// up in batches, and a single file bigger than that stays on IPFS only.
+// up in batches, and a single file bigger than a batch goes in chunks that
+// the host reassembles.
 const (
-	pushBatch   = 64 << 20
-	pushMaxFile = 95 << 20
+	pushBatch = 64 << 20
+	pushChunk = 64 << 20
 )
 
 // Push uploads the published site's files to its host so the host serves
@@ -112,16 +113,75 @@ func (p *Publisher) Push(ctx context.Context, site *store.Site, cid string, seq 
 			return err
 		}
 		rel, _ := filepath.Rel(dir, path)
-		if info.Size() > pushMaxFile {
-			p.log("%s is %d MB, more than the host accepts in one request; it stays on IPFS only", rel, info.Size()>>20)
-			return nil
-		}
 		files = append(files, file{filepath.ToSlash(rel), info.Size()})
 		return nil
 	})
 	if err != nil {
 		return err
 	}
+	signed := func(req *http.Request) {
+		req.Header.Set("X-Croptop-Ipns", site.IPNS)
+		req.Header.Set("X-Croptop-Cid", cid)
+		req.Header.Set("X-Croptop-Seq", strconv.FormatUint(seq, 10))
+		req.Header.Set("X-Croptop-Time", strconv.FormatInt(now, 10))
+		req.Header.Set("X-Croptop-Sig", base64.StdEncoding.EncodeToString(sig))
+		if record != "" {
+			req.Header.Set("X-Croptop-Record", record)
+		}
+	}
+	client := &http.Client{Timeout: 10 * time.Minute}
+	// big files first, in chunks; the host reassembles them
+	var small []file
+	for _, f := range files {
+		if f.size <= pushBatch {
+			small = append(small, f)
+			continue
+		}
+		chunks := int((f.size + pushChunk - 1) / pushChunk)
+		upload := ""
+		fh, err := os.Open(filepath.Join(dir, filepath.FromSlash(f.rel)))
+		if err != nil {
+			return err
+		}
+		for i := 0; i < chunks; i++ {
+			size := int64(pushChunk)
+			if rest := f.size - int64(i)*pushChunk; rest < size {
+				size = rest
+			}
+			req, err := http.NewRequestWithContext(ctx, "POST", base+"/v0/host/push", io.NewSectionReader(fh, int64(i)*pushChunk, size))
+			if err != nil {
+				fh.Close()
+				return err
+			}
+			req.ContentLength = size
+			req.Header.Set("Content-Type", "application/octet-stream")
+			signed(req)
+			req.Header.Set("X-Croptop-File", f.rel)
+			req.Header.Set("X-Croptop-Chunk", fmt.Sprintf("%d/%d", i+1, chunks))
+			if upload != "" {
+				req.Header.Set("X-Croptop-Upload", upload)
+			}
+			resp, err := client.Do(req)
+			if err != nil {
+				fh.Close()
+				return err
+			}
+			body, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
+			resp.Body.Close()
+			if resp.StatusCode != 200 {
+				fh.Close()
+				return fmt.Errorf("%s chunk %d of %d: %s: %s", f.rel, i+1, chunks, resp.Status, strings.TrimSpace(string(body)))
+			}
+			var out struct{ Upload string }
+			json.Unmarshal(body, &out)
+			if out.Upload != "" {
+				upload = out.Upload
+			}
+		}
+		fh.Close()
+		p.log("pushed %s in %d chunks", f.rel, chunks)
+	}
+	files = small
 	var batches [][]file
 	var cur []file
 	var curSize int64
@@ -169,16 +229,9 @@ func (p *Publisher) Push(ctx context.Context, site *store.Site, cid string, seq 
 			return err
 		}
 		req.Header.Set("Content-Type", mw.FormDataContentType())
-		req.Header.Set("X-Croptop-Ipns", site.IPNS)
-		req.Header.Set("X-Croptop-Cid", cid)
-		req.Header.Set("X-Croptop-Seq", strconv.FormatUint(seq, 10))
-		req.Header.Set("X-Croptop-Time", strconv.FormatInt(now, 10))
-		req.Header.Set("X-Croptop-Sig", base64.StdEncoding.EncodeToString(sig))
+		signed(req)
 		req.Header.Set("X-Croptop-Part", fmt.Sprintf("%d/%d", i+1, len(batches)))
-		if record != "" {
-			req.Header.Set("X-Croptop-Record", record)
-		}
-		resp, err := (&http.Client{Timeout: 10 * time.Minute}).Do(req)
+		resp, err := client.Do(req)
 		if err != nil {
 			return err
 		}

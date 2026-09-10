@@ -525,6 +525,15 @@ func (h *Host) push(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), 500)
 		return
 	}
+	if rel := r.Header.Get("X-Croptop-File"); rel != "" {
+		// one chunk of a file too big for a single request
+		if err := saveChunk(r, stage, rel); err != nil {
+			http.Error(w, "chunk: "+err.Error(), 400)
+			return
+		}
+		writeJSON(w, 200, map[string]any{"chunk": r.Header.Get("X-Croptop-Chunk")})
+		return
+	}
 	n, err := saveMultipart(r, stage)
 	if err != nil {
 		http.Error(w, "reading files: "+err.Error(), 400)
@@ -638,4 +647,56 @@ func saveMultipart(r *http.Request, dir string) (int, error) {
 		}
 		n++
 	}
+}
+
+// saveChunk stores chunk i/n of a file under stage and joins the chunks when
+// the last one lands. Chunks may arrive in any order.
+func saveChunk(r *http.Request, stage, rel string) error {
+	var i, n int
+	if _, err := fmt.Sscanf(r.Header.Get("X-Croptop-Chunk"), "%d/%d", &i, &n); err != nil || i < 1 || n < i {
+		return fmt.Errorf("bad chunk header")
+	}
+	dst := filepath.Join(stage, filepath.Clean("/"+filepath.FromSlash(rel)))
+	if err := os.MkdirAll(filepath.Dir(dst), 0o755); err != nil {
+		return err
+	}
+	var src io.Reader = http.MaxBytesReader(nil, r.Body, maxPush)
+	if strings.EqualFold(r.Header.Get("X-Croptop-Encoding"), "base64") {
+		src = base64.NewDecoder(base64.StdEncoding, src)
+	}
+	part := fmt.Sprintf("%s.part%d", dst, i)
+	f, err := os.Create(part)
+	if err != nil {
+		return err
+	}
+	_, err = io.Copy(f, src)
+	f.Close()
+	if err != nil {
+		return err
+	}
+	// join once every chunk is here
+	for j := 1; j <= n; j++ {
+		if _, err := os.Stat(fmt.Sprintf("%s.part%d", dst, j)); err != nil {
+			return nil
+		}
+	}
+	out, err := os.Create(dst)
+	if err != nil {
+		return err
+	}
+	defer out.Close()
+	for j := 1; j <= n; j++ {
+		name := fmt.Sprintf("%s.part%d", dst, j)
+		in, err := os.Open(name)
+		if err != nil {
+			return err
+		}
+		_, err = io.Copy(out, in)
+		in.Close()
+		os.Remove(name)
+		if err != nil {
+			return err
+		}
+	}
+	return nil
 }

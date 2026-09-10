@@ -305,6 +305,7 @@ async function push(request, url, env, ctx) {
   const existing = await entryByKey(env, ipns);
   if (existing && seq < existing.sequence) return text(`host already has sequence ${existing.sequence}`, 409);
   if (Number(request.headers.get("content-length") || 0) > MAX_PUSH) return text("push too large", 413);
+  if (h("File")) return pushChunk(request, env, ctx, cid, h, signingHost(request, url, env));
   const form = await request.formData();
   let n = 0;
   for (const [field, value] of form.entries()) {
@@ -355,6 +356,47 @@ async function debugResolve(env, name) {
   if (key) for (const up of upstreams(env)) await probe("upstream:" + up, () => rootsOf(upstreamURL(up, "ipns", key)));
   await probe("resolveAny", () => resolveAny(env, name));
   return json(out);
+}
+
+// pushChunk stores one chunk of a file too big for a single request, through
+// R2's multipart upload. The first chunk opens the upload and returns its id;
+// the last one completes it. Chunks are forwarded to the node as they come.
+async function pushChunk(request, env, ctx, cid, h, signedHost) {
+  const rel = h("File").replace(/^\/+/, "");
+  const [i, n] = h("Chunk").split("/").map(Number);
+  if (!rel || rel.includes("..") || !(i >= 1 && n >= i)) return text("bad chunk", 400);
+  const key = `sites/${cid}/${rel}`;
+  const stateKey = `upload:${cid}:${rel}`;
+  let state = i === 1 ? null : await env.REGISTRY.get(stateKey, { type: "json" });
+  let mp;
+  if (!state) {
+    mp = await env.SITES.createMultipartUpload(key, { httpMetadata: { contentType: contentType(rel) } });
+    state = { uploadId: mp.uploadId, parts: [] };
+  } else {
+    mp = env.SITES.resumeMultipartUpload(key, state.uploadId);
+  }
+  const body = await request.arrayBuffer();
+  const part = await mp.uploadPart(i, body);
+  state.parts[i - 1] = part;
+  if (i === n) {
+    await mp.complete(state.parts.filter(Boolean));
+    await env.REGISTRY.delete(stateKey);
+  } else {
+    await env.REGISTRY.put(stateKey, JSON.stringify(state), { expirationTtl: 3600 });
+  }
+  if (env.NODE) ctx.waitUntil(forwardChunk(env, request, body, signedHost));
+  return json({ upload: state.uploadId, chunk: i, of: n });
+}
+
+async function forwardChunk(env, request, body, signedHost) {
+  try {
+    const headers = { ...UA, "X-Croptop-Signed-Host": signedHost, "X-Croptop-Encoding": "base64", "Content-Type": "text/plain" };
+    for (const k of ["Ipns", "Cid", "Seq", "Time", "Sig", "Record", "File", "Chunk"]) { const v = request.headers.get("X-Croptop-" + k); if (v) headers["X-Croptop-" + k] = v; }
+    const r = await fetch(`${env.NODE}/v0/host/push`, { method: "POST", headers, body: toBase64(body) });
+    if (!r.ok) console.log("node chunk", r.status, (await r.text()).slice(0, 120));
+  } catch (e) {
+    console.log("node chunk failed", e.message);
+  }
 }
 
 async function forwardPush(env, request, form, signedHost) {

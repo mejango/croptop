@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
+	"fmt"
 	"io"
 	"mime/multipart"
 	"net/http"
@@ -252,12 +253,47 @@ func TestClaimPushServe(t *testing.T) {
 	if e := h.reg.Keys[ipnsName]; e.Sequence != 5 {
 		t.Fatalf("part 2 must commit, sequence is %d", e.Sequence)
 	}
+	// a big file arrives in chunks, then the parts commit the version
+	big := bytes.Repeat([]byte("croptop "), 4096) // 32 KiB, split in two
+	os.WriteFile(filepath.Join(dir, "big.bin"), big, 0o644)
+	root2, _ := site.AddDir(ctx, dir)
+	psig6, _ := site.Keystore().Sign("site1", PushMessage("crop.test", ipnsName, root2, 6, now))
+	chunk := func(i, n int, b []byte) int {
+		rq, _ := http.NewRequest("POST", srv.URL+"/v0/host/push", bytes.NewReader(b))
+		rq.Host = "crop.test"
+		rq.Header.Set("Content-Type", "application/octet-stream")
+		for k, v := range map[string]string{"Ipns": ipnsName, "Cid": root2, "Seq": "6", "Time": strconv.FormatInt(now, 10), "Sig": base64.StdEncoding.EncodeToString(psig6), "File": "big.bin", "Chunk": fmt.Sprintf("%d/%d", i, n)} {
+			rq.Header.Set("X-Croptop-"+k, v)
+		}
+		resp, _ := http.DefaultClient.Do(rq)
+		return resp.StatusCode
+	}
+	if c := chunk(2, 2, big[len(big)/2:]); c != 200 {
+		t.Fatalf("chunk 2: %d", c)
+	}
+	if c := chunk(1, 2, big[:len(big)/2]); c != 200 {
+		t.Fatalf("chunk 1: %d", c)
+	}
+	body7, ct7 := partBody(map[string]string{"planet.json": filepath.Join(dir, "planet.json"), "post/index.html": filepath.Join(dir, "post", "index.html")})
+	rq7, _ := http.NewRequest("POST", srv.URL+"/v0/host/push", body7)
+	rq7.Host = "crop.test"
+	rq7.Header.Set("Content-Type", ct7)
+	for k, v := range map[string]string{"Ipns": ipnsName, "Cid": root2, "Seq": "6", "Time": strconv.FormatInt(now, 10), "Sig": base64.StdEncoding.EncodeToString(psig6), "Part": "1/1"} {
+		rq7.Header.Set("X-Croptop-"+k, v)
+	}
+	if r7, _ := http.DefaultClient.Do(rq7); r7.StatusCode != 200 {
+		b, _ := readAll(r7)
+		t.Fatalf("commit after chunks: %s %s", r7.Status, b)
+	}
+	if code, b := get("crop.test", "/probe/big.bin"); code != 200 || len(b) != len(big) {
+		t.Fatalf("chunked file served: %d %d bytes", code, len(b))
+	}
 	// registry survives a restart
 	h2 := &Host{Domain: "crop.test", DataDir: h.DataDir, Engine: h.Engine}
 	if err := h2.Start(); err != nil {
 		t.Fatal(err)
 	}
-	if h2.reg.Names["probe"] != ipnsName || h2.reg.Keys[ipnsName].Sequence != 5 {
+	if h2.reg.Names["probe"] != ipnsName || h2.reg.Keys[ipnsName].Sequence != 6 {
 		t.Fatal("registry not persisted")
 	}
 }
