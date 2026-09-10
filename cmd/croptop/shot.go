@@ -93,7 +93,6 @@ func installShotShortcut(key string) error {
   <key>NSServices</key><array><dict>
     <key>NSMenuItem</key><dict><key>default</key><string>Croptop Shot</string></dict>
     <key>NSMessage</key><string>runWorkflowAsService</string>
-    <key>NSRequiredContext</key><dict><key>NSApplicationIdentifier</key><string>*</string></dict>
     <key>NSKeyEquivalent</key><dict><key>default</key><string>%s</string></dict>
   </dict></array>
 </dict></plist>
@@ -148,6 +147,8 @@ func installShotShortcut(key string) error {
   </dict>
 </dict></plist>
 `, exe)
+	// No NSRequiredContext: pbs takes an application identifier literally, so a "*" wildcard
+	// hides the service from every app's Services menu (it still shows in Keyboard settings).
 	// The command stays in the foreground: Automator ends the action's process group when the
 	// script returns, which killed a backgrounded croptop before screencapture could open.
 	if err := os.WriteFile(filepath.Join(dir, "Info.plist"), []byte(info), 0o644); err != nil {
