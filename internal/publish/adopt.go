@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 
 	"github.com/mejango/croptop/internal/render"
@@ -168,6 +169,9 @@ func rebuildSource(st *store.Store, siteID, pubDir string) error {
 			}
 		}
 	}
+	// the published article.json does not say which pages are navigation
+	// items or in what order, but the rendered index.html does
+	navWeight := navigationFromIndex(pubDir, articles)
 	for _, a := range articles {
 		postDir := filepath.Join(pubDir, a.ID)
 		// prefer the per-post article.json; it is the same shape
@@ -178,6 +182,10 @@ func rebuildSource(st *store.Store, siteID, pubDir string) error {
 			}
 		}
 		post := postFromPublic(a) // article.json carries the exact content; article.md is title + content
+		if w, ok := navWeight[post.ID]; ok {
+			yes := true
+			post.IsIncludedInNavigation, post.NavigationWeight = &yes, &w
+		}
 		if err := st.SavePost(siteID, post); err != nil {
 			return err
 		}
@@ -226,4 +234,41 @@ func postFromPublic(a render.PublicPost) *store.Post {
 	empty := "" // Planet posts carry an empty summary; nft.json's description depends on it
 	p.Summary = &empty
 	return p
+}
+
+var navAnchor = regexp.MustCompile(`(?s)<a\s+href="([^"]*)"\s+class="nav-(?:item|current)"[^>]*>`)
+
+// navigationFromIndex reads the navigation the template rendered into
+// index.html and maps each item back to a page: by external link, or by the
+// slug or id in its href. The value is the item's position.
+func navigationFromIndex(pubDir string, articles []render.PublicPost) map[string]int {
+	out := map[string]int{}
+	b, err := os.ReadFile(filepath.Join(pubDir, "index.html"))
+	if err != nil {
+		return out
+	}
+	h := string(b)
+	i := strings.Index(h, `id="nav"`)
+	if i < 0 {
+		return out
+	}
+	h = h[i:]
+	if j := strings.Index(h, "</div>"); j > 0 {
+		h = h[:j]
+	}
+	for n, m := range navAnchor.FindAllStringSubmatch(h, -1) {
+		href := strings.TrimSpace(m[1])
+		path := strings.Trim(strings.TrimPrefix(strings.TrimPrefix(href, "./"), "../"), "/")
+		for _, a := range articles {
+			if a.ArticleType != 1 {
+				continue
+			}
+			ext := strings.TrimSpace(a.ExternalLink)
+			if (ext != "" && ext == href) || (path != "" && (path == a.ID || path == a.Slug)) {
+				out[a.ID] = n
+				break
+			}
+		}
+	}
+	return out
 }
