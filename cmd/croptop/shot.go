@@ -155,7 +155,11 @@ func installShotShortcut(key string) error {
 		return err
 	}
 	// register the key the way System Settings stores it
-	exec.Command("defaults", "write", "pbs", "NSServicesStatus", "-dict-add", "(null) - Croptop Shot - runWorkflowAsService", `{ "key_equivalent" = "`+keyEq+`"; }`).Run()
+	// The key must be passed with its own double quotes: defaults parses the value as old-style plist text.
+	if out, err := exec.Command("defaults", "write", "pbs", "NSServicesStatus", "-dict-add", `"(null) - Croptop Shot - runWorkflowAsService"`,
+		`{ "key_equivalent" = "`+keyEq+`"; "enabled_services_menu" = 1; "presentation_modes" = { ContextMenu = 0; ServicesMenu = 1; }; }`).CombinedOutput(); err != nil {
+		return fmt.Errorf("registering the key: %s", strings.TrimSpace(string(out)))
+	}
 	exec.Command("/System/Library/CoreServices/pbs", "-update").Run()
 	fmt.Printf("installed the Croptop Shot quick action. Press %s anywhere to grab part of the screen and post it.\n", human)
 	fmt.Println("If the key does nothing, open System Settings, Keyboard, Keyboard Shortcuts, Services, General, and tick Croptop Shot.")
