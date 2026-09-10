@@ -16,9 +16,9 @@ import (
 
 // shot captures part of the screen and hands it to the running console,
 // which opens a small form to turn it into a post.
-func (a *app) shot(install bool) error {
+func (a *app) shot(install bool, key string) error {
 	if install {
-		return installShotShortcut()
+		return installShotShortcut(key)
 	}
 	tmp := filepath.Join(os.TempDir(), "croptop-shot.png")
 	var cmd *exec.Cmd
@@ -64,8 +64,17 @@ func (a *app) shot(install bool) error {
 }
 
 // installShotShortcut registers a macOS Quick Action that runs `croptop shot`
-// and binds it to Command Shift C.
-func installShotShortcut() error {
+// and binds it to a key. The default, Command Control Shift C, is one no
+// common app claims: an app's own menu shortcuts always win over a Service's
+// (Command Shift C is "Show Colors" in the terminal, TextEdit, Mail...).
+func installShotShortcut(key string) error {
+	if key == "" {
+		key = "cmd+ctrl+shift+c"
+	}
+	keyEq, human, err := parseShortcut(key)
+	if err != nil {
+		return err
+	}
 	if runtime.GOOS != "darwin" {
 		return fmt.Errorf("the shortcut installer is for macOS; on Linux bind `croptop shot` to a key in your desktop's keyboard settings")
 	}
@@ -85,10 +94,11 @@ func installShotShortcut() error {
     <key>NSMenuItem</key><dict><key>default</key><string>Croptop Shot</string></dict>
     <key>NSMessage</key><string>runWorkflowAsService</string>
     <key>NSRequiredContext</key><dict><key>NSApplicationIdentifier</key><string>*</string></dict>
-    <key>NSKeyEquivalent</key><dict><key>default</key><string>C</string></dict>
+    <key>NSKeyEquivalent</key><dict><key>default</key><string>%s</string></dict>
   </dict></array>
 </dict></plist>
 `
+	info = fmt.Sprintf(info, keyEq[len(keyEq)-1:])
 	wflow := fmt.Sprintf(`<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0"><dict>
@@ -144,10 +154,45 @@ func installShotShortcut() error {
 	if err := os.WriteFile(filepath.Join(dir, "document.wflow"), []byte(wflow), 0o644); err != nil {
 		return err
 	}
-	// register the key: Command Shift C, the way System Settings stores it
-	exec.Command("defaults", "write", "pbs", "NSServicesStatus", "-dict-add", "(null) - Croptop Shot - runWorkflowAsService", `{ "key_equivalent" = "@$C"; }`).Run()
+	// register the key the way System Settings stores it
+	exec.Command("defaults", "write", "pbs", "NSServicesStatus", "-dict-add", "(null) - Croptop Shot - runWorkflowAsService", `{ "key_equivalent" = "`+keyEq+`"; }`).Run()
 	exec.Command("/System/Library/CoreServices/pbs", "-update").Run()
-	fmt.Println("installed the Croptop Shot quick action. Press Command Shift C anywhere to grab part of the screen and post it.")
+	fmt.Printf("installed the Croptop Shot quick action. Press %s anywhere to grab part of the screen and post it.\n", human)
 	fmt.Println("If the key does nothing, open System Settings, Keyboard, Keyboard Shortcuts, Services, General, and tick Croptop Shot.")
 	return nil
+}
+
+// parseShortcut turns "cmd+ctrl+shift+c" into the key_equivalent string
+// System Settings stores ("@^$C") and a readable name.
+func parseShortcut(spec string) (string, string, error) {
+	mods := map[string][2]string{"cmd": {"@", "Command"}, "command": {"@", "Command"}, "ctrl": {"^", "Control"}, "control": {"^", "Control"}, "shift": {"$", "Shift"}, "opt": {"~", "Option"}, "option": {"~", "Option"}, "alt": {"~", "Option"}}
+	order := "@^~$"
+	parts := strings.Split(strings.ToLower(spec), "+")
+	have := map[string]bool{}
+	var names []string
+	letter := ""
+	for _, p := range parts {
+		p = strings.TrimSpace(p)
+		if m, ok := mods[p]; ok {
+			if !have[m[0]] {
+				have[m[0]] = true
+				names = append(names, m[1])
+			}
+			continue
+		}
+		if len(p) != 1 || letter != "" {
+			return "", "", fmt.Errorf("shortcut must be modifiers plus one key, like cmd+shift+c")
+		}
+		letter = strings.ToUpper(p)
+	}
+	if letter == "" || !have["@"] && !have["^"] {
+		return "", "", fmt.Errorf("shortcut needs cmd or ctrl plus one key, like cmd+ctrl+shift+c")
+	}
+	eq := ""
+	for _, c := range order {
+		if have[string(c)] {
+			eq += string(c)
+		}
+	}
+	return eq + letter, strings.Join(append(names, letter), " "), nil
 }
