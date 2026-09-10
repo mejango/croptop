@@ -95,45 +95,70 @@
   /* ---------- views ---------- */
   const views = {};
 
-  // Quick post: a screenshot from `croptop shot` plus a title, a few words, tags, and the site it goes to.
-  views.quick = async (shot) => {
+  // Quick post: media handed over by `croptop post` or dropped on the app's Dock icon,
+  // plus a title, a few words, tags, and the site it goes to.
+  const mediaKind = (name) => {
+    const ext = name.toLowerCase().split(".").pop();
+    if (["png", "jpg", "jpeg", "gif", "webp", "avif", "svg", "heic"].includes(ext)) return "image";
+    if (["mp4", "mov", "webm", "m4v"].includes(ext)) return "video";
+    if (["mp3", "m4a", "wav", "ogg", "aac", "flac"].includes(ext)) return "audio";
+    return "file";
+  };
+  views.quick = async (id) => {
     const m = $("#main");
     const mine = state.sites.filter((s) => !s.archived);
     if (!mine.length) { m.replaceChildren(h("div", { class: "empty" }, "No site to post to yet. ", h("a", { href: "#/new" }, h("u", {}, "Start one")), ".")); return; }
+    let group;
+    try { group = await api("GET", `/v0/croptop/quick/${id}`); } catch { m.replaceChildren(h("div", { class: "empty" }, "These files are gone. Drop them on Croptop again.")); return; }
     const lastSite = (() => { try { return localStorage.getItem("croptop.quickSite"); } catch { return null; } })();
     const siteSel = h("select", { name: "site" }, ...mine.map((s) => h("option", { value: s.id, selected: s.id === lastSite ? "" : null }, s.name)));
     const title = h("input", { type: "text", name: "title", placeholder: "Title (optional)", autofocus: "" });
     const words = h("textarea", { name: "content", placeholder: "A few words (optional, markdown)", style: "min-height:90px" });
     const tags = h("input", { type: "text", name: "tags", placeholder: "tags, comma separated" });
-    const img = h("img", { src: `/v0/croptop/quick/${shot}`, alt: "screenshot", style: "max-width:100%;max-height:45vh;object-fit:contain;border:2px solid var(--ink);display:block" });
+    const src = (name) => `/v0/croptop/quick/${id}/${encodeURIComponent(name)}`;
+    const previews = h("div", { class: "quick-media" }, ...group.files.map((name) => {
+      const k = mediaKind(name);
+      if (k === "image") return h("img", { src: src(name), alt: name });
+      if (k === "video") return h("video", { src: src(name), controls: "", muted: "" });
+      if (k === "audio") return h("audio", { src: src(name), controls: "" });
+      return h("div", { class: "quick-file" }, name);
+    }));
     const submit = async (publish) => {
       const btns = [...form.querySelectorAll("button")]; btns.forEach((b) => { b.disabled = true; });
       try {
-        const id = siteSel.value;
-        try { localStorage.setItem("croptop.quickSite", id); } catch {}
-        const blob = await (await fetch(`/v0/croptop/quick/${shot}`)).blob();
+        const sid = siteSel.value;
+        try { localStorage.setItem("croptop.quickSite", sid); } catch {}
         const fd = new FormData();
-        const name = "screenshot-" + new Date().toISOString().slice(0, 19).replace(/[:T]/g, "-") + ".png";
-        // Same shape the Mac app writes: the image inline at the top, and as the hero image for grids and previews.
-        fd.set("title", title.value); fd.set("content", `<img alt="${title.value || "screenshot"}" src="${name}">\n\n${words.value}`); fd.set("tags", tags.value);
-        fd.set("heroImage", name);
-        fd.append("attachments", blob, name);
-        const post = await api("POST", `/v0/planets/my/${id}/articles`, fd, true);
-        await fetch(`/v0/croptop/quick/${shot}`, { method: "DELETE" });
-        if (publish) { toast("Posted. Publishing…"); await api("POST", `/v0/croptop/sites/${id}/publish`, {}); toast("Published."); }
+        // Same shape the Mac app writes: media inline at the top, the first image as the hero.
+        const inline = [];
+        let hero = "";
+        for (const name of group.files) {
+          const blob = await (await fetch(src(name))).blob();
+          fd.append("attachments", blob, name);
+          const k = mediaKind(name), esc = name.replace(/"/g, "&quot;");
+          if (k === "image") { inline.push(`<img alt="${esc}" src="${esc}">`); if (!hero) hero = name; }
+          else if (k === "video") inline.push(`<video controls playsinline src="${esc}"></video>`);
+          else if (k === "audio") inline.push(`<audio controls src="${esc}"></audio>`);
+          else inline.push(`<a href="${esc}">${name}</a>`);
+        }
+        fd.set("title", title.value); fd.set("content", inline.join("\n") + "\n\n" + words.value); fd.set("tags", tags.value);
+        if (hero) fd.set("heroImage", hero);
+        const post = await api("POST", `/v0/planets/my/${sid}/articles`, fd, true);
+        await fetch(`/v0/croptop/quick/${id}`, { method: "DELETE" });
+        if (publish) { toast("Posted. Publishing…"); await api("POST", `/v0/croptop/sites/${sid}/publish`, {}); toast("Published."); }
         else toast("Posted. Publish the site when you're ready.");
-        location.hash = `#/site/${id}/post/${post.id}`;
+        location.hash = `#/site/${sid}/post/${post.id}`;
       } catch (err) { toast(err.message, true); btns.forEach((b) => { b.disabled = false; }); }
     };
     const form = h("form", { class: "sheet quick", onsubmit: (e) => { e.preventDefault(); submit(false); } },
-      img,
+      previews,
       h("label", {}, "Post to", siteSel),
       h("label", {}, "Title", title),
       h("label", {}, "Words", words),
       h("label", {}, "Tags", tags),
-      h("div", { class: "row" }, h("button", { class: "btn hot", type: "submit" }, "Post"), h("button", { class: "btn", type: "button", onclick: () => submit(true) }, "Post and publish"), h("a", { class: "btn quiet", href: "#/", onclick: () => fetch(`/v0/croptop/quick/${shot}`, { method: "DELETE" }) }, "Discard")));
+      h("div", { class: "row" }, h("button", { class: "btn hot", type: "submit" }, "Post"), h("button", { class: "btn", type: "button", onclick: () => submit(true) }, "Post and publish"), h("a", { class: "btn quiet", href: "#/", onclick: () => fetch(`/v0/croptop/quick/${id}`, { method: "DELETE" }) }, "Discard")));
     form.addEventListener("keydown", (e) => { if ((e.metaKey || e.ctrlKey) && e.key === "Enter") { e.preventDefault(); submit(e.shiftKey); } });
-    m.replaceChildren(h("div", { class: "head" }, h("div", {}, h("h1", {}, "Quick post"), h("p", {}, "Command Enter posts, Command Shift Enter posts and publishes."))), form);
+    m.replaceChildren(h("div", { class: "head" }, h("div", {}, h("h1", {}, "Quick post"), h("p", {}, `${group.files.length} file${group.files.length === 1 ? "" : "s"}. Command Enter posts, Command Shift Enter posts and publishes.`))), form);
     title.focus();
   };
 

@@ -53,7 +53,8 @@ const usage = `croptop — publish Croptop sites to IPFS
   croptop engine           print the active ipfs engine (kubo or embedded)
   croptop version
   croptop update           install the newest release over this binary
-  croptop shot             grab part of the screen and post it (shot install [cmd+ctrl+shift+c]: bind a key on macOS)
+  croptop post <files>     open the console on a new post with these images, videos or audio attached
+  croptop service install  run the console at login, always on (uninstall, status)
 
 Flags for serve: --listen <addr>, --role node (headless: no browser, log only)
   croptop host --domain crop.top --listen 127.0.0.1:8090 [--root croptop.eth] [--announce /dns4/…/tcp/…]
@@ -126,15 +127,20 @@ func run(args []string) error {
 		}
 		fmt.Println("run croptop again to use", rel.Version(), "at", exe)
 		return nil
-	case "shot":
+	case "post":
 		if err := a.open(*engineFlag); err != nil {
 			return err
 		}
-		key := ""
-		if len(rest) > 1 {
-			key = rest[1]
+		return a.post(rest)
+	case "service":
+		if err := a.open(*engineFlag); err != nil {
+			return err
 		}
-		return a.shot(len(rest) > 0 && rest[0] == "install", key)
+		sub := "status"
+		if len(rest) > 0 {
+			sub = rest[0]
+		}
+		return a.service(sub)
 	case "version":
 		fmt.Println("croptop", version, "kubo", ipfs.KuboVersion)
 		return nil

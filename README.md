@@ -229,7 +229,8 @@ downloaded binary under `.data/kubo` and skip otherwise.
 
 MIT. The bundled Press Start 2P font is under the SIL Open Font License.
 
-## Quick posts from a screenshot
+## Quick posts and the always-on node
 
-`croptop shot` grabs part of the screen and opens the console with a small form: pick the site, add a title, a few words and tags, then post (or post and publish). On macOS, `croptop shot install` adds a "Croptop Shot" Quick Action bound to Command Control Shift C (pass another combo, like `croptop shot install cmd+shift+7`; an app's own menu shortcuts beat it, which is why Command Shift C, the terminal's Show Colors, does not work). On Linux bind `croptop shot` to a key in your desktop's keyboard settings.
+`croptop service install` keeps the console, and with it your IPFS node, running from login on (launchd on macOS, a systemd user unit on Linux). `croptop service status` and `uninstall` do what they say.
 
+`croptop post photo.jpg clip.mp4` opens the console on a new post with those files attached: pick the site, add a title, a few words and tags, then post, or post and publish. On macOS the Croptop app in the Dock does the same for anything you drop on its icon, and installs the login service the first time you open it. Keep it in the Dock (right-click, Options, Keep in Dock).
