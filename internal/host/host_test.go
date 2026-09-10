@@ -288,12 +288,39 @@ func TestClaimPushServe(t *testing.T) {
 	if code, b := get("crop.test", "/probe/big.bin"); code != 200 || len(b) != len(big) {
 		t.Fatalf("chunked file served: %d %d bytes", code, len(b))
 	}
+	// pull: a host mirrors a version from a URL, verifying the cid
+	files := httptest.NewServer(http.FileServer(http.Dir(dir)))
+	defer files.Close()
+	psig7, _ := site.Keystore().Sign("site1", PushMessage("crop.test", ipnsName, root2, 7, now))
+	pbody, _ := json.Marshal(map[string]any{"base": files.URL + "/", "files": []string{"planet.json", "post/index.html", "big.bin"}})
+	prq, _ := http.NewRequest("POST", srv.URL+"/v0/host/pull", bytes.NewReader(pbody))
+	prq.Host = "crop.test"
+	prq.Header.Set("Content-Type", "application/json")
+	for k, v := range map[string]string{"Ipns": ipnsName, "Cid": root2, "Seq": "7", "Time": strconv.FormatInt(now, 10), "Sig": base64.StdEncoding.EncodeToString(psig7)} {
+		prq.Header.Set("X-Croptop-"+k, v)
+	}
+	if pr, _ := http.DefaultClient.Do(prq); pr.StatusCode != 202 {
+		b, _ := readAll(pr)
+		t.Fatalf("pull: %s %s", pr.Status, b)
+	}
+	for i := 0; i < 100; i++ {
+		h.mu.Lock()
+		seqNow := h.reg.Keys[ipnsName].Sequence
+		h.mu.Unlock()
+		if seqNow == 7 {
+			break
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	if h.reg.Keys[ipnsName].Sequence != 7 {
+		t.Fatalf("pull did not register sequence 7")
+	}
 	// registry survives a restart
 	h2 := &Host{Domain: "crop.test", DataDir: h.DataDir, Engine: h.Engine}
 	if err := h2.Start(); err != nil {
 		t.Fatal(err)
 	}
-	if h2.reg.Names["probe"] != ipnsName || h2.reg.Keys[ipnsName].Sequence != 6 {
+	if h2.reg.Names["probe"] != ipnsName || h2.reg.Keys[ipnsName].Sequence != 7 {
 		t.Fatal("registry not persisted")
 	}
 }

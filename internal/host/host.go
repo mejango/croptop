@@ -408,6 +408,8 @@ func (h *Host) serveAPI(w http.ResponseWriter, r *http.Request) {
 		h.claim(w, r)
 	case p == "push" && r.Method == "POST":
 		h.push(w, r)
+	case p == "pull" && r.Method == "POST":
+		h.pull(w, r)
 	case strings.HasPrefix(p, "names/") && r.Method == "GET":
 		h.mu.Lock()
 		e := h.reg.Keys[h.reg.Names[strings.TrimPrefix(p, "names/")]]
@@ -696,6 +698,123 @@ func saveChunk(r *http.Request, stage, rel string) error {
 		os.Remove(name)
 		if err != nil {
 			return err
+		}
+	}
+	return nil
+}
+
+// pull mirrors a version another host holds: the request is signed like a
+// push and names a base URL and the files under it. The download runs in the
+// background; the root must hash to the cid, with missing blocks fetched
+// from the network as a last resort.
+func (h *Host) pull(w http.ResponseWriter, r *http.Request) {
+	ipnsName, c := r.Header.Get("X-Croptop-Ipns"), r.Header.Get("X-Croptop-Cid")
+	seq, _ := strconv.ParseUint(r.Header.Get("X-Croptop-Seq"), 10, 64)
+	t, _ := strconv.ParseInt(r.Header.Get("X-Croptop-Time"), 10, 64)
+	sig, _ := base64.StdEncoding.DecodeString(r.Header.Get("X-Croptop-Sig"))
+	if !fresh(t) || !ipfs.VerifyIPNS(ipnsName, PushMessage(h.signingHost(r), ipnsName, c, seq, t), sig) {
+		http.Error(w, "bad signature", 403)
+		return
+	}
+	var rec []byte
+	if b64 := r.Header.Get("X-Croptop-Record"); b64 != "" {
+		rec, _ = base64.StdEncoding.DecodeString(b64)
+	}
+	var in struct {
+		Base  string
+		Files []string
+	}
+	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 4<<20)).Decode(&in); err != nil || in.Base == "" {
+		http.Error(w, "bad request", 400)
+		return
+	}
+	h.mu.Lock()
+	if e := h.reg.Keys[ipnsName]; e != nil && seq < e.Sequence {
+		h.mu.Unlock()
+		http.Error(w, fmt.Sprintf("host already has sequence %d", e.Sequence), 409)
+		return
+	}
+	h.mu.Unlock()
+	writeJSON(w, 202, map[string]any{"pulling": c, "files": len(in.Files)})
+	go func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Minute)
+		defer cancel()
+		if err := h.mirror(ctx, ipnsName, c, seq, rec, in.Base, in.Files); err != nil {
+			h.log("pull %s: %v", c, err)
+		}
+	}()
+}
+
+func (h *Host) mirror(ctx context.Context, ipnsName, c string, seq uint64, rec []byte, base string, files []string) error {
+	stage := filepath.Join(h.DataDir, "host", "staging", c)
+	defer os.RemoveAll(stage)
+	client := &http.Client{Timeout: 20 * time.Minute}
+	for _, rel := range files {
+		rel = strings.TrimPrefix(rel, "/")
+		if rel == "" || strings.Contains(rel, "..") {
+			continue
+		}
+		dst := filepath.Join(stage, filepath.FromSlash(rel))
+		if err := os.MkdirAll(filepath.Dir(dst), 0o755); err != nil {
+			return err
+		}
+		req, err := http.NewRequestWithContext(ctx, "GET", strings.TrimSuffix(base, "/")+"/"+rel, nil)
+		if err != nil {
+			return err
+		}
+		resp, err := client.Do(req)
+		if err != nil {
+			return err
+		}
+		if resp.StatusCode != 200 {
+			resp.Body.Close()
+			return fmt.Errorf("%s: %s", rel, resp.Status)
+		}
+		f, err := os.Create(dst)
+		if err != nil {
+			resp.Body.Close()
+			return err
+		}
+		_, err = io.Copy(f, resp.Body)
+		f.Close()
+		resp.Body.Close()
+		if err != nil {
+			return err
+		}
+	}
+	got, err := h.Engine.AddDir(ctx, stage)
+	if err != nil {
+		return err
+	}
+	if got != c {
+		h.log("pull %s: files hash to %s, fetching the rest from the network", c, got)
+		if err := h.Engine.Get(ctx, "/ipfs/"+c, filepath.Join(stage, "..", c+".fetch")); err != nil {
+			return fmt.Errorf("files hash to %s, not %s, and the rest could not be fetched: %w", got, c, err)
+		}
+		os.RemoveAll(filepath.Join(stage, "..", c+".fetch"))
+	}
+	h.mu.Lock()
+	e := h.reg.Keys[ipnsName]
+	if e == nil {
+		e = &Entry{IPNS: ipnsName}
+		h.reg.Keys[ipnsName] = e
+	}
+	if seq >= e.Sequence {
+		e.CID, e.Sequence, e.Updated = c, seq, time.Now()
+		if len(rec) > 0 {
+			e.Record = rec
+		}
+	}
+	err = h.save()
+	h.mu.Unlock()
+	if err != nil {
+		return err
+	}
+	h.log("mirrored %s: %d files, sequence %d -> %s", ipnsName, len(files), seq, c)
+	h.Engine.Provide(ctx, c)
+	if len(rec) > 0 {
+		if err := h.Engine.PutRecord(ctx, ipnsName, rec); err != nil {
+			h.log("record for %s: %v", ipnsName, err)
 		}
 	}
 	return nil

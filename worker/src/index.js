@@ -313,7 +313,8 @@ async function push(request, url, env, ctx) {
     if (!field.startsWith("file:") || typeof value === "string") continue;
     const rel = field.slice(5).replace(/^\/+/, "");
     if (!rel || rel.includes("..")) continue;
-    await env.SITES.put(`sites/${cid}/${rel}`, value.stream(), { httpMetadata: { contentType: contentType(rel) } });
+    const have = await env.SITES.head(`sites/${cid}/${rel}`);
+    if (!have || have.size !== value.size) await env.SITES.put(`sites/${cid}/${rel}`, value.stream(), { httpMetadata: { contentType: contentType(rel) } });
     n++;
   }
   if (n === 0) return text("no files", 400);
@@ -329,9 +330,9 @@ async function push(request, url, env, ctx) {
     if (e.record) ctx.waitUntil(republish(ipns, e.record));
   }
   await env.REGISTRY.put("lastpush:" + ipns, JSON.stringify(Object.fromEntries(["Ipns", "Cid", "Seq", "Time", "Sig", "Record"].map((k) => ["X-Croptop-" + k, request.headers.get("X-Croptop-" + k) || ""]))), { expirationTtl: 3600 });
-  // replicate to the node so the IPFS network gets the site from a reachable
-  // peer, not from the author's laptop; it re-adds the files and checks the cid
-  if (env.NODE) ctx.waitUntil(forwardPush(env, request, form, signingHost(request, url, env)));
+  // the node mirrors the site so the IPFS network gets it from a reachable
+  // peer: it pulls the files back from R2 through this Worker and checks the cid
+  if (final && env.NODE) ctx.waitUntil(notifyNode(env, request, cid, signingHost(request, url, env)));
   return json({ cid, sequence: seq, files: n, name: e.name || "" });
 }
 
@@ -384,33 +385,26 @@ async function pushChunk(request, env, ctx, cid, h, signedHost) {
   } else {
     await env.REGISTRY.put(stateKey, JSON.stringify(state), { expirationTtl: 3600 });
   }
-  if (env.NODE) ctx.waitUntil(forwardChunk(env, request, body, signedHost));
   return json({ upload: state.uploadId, chunk: i, of: n });
 }
 
-async function forwardChunk(env, request, body, signedHost) {
+// notifyNode tells the node a version is complete in R2; it pulls the files
+// from <cid>.<domain>, re-adds them, checks the cid, and provides the blocks.
+async function notifyNode(env, request, cid, signedHost) {
   try {
-    const headers = { ...UA, "X-Croptop-Signed-Host": signedHost, "X-Croptop-Encoding": "base64", "Content-Type": "text/plain" };
-    for (const k of ["Ipns", "Cid", "Seq", "Time", "Sig", "Record", "File", "Chunk"]) { const v = request.headers.get("X-Croptop-" + k); if (v) headers["X-Croptop-" + k] = v; }
-    const r = await fetch(`${env.NODE}/v0/host/push`, { method: "POST", headers, body: toBase64(body) });
-    if (!r.ok) console.log("node chunk", r.status, (await r.text()).slice(0, 120));
+    const keys = [];
+    let cursor;
+    do {
+      const page = await env.SITES.list({ prefix: `sites/${cid}/`, cursor, limit: 1000 });
+      for (const o of page.objects) keys.push(o.key.slice(`sites/${cid}/`.length));
+      cursor = page.truncated ? page.cursor : undefined;
+    } while (cursor);
+    const headers = { ...UA, "Content-Type": "application/json", "X-Croptop-Signed-Host": signedHost };
+    for (const k of ["Ipns", "Cid", "Seq", "Time", "Sig", "Record"]) { const v = request.headers.get("X-Croptop-" + k); if (v) headers["X-Croptop-" + k] = v; }
+    const r = await fetch(`${env.NODE}/v0/host/pull`, { method: "POST", headers, body: JSON.stringify({ base: `https://${cid}.${env.DOMAIN}/`, files: keys }) });
+    if (!r.ok) console.log("node pull", r.status, (await r.text()).slice(0, 120));
   } catch (e) {
-    console.log("node chunk failed", e.message);
-  }
-}
-
-async function forwardPush(env, request, form, signedHost) {
-  try {
-    const fd = new FormData();
-    for (const [field, value] of form.entries()) if (field.startsWith("file:") && typeof value !== "string") fd.append(field, new Blob([toBase64(await value.arrayBuffer())]), value.name);
-    // base64, because a firewall in front of the node reads a site's scripts as an attack
-    const headers = { ...UA, "X-Croptop-Signed-Host": signedHost, "X-Croptop-Encoding": "base64" };
-    for (const k of ["Ipns", "Cid", "Seq", "Time", "Sig", "Record", "Part"]) { const v = request.headers.get("X-Croptop-" + k); if (v) headers["X-Croptop-" + k] = v; }
-    console.log("node push start", Object.keys(headers).join(","), [...fd.keys()].length + " files");
-    const r = await fetch(`${env.NODE}/v0/host/push`, { method: "POST", headers, body: fd });
-    console.log("node push result", r.status, r.headers.get("server") || "", r.headers.get("content-type") || "", (await r.text()).slice(0, 200));
-  } catch (e) {
-    console.log("node push failed", e.message);
+    console.log("node pull failed", e.message);
   }
 }
 

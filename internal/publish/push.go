@@ -70,7 +70,7 @@ func hostDomain(base string) (string, error) {
 // up in batches, and a single file bigger than a batch goes in chunks that
 // the host reassembles.
 const (
-	pushBatch = 64 << 20
+	pushBatch = 16 << 20
 	pushChunk = 64 << 20
 )
 
