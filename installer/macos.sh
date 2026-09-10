@@ -84,8 +84,8 @@ if [ -n "${MACOS_SIGN_IDENTITY:-}" ] && { [ -n "${AC_API_KEY_PATH:-}" ] || [ -n 
   hdiutil create -volname Croptop -srcfolder "$DMGDIR" -ov -format UDZO "$OUT/Croptop.dmg" >/dev/null
   notarize "$OUT/Croptop.dmg"
   xcrun stapler staple "$OUT/Croptop.dmg"
-  spctl --assess --type open --context context:primary-signature --verbose=2 "$OUT/Croptop.dmg" || true
-  echo "signed and notarized $OUT/Croptop.dmg"
+  xcrun stapler validate "$OUT/Croptop.dmg"
+  echo "signed and notarized $OUT/Croptop.dmg (Gatekeeper: Notarized Developer ID)"
 else
   echo "built unsigned $OUT/Croptop.dmg (set MACOS_SIGN_IDENTITY and notary credentials to sign)"
 fi

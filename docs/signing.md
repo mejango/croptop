@@ -12,7 +12,7 @@ Run the commands on the Mac that holds your Developer ID Application certificate
 
 | Secret | What it is | How to produce it |
 |---|---|---|
-| `MACOS_CERT_P12` | Your Developer ID Application cert and key, base64'd | Keychain Access, right-click the "Developer ID Application: … (229P4A97W6)" identity, Export as `cert.p12` with a password. Then `base64 -i cert.p12 \| gh secret set MACOS_CERT_P12 --repo mejango/croptop` |
+| `MACOS_CERT_P12` | Your Developer ID Application cert and key, base64'd | Keychain Access, right-click the "Developer ID Application: … (SY2W527QJA)" identity, Export as `cert.p12` with a password. Then `base64 -i cert.p12 \| gh secret set MACOS_CERT_P12 --repo mejango/croptop` |
 | `MACOS_CERT_PASSWORD` | The password you set on that `.p12` | `gh secret set MACOS_CERT_PASSWORD --repo mejango/croptop` (type it) |
 | `AC_API_KEY_P8` | An App Store Connect API key (`.p8`), base64'd | App Store Connect, Users and Access, Integrations, Team Keys, generate a key with the "Developer" role. Download `AuthKey_XXXX.p8` once. Then `base64 -i AuthKey_XXXX.p8 \| gh secret set AC_API_KEY_P8 --repo mejango/croptop` |
 | `AC_API_KEY_ID` | The key's ID (the `XXXX` in the filename) | `gh secret set AC_API_KEY_ID --repo mejango/croptop` |
@@ -54,4 +54,5 @@ uploads the stapled `Croptop.dmg` to the release. It reads:
   dir). The bundled Go engine is signed too, so hardened runtime accepts it.
 - The signed app cannot replace its own binary, so its update banner sends you
   to the download instead of self-updating. The CLI install keeps self-update.
-- Team ID is `229P4A97W6`.
+- Developer ID team is `SY2W527QJA`; the identity is `Developer ID Application: Jango De La Noche (SY2W527QJA)`.
+- On this release Mac the signing keychain, private key and `.p12` live under `~/Documents/croptop-signing/`, and the App Store Connect notary key under `~/Downloads/` (see local notes for the exact ids). Keep them out of the repo.
