@@ -277,7 +277,7 @@ func run(args []string) error {
 		if err != nil {
 			return err
 		}
-		id, err := a.pub.Adopt(ctx, rest[0], pem)
+		id, err := a.pub.Adopt(ctx, rest[0], pem, *force)
 		if err != nil {
 			return err
 		}

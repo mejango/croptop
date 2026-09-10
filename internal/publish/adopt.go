@@ -16,7 +16,10 @@ import (
 // Adopt takes over a published site on this machine from just its IPNS name
 // (or ENS domain) and private key: the published tree is fetched from IPFS
 // and the source files rebuilt from it.
-func (p *Publisher) Adopt(ctx context.Context, nameOrENS string, pemBytes []byte) (string, error) {
+// Adopt fetches a published site and makes this machine its publisher. With
+// force it re-adopts a site that is already here, rebuilding its posts from
+// the network again; the key must be the same one.
+func (p *Publisher) Adopt(ctx context.Context, nameOrENS string, pemBytes []byte, force bool) (string, error) {
 	name := strings.TrimPrefix(strings.TrimSpace(nameOrENS), "/ipns/")
 	if strings.HasSuffix(name, ".eth") {
 		p.log("resolving %s", name)
@@ -56,27 +59,31 @@ func (p *Publisher) Adopt(ctx context.Context, nameOrENS string, pemBytes []byte
 		return "", fmt.Errorf("planet.json has no id")
 	}
 	ks := p.Node.Keystore()
-	if ks.Has(head.ID) {
-		return "", fmt.Errorf("a key for %s already exists on this machine", head.ID)
+	if ks.Has(head.ID) && !force {
+		return "", fmt.Errorf("a key for %s already exists on this machine (use --force to rebuild the site from the network)", head.ID)
 	}
-	// Planet's .site export ships the key as kubo's raw keystore bytes; the
-	// console and croptop's own export use PEM
-	importKey := ks.ImportPEM
-	if !bytes.Contains(pemBytes, []byte("-----BEGIN")) {
-		importKey = ks.ImportRaw
-	}
-	if err := importKey(head.ID, pemBytes); err != nil {
-		return "", err
+	if !ks.Has(head.ID) {
+		// Planet's .site export ships the key as kubo's raw keystore bytes; the
+		// console and croptop's own export use PEM
+		importKey := ks.ImportPEM
+		if !bytes.Contains(pemBytes, []byte("-----BEGIN")) {
+			importKey = ks.ImportRaw
+		}
+		if err := importKey(head.ID, pemBytes); err != nil {
+			return "", err
+		}
 	}
 	derived, err := ks.Name(head.ID)
 	if err != nil {
 		return "", err
 	}
 	if derived != name {
-		ks.Delete(head.ID)
+		if !force {
+			ks.Delete(head.ID)
+		}
 		return "", fmt.Errorf("that key belongs to %s, not %s", derived, name)
 	}
-	if _, err := os.Stat(p.Store.SiteDir(head.ID)); err == nil {
+	if _, err := os.Stat(p.Store.SiteDir(head.ID)); err == nil && !force {
 		return "", fmt.Errorf("site %s already exists here", head.ID)
 	}
 	os.RemoveAll(p.Store.PublicDir(head.ID))
@@ -136,6 +143,28 @@ func rebuildSource(st *store.Store, siteID, pubDir string) error {
 		if _, err := os.Stat(src); err == nil {
 			if err := copyFile(src, filepath.Join(st.SiteDir(siteID), f)); err != nil {
 				return err
+			}
+		}
+	}
+	// planet.json lists only the feed; pages live in the tree as folders with
+	// their own article.json, so walk the folders too
+	seen := map[string]bool{}
+	for _, a := range articles {
+		seen[a.ID] = true
+	}
+	if entries, err := os.ReadDir(pubDir); err == nil {
+		for _, e := range entries {
+			if !e.IsDir() || seen[e.Name()] {
+				continue
+			}
+			pb, err := os.ReadFile(filepath.Join(pubDir, e.Name(), "article.json"))
+			if err != nil {
+				continue
+			}
+			var page render.PublicPost
+			if json.Unmarshal(pb, &page) == nil && page.ID == e.Name() {
+				articles = append(articles, page)
+				seen[page.ID] = true
 			}
 		}
 	}

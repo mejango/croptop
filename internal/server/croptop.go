@@ -237,7 +237,7 @@ func (s *Server) routesCroptop(mux *http.ServeMux) {
 		defer s.mu.Unlock()
 		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Minute)
 		defer cancel()
-		id, err := s.Pub.Adopt(ctx, in.Name, []byte(in.PEM))
+		id, err := s.Pub.Adopt(ctx, in.Name, []byte(in.PEM), false)
 		if err != nil {
 			writeErr(w, 400, err)
 			return
