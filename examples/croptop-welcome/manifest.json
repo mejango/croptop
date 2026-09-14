@@ -1,0 +1,90 @@
+[
+  {
+    "key": "start",
+    "title": "Start here",
+    "label": "Start",
+    "tag": "start here",
+    "id": "9EE5FA3A-F992-47A9-BDBB-B38F525FDAD5",
+    "order": 0
+  },
+  {
+    "key": "essays",
+    "title": "Essays",
+    "label": "Essays",
+    "tag": "posts",
+    "id": "E2F5F17C-3088-48BB-8440-DA3E357F5104",
+    "order": 1
+  },
+  {
+    "key": "audio",
+    "title": "Audio",
+    "label": "Audio",
+    "tag": "posts",
+    "id": "C7215628-0976-4CC6-AC20-7950C93A83F3",
+    "order": 2
+  },
+  {
+    "key": "documents",
+    "title": "Documents",
+    "label": "Documents",
+    "tag": "posts",
+    "id": "E94F0B91-BD34-4B70-A88C-CC057B7A0D7B",
+    "order": 3
+  },
+  {
+    "key": "video",
+    "title": "Video",
+    "label": "Video",
+    "tag": "posts",
+    "id": "77E6E2AE-B847-4BF2-B904-93E59021712E",
+    "order": 4
+  },
+  {
+    "key": "writing",
+    "title": "Poetry",
+    "label": "Poetry",
+    "tag": "posts",
+    "id": "9CB0B19C-061C-4378-9D27-9E434C796B76",
+    "order": 5
+  },
+  {
+    "key": "studio",
+    "title": "Custom",
+    "label": "Custom",
+    "tag": "custom",
+    "id": "71E4547B-9F51-490B-B8CB-7FEA4FBF9DA7",
+    "order": 6
+  },
+  {
+    "key": "art",
+    "title": "Embeds",
+    "label": "Embeds",
+    "tag": "custom",
+    "id": "D4C68DAB-4CB6-4B26-B157-FC8CC7D54A50",
+    "order": 7
+  },
+  {
+    "key": "bots",
+    "title": "Bots",
+    "label": "Bots",
+    "tag": "start here",
+    "id": "D174A1AD-E36E-4F81-AE29-93107150749D",
+    "order": 8
+  },
+  {
+    "key": "network",
+    "title": "Peers",
+    "label": "Peers",
+    "tag": "how it works",
+    "id": "EDAA9F21-873F-47E2-B5EB-689003FB9B47",
+    "order": 9
+  },
+  {
+    "key": "faq",
+    "title": "Basics",
+    "label": "Basics",
+    "tag": "start here",
+    "id": "35C0796C-B6AC-4613-AB17-56083B645539",
+    "order": 10
+  }
+]

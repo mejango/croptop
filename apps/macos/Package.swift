@@ -6,11 +6,16 @@ import PackageDescription
 let package = Package(
     name: "Croptop",
     platforms: [.macOS(.v13)],
+    dependencies: [.package(url: "https://github.com/sparkle-project/Sparkle", exact: "2.9.6")],
     targets: [
         .executableTarget(
             name: "Croptop",
+            dependencies: [.product(name: "Sparkle", package: "Sparkle")],
             path: "Sources/Croptop",
-            swiftSettings: [.unsafeFlags(["-swift-version", "5"])]
-        )
+            resources: [.process("Resources")],
+            swiftSettings: [.unsafeFlags(["-swift-version", "5"])],
+            linkerSettings: [.unsafeFlags(["-Xlinker", "-rpath", "-Xlinker", "@executable_path/../Frameworks"])]
+        ),
+        .testTarget(name: "CroptopTests", dependencies: ["Croptop"])
     ]
 )

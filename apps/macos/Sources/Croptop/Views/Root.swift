@@ -10,7 +10,7 @@ struct RootView: View {
         ZStack(alignment: .bottom) {
             HStack(spacing: 0) {
                 RailView()
-                Rectangle().fill(Theme.ink).frame(width: Theme.border)
+                Rectangle().fill(Theme.rule).frame(width: 1)
                 content.frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -35,6 +35,8 @@ struct RootView: View {
             switch s {
             case .newSite: NewSiteSheet()
             case .follow: FollowSheet()
+            case .curate: CurateSheet()
+            case .capture(let id): QuickView(groupID: id, presentedAsSheet: true).frame(width: 720, height: 720)
             }
         }
     }
@@ -42,18 +44,19 @@ struct RootView: View {
     @ViewBuilder var content: some View {
         if let f = model.fatal {
             VStack(spacing: 12) {
-                Text("Croptop could not start").font(Theme.pixel(28))
+                Text("Croptop could not start").font(Theme.heading(28))
                 Text(f).font(Theme.body()).foregroundColor(Theme.muted).multilineTextAlignment(.center)
             }.frame(maxWidth: .infinity, maxHeight: .infinity).padding(Theme.content)
         } else if !model.ready {
-            VStack(spacing: 12) {
-                ProgressView()
-                Text("Starting your node…").font(Theme.body()).foregroundColor(Theme.muted)
-            }.frame(maxWidth: .infinity, maxHeight: .infinity)
+            LoadingTicker(accessibilityLabel: "Starting your node")
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
         } else {
             switch model.screen {
-            case .feed: FeedView()
+            case .feed: FeedView(scope: .following).id("following-feed")
+            case .ownedFeed: FeedView(scope: .owned).id("owned-feed")
+            case .followingSite(let ipns): FeedView(scope: .site(ipns)).id("following:" + ipns)
             case .site(let id): SiteView(siteID: id).id(id)
+            case .settings(let id): SiteSettingsView(siteID: id).id(id)
             case .editor(let site, let post): EditorView(siteID: site, postID: post).id(site + (post ?? "new"))
             case .quick(let id): QuickView(groupID: id).id(id)
             }

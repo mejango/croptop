@@ -23,10 +23,22 @@ type Site struct {
 	IPNSSequence       uint64
 	PublishedElsewhere bool
 
+	Contributors []Contributor
+	Aggregation  []string
+
 	Raw doc
 }
 
+// Contributor identifies a publishing site; it never grants access to the owner’s key.
+type Contributor struct {
+	IPNS string `json:"ipns"`
+	Name string `json:"name"`
+	Mode string `json:"mode"` // submissions or all (curated source)
+}
+
 type siteJSON struct {
+	Contributors       []Contributor     `json:"contributors,omitempty"`
+	Aggregation        []string          `json:"aggregation,omitempty"`
 	ID                 string            `json:"id"`
 	Name               string            `json:"name"`
 	About              string            `json:"about"`
@@ -56,7 +68,7 @@ func (s *Site) UnmarshalJSON(b []byte) error {
 		ID: j.ID, Name: j.Name, About: j.About, IPNS: j.IPNS, TemplateName: j.TemplateName,
 		Created: j.Created, Updated: j.Updated, Domain: j.Domain, LastPublished: j.LastPublished,
 		LastPublishedCID: j.LastPublishedCID, Archived: j.Archived, Tags: j.Tags,
-		IPNSSequence: j.IPNSSequence, PublishedElsewhere: j.PublishedElsewhere, Raw: raw,
+		IPNSSequence: j.IPNSSequence, PublishedElsewhere: j.PublishedElsewhere, Raw: raw, Contributors: j.Contributors, Aggregation: j.Aggregation,
 	}
 	return nil
 }
@@ -66,6 +78,10 @@ func (s Site) MarshalJSON() ([]byte, error) {
 	if d == nil {
 		d = doc{}
 	}
+	if s.Contributors != nil {
+		d.put("contributors", s.Contributors)
+	}
+	d.putIfNotNil("aggregation", s.Aggregation)
 	d.put("id", s.ID)
 	d.put("name", s.Name)
 	d.put("about", s.About)
@@ -105,11 +121,14 @@ func (s Site) Public() map[string]json.RawMessage {
 			out[k] = v
 		}
 	}
+	if contributors := s.ContributorSites(); len(contributors) > 0 {
+		out.put("contributors", contributors)
+	}
 	return out
 }
 
 var publicSiteKeys = []string{
-	"id", "name", "about", "ipns", "created", "updated",
+	"id", "name", "about", "ipns", "created", "updated", "contributors",
 	"plausibleEnabled", "plausibleDomain", "plausibleAPIServer",
 	"juiceboxEnabled", "juiceboxProjectID", "juiceboxProjectIDGoerli",
 	"acceptsDonation", "acceptsDonationMessage", "acceptsDonationETHAddress",
@@ -117,4 +136,22 @@ var publicSiteKeys = []string{
 	"farcasterEnabled",
 	"podcastCategories", "podcastLanguage", "podcastExplicit",
 	"tags",
+}
+
+// ContributorSites includes sources from Planet's composite-site format.
+func (s Site) ContributorSites() []Contributor {
+	out := append([]Contributor{}, s.Contributors...)
+	for _, name := range s.Aggregation {
+		found := false
+		for _, c := range out {
+			if c.IPNS == name {
+				found = true
+				break
+			}
+		}
+		if !found {
+			out = append(out, Contributor{IPNS: name, Name: name, Mode: "all"})
+		}
+	}
+	return out
 }

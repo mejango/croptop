@@ -159,7 +159,7 @@
       previews,
       h("label", {}, "Post to", siteSel),
       h("label", {}, "Title", title),
-      h("label", {}, "Words", words),
+      h("label", {}, "Body", words),
       h("label", {}, "Tags", tags),
       h("div", { class: "row" }, h("button", { class: "btn hot", type: "submit" }, "Post"), h("button", { class: "btn", type: "button", onclick: () => submit(true) }, "Post and publish"), h("a", { class: "btn quiet", href: "#/", onclick: () => fetch(`/v0/croptop/quick/${id}`, { method: "DELETE" }) }, "Discard")));
     form.addEventListener("keydown", (e) => { if ((e.metaKey || e.ctrlKey) && e.key === "Enter") { e.preventDefault(); submit(e.shiftKey); } });
@@ -274,7 +274,7 @@
 
   // the site's canonical address, the same rule as internal/gateway
   const siteURL = (site) => {
-    const g = site.croptopGateway || "sucks";
+    const g = site.croptopGateway || "crop.top";
     const ens = site.domain && site.domain.endsWith(".eth") ? site.domain : null;
     if (g === "crop.top") {
       if (ens) return `https://${ens.slice(0, -4)}.crop.top/`;
@@ -530,12 +530,64 @@
     const site = siteById(id); if (!site) return views.home();
     const m = $("#main");
     const [tmpl, settings, gateways] = await Promise.all([template(), api("GET", `/v0/croptop/sites/${id}/settings`), api("GET", "/v0/croptop/gateways")]);
-    const basic = h("fieldset", {}, h("legend", {}, "Collection"));
+    const appearance = h("fieldset", {}, h("legend", {}, "Website colors"));
+    const basic = h("fieldset", {}, h("legend", {}, "Shop"));
+    basic.append(h("button", { type: "button", class: "btn", onclick: async (e) => {
+      e.target.disabled = true;
+      const popup = window.open("about:blank", "_blank");
+      if (popup) popup.opener = null;
+      try {
+        const response = await fetch(`/v0/croptop/sites/${id}/shop`, { method: "POST", headers: { "X-Croptop-Shop": "1" } });
+        if (!response.ok) throw new Error(await response.text());
+        const result = await response.json();
+        if (!result.url.startsWith("/shop#")) throw new Error("Invalid shop URL");
+        if (popup) popup.location = result.url;
+        else toast("Allow popups, then open shop creation again.", true);
+      } catch (error) { popup?.close(); toast(error.message, true); }
+      finally { e.target.disabled = false; }
+    }}, "Create shop"), h("p", { class: "help" }, "Or enter an existing shop and set up its posting permissions below."));
     const advanced = h("fieldset", {}, h("legend", {}, "Advanced"));
     const keys = Object.keys(tmpl.settings || {}).sort((a, b) => a.localeCompare(b));
     for (const k of keys) {
       const s = tmpl.settings[k];
-      (s.advanced ? advanced : basic).append(h("label", {}, s.name || k, h("input", { type: "text", name: "ts:" + k, value: settings[k] ?? "" }), s.description ? h("span", { class: "help" }, s.description) : null));
+      if (["backgroundColor", "foregroundColor", "highlightColor"].includes(k)) {
+        const fallback = k === "backgroundColor" ? "#ffffff" : k === "foregroundColor" ? "#000000" : "#f056c1";
+        const expand = value => /^#[0-9a-f]{3}$/i.test(value) ? "#" + value.slice(1).split("").map(c => c + c).join("") : value;
+        const text = h("input", { type: "text", name: "ts:" + k, value: settings[k] ?? "", placeholder: "Automatic", pattern: "#[0-9a-fA-F]{3}([0-9a-fA-F]{3})?", "aria-label": (s.name || k) + " hex value" });
+        const picker = h("input", { type: "color", value: expand(settings[k] || fallback), "aria-label": s.name || k, style: "width:48px;height:40px;padding:4px;flex:none", oninput: e => { text.value = e.target.value; } });
+        text.addEventListener("input", () => { if (text.validity.valid) picker.value = expand(text.value || fallback); });
+        appearance.append(h("label", {}, s.name || k, h("span", { class: "row" }, picker, text), s.description ? h("span", { class: "help" }, s.description) : null));
+      } else {
+        (s.advanced ? advanced : basic).append(h("label", {}, s.name || k, h("input", { type: "text", name: "ts:" + k, value: settings[k] ?? "" }), s.description ? h("span", { class: "help" }, s.description) : null));
+
+      }
+    }
+    const setupFamily = h("select", {"aria-label":"Posting setup networks"}, h("option", {value:"production"}, "Production"), h("option", {value:"testnet"}, "Testnets"));
+    basic.append(setupFamily, h("button", {type:"button",class:"btn",onclick:async e => {
+      const targets = {};
+      for (const k of keys.filter(k => k.endsWith("CollectionAddress") && /sepolia|testnet/i.test(k) === (setupFamily.value === "testnet"))) {
+        const hook = (basic.querySelector(`[name="ts:${k}"]`) || advanced.querySelector(`[name="ts:${k}"]`))?.value.trim();
+        if (hook) targets[k] = hook;
+      }
+      const category = basic.querySelector('[name="ts:collectionCategory"]')?.value.trim() || String(settings.collectionCategory || "1");
+      const popup = window.open("about:blank", "_blank"); if (popup) popup.opener = null;
+      e.target.disabled = true;
+      try {
+        const response = await fetch(`/v0/croptop/sites/${id}/shop-setup`, {method:"POST",headers:{"Content-Type":"application/json","X-Croptop-Shop":"1"},body:JSON.stringify({targets,category})});
+        if (!response.ok) throw new Error(await response.text());
+        const result = await response.json();
+        if (!result.url.startsWith("/shop-setup#") && !result.url.startsWith("/shop-connect#")) throw new Error("Invalid shop URL");
+        if (popup) popup.location = result.url; else toast("Allow popups, then open shop setup again.",true);
+      } catch(error) {popup?.close();toast(error.message,true);} finally {e.target.disabled=false;}
+    }}, "Set up posting"));
+    if (keys.includes("backgroundColor") && keys.includes("foregroundColor")) {
+      appearance.append(h("button", { type: "button", class: "btn quiet", onclick: () => {
+        for (const key of ["backgroundColor", "foregroundColor"]) {
+          const input = $(`[name="ts:${key}"]`, appearance);
+          input.value = "";
+          input.dispatchEvent(new Event("input"));
+        }
+      }}, "Use automatic colors"));
     }
     const form = h("form", { class: "sheet", onsubmit: async (e) => {
       e.preventDefault();
@@ -550,8 +602,8 @@
                     customCodeBodyEnd: $("[name=customCodeBodyEnd]", form).value, customCodeBodyEndEnabled: !!$("[name=customCodeBodyEnd]", form).value.trim(),
                     doNotIndex: $("[name=doNotIndex]", form).checked },
         });
-        const ts = {}; for (const k of keys) ts[k] = $(`[name="ts:${k}"]`, form).value;
-        await api("PUT", `/v0/croptop/sites/${id}/settings`, ts);
+        const ts = {}; for (const k of keys) { const value = $(`[name="ts:${k}"]`, form).value; if (value !== String(settings[k] ?? "")) ts[k] = value; }
+        await api("PATCH", `/v0/croptop/sites/${id}/settings`, ts);
         const avatar = $("[name=avatar]", form).files[0];
         if (avatar) { const fd = new FormData(); fd.set("avatar", avatar); await api("POST", `/v0/planets/my/${id}`, fd, true); }
         await loadSites(); toast("Settings saved. Publish to apply them on IPFS."); location.hash = `#/site/${id}`;
@@ -561,8 +613,8 @@
         h("label", {}, "Name", h("input", { type: "text", name: "name", value: site.name })),
         h("label", {}, "About", h("input", { type: "text", name: "about", value: site.about })),
         h("label", {}, "ENS domain", h("input", { type: "text", name: "domain", value: site.domain || "", placeholder: "yoursite.eth" }), h("span", { class: "help" }, "Point the domain's content hash at ", h("code", {}, "ipns://" + site.ipns), " once, then every publish updates it.")),
-        h("label", {}, "Gateway", h("select", { name: "gateway" }, ...gateways.map((g) => h("option", { value: g.Key, selected: (site.croptopGateway || "sucks") === g.Key ? "" : null }, g.Name))), h("span", { class: "help" }, "Written into the site's absolute links. Any gateway can read the site; this one is the canonical address.")),
-        h("label", {}, "Host", h("input", { type: "text", name: "host", value: site.croptopHost || "", placeholder: "https://crop.top" }), h("span", { class: "help" }, "A croptop host receives every publish and serves it at once, even while this computer is off. Leave empty to publish to IPFS only.")),
+        h("label", {}, "Gateway", h("select", { name: "gateway" }, ...gateways.map((g) => h("option", { value: g.Key, selected: (site.croptopGateway || "crop.top") === g.Key ? "" : null }, g.Name))), h("span", { class: "help" }, "Written into the site's absolute links. Any gateway can read the site; this one is the canonical address.")),
+        h("label", {}, "Host", h("input", { type: "text", name: "host", value: site.croptopHost || "", placeholder: "https://crop.top" }), h("span", { class: "help" }, "Every publish sends the latest version to crop.top so it stays available while this computer is off. Enter a custom host to use it instead; leave empty to use crop.top.")),
         h("label", {}, "Free name on the host", h("div", { class: "row" }, h("input", { type: "text", name: "cropname", value: site.croptopName || "", placeholder: "yoursite", style: "flex:1" }),
           h("button", { class: "btn", type: "button", onclick: async (e) => {
             const btn = e.target; btn.disabled = true;
@@ -575,11 +627,28 @@
         h("label", {}, "Tags", h("input", { type: "text", name: "tags", value: Object.keys(site.tags || {}).join(", ") }), h("span", { class: "help" }, "Tags offered in the site's filter bar.")),
         h("label", {}, "Avatar", h("input", { type: "file", name: "avatar", accept: "image/*" })),
         h("label", { class: "row" }, h("input", { type: "checkbox", name: "doNotIndex", checked: site.doNotIndex ? "" : null, style: "width:auto" }), " Ask search engines not to index")),
-      basic, advanced,
+      appearance, basic, advanced,
       h("fieldset", {}, h("legend", {}, "Custom code"),
         h("label", {}, "In <head>", h("textarea", { name: "customCodeHead", style: "min-height:90px" }, site.customCodeHead || "")),
         h("label", {}, "Before </body>", h("textarea", { name: "customCodeBodyEnd", style: "min-height:90px" }, site.customCodeBodyEnd || ""))),
       h("div", { class: "row" }, h("button", { class: "btn hot", type: "submit" }, "Save settings"), h("a", { class: "btn quiet", href: `#/site/${id}` }, "Cancel")));
+
+    const refreshShop = async () => {
+      if (!form.isConnected) return;
+      try {
+        const remote = await api("GET", `/v0/croptop/sites/${id}/settings`);
+        let changed = false;
+        for (const key of keys.filter(k => k.endsWith("CollectionAddress") || k === "collectionCategory")) {
+          if (String(remote[key] ?? "") === String(settings[key] ?? "")) continue;
+          const input = $(`[name="ts:${key}"]`, form);
+          if (input.value === String(settings[key] ?? "")) input.value = remote[key] ?? "";
+          settings[key] = remote[key]; changed = true;
+        }
+        if (changed) { await loadSites(); toast("Shop settings updated. Publish when you’re ready."); }
+      } catch { /* Keep unsaved edits during a temporary node outage. */ }
+      if (form.isConnected) setTimeout(refreshShop, 5000);
+    };
+    setTimeout(refreshShop, 5000);
 
     const keyBox = h("textarea", { class: "pem", readonly: "", hidden: "" });
     const keySection = h("fieldset", {}, h("legend", {}, "Move to another machine"),
@@ -684,11 +753,19 @@
   };
 
   /* ---------- router ---------- */
+  // The main pane wears the site's own colors; everything else keeps the app palette.
+  const paint = async (siteId) => {
+    let bg = "", fg = "";
+    if (siteId) try { ({ backgroundColor: bg = "", foregroundColor: fg = "" } = await api("GET", `/v0/croptop/sites/${siteId}/settings`)); } catch (e) {}
+    $("#app").style.setProperty("--paper", bg || "");
+    $("#app").style.setProperty("--ink", fg || "");
+  };
   const route = async () => {
     const [path, query = ""] = location.hash.replace(/^#\/?/, "").split("?");
     const parts = path.split("/").filter(Boolean);
     const q = new URLSearchParams(query);
     renderRail();
+    paint(parts[0] === "site" && parts[1]);
     try {
       if (!parts.length) return views.home();
       if (parts[0] === "new") return views.new();

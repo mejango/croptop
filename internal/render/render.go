@@ -292,7 +292,10 @@ func (r *Renderer) renderPost(ctx context.Context, eng *engine, site *store.Site
 	needsCover := p.TextOnly() || (p.AudioFilename != nil && *p.AudioFilename != "")
 	if needsCover {
 		text := p.Title
-		if strings.TrimSpace(p.Content) != "" {
+		// Preview posts contain executable code and may embed media. Their
+		// fallback cover should show the title, never wrap that source as text.
+		hasPreview := contains(p.Attachments, "preview.js") || strings.Contains(p.Content, "croptop/preview")
+		if !hasPreview && strings.TrimSpace(p.Content) != "" {
 			text = p.Content
 		}
 		if p.AudioFilename != nil && *p.AudioFilename != "" {

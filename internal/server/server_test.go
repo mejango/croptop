@@ -289,3 +289,34 @@ func TestWidgetPostRenders(t *testing.T) {
 		t.Fatal("runtime or post meta not included by the template")
 	}
 }
+
+func TestPlausibleSettingsPersistAndRender(t *testing.T) {
+	s, ts := testServer(t)
+	body, ctype := multipartBody(t, map[string]string{"name": "Analytics test"}, nil)
+	code, created := do(t, "POST", ts.URL+"/v0/planets/my", body, ctype)
+	if code != 200 {
+		t.Fatalf("create: %d %v", code, created)
+	}
+	id := created["id"].(string)
+	code, result := do(t, "PUT", ts.URL+"/v0/croptop/sites/"+id, strings.NewReader(`{"custom":{"plausibleEnabled":true,"plausibleDomain":"example.test","plausibleAPIServer":"plausible.io","twitterUsername":"example","unrecognized":"ignored"}}`), "application/json")
+	if code != 200 || result["plausibleEnabled"] != true || result["plausibleDomain"] != "example.test" || result["plausibleAPIServer"] != "plausible.io" {
+		t.Fatalf("save: %d %v", code, result)
+	}
+	site, err := s.Store.Site(id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(site.Raw["plausibleDomain"]) != `"example.test"` || string(site.Raw["twitterUsername"]) != `"example"` {
+		t.Fatal("settings were not persisted")
+	}
+	if _, ok := site.Raw["unrecognized"]; ok {
+		t.Fatal("unknown setting was accepted")
+	}
+	html, err := os.ReadFile(filepath.Join(s.Store.PublicDir(id), "index.html"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(html), `data-domain="example.test"`) || !strings.Contains(string(html), "https://plausible.io/js/plausible.local.js") {
+		t.Fatal("Plausible script not rendered")
+	}
+}

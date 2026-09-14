@@ -16,25 +16,31 @@ import (
 	"sync"
 	"time"
 
+	"github.com/mejango/croptop/internal/collaboration"
 	"github.com/mejango/croptop/internal/config"
 	"github.com/mejango/croptop/internal/follow"
 	"github.com/mejango/croptop/internal/ipfs"
 	"github.com/mejango/croptop/internal/publish"
 	"github.com/mejango/croptop/internal/render"
+	"github.com/mejango/croptop/internal/shop"
 	"github.com/mejango/croptop/internal/store"
 	"github.com/mejango/croptop/internal/tpl"
 )
 
 type Server struct {
-	Store     *store.Store
-	Pub       *publish.Publisher
-	Follow    *follow.Store
-	Tpl       *tpl.Resolver
-	Node      ipfs.Engine
-	Cfg       *config.Config
-	UI        fs.FS
-	Templates fs.FS
-	Version   string
+	shopRPC shop.RPC // injectable read-only RPC for deployment verification
+
+	collabOnce sync.Once
+	collab     *collaboration.Manager
+	Store      *store.Store
+	Pub        *publish.Publisher
+	Follow     *follow.Store
+	Tpl        *tpl.Resolver
+	Node       ipfs.Engine
+	Cfg        *config.Config
+	UI         fs.FS
+	Templates  fs.FS
+	Version    string
 	// Quit stops the process; set by the command line so the console can offer it.
 	Quit func()
 
@@ -53,7 +59,9 @@ func (s *Server) Handler() http.Handler {
 	mux := http.NewServeMux()
 	s.routesAPI(mux)
 	s.routesCroptop(mux)
+	s.routesShop(mux)
 	s.routesFollow(mux)
+	s.routesCollaboration(mux)
 	s.routesTemplate(mux)
 	s.quickRoutes(mux)
 
@@ -103,6 +111,13 @@ func (s *Server) Handler() http.Handler {
 // except for the public site trees. Planet's own clients (pn) speak this.
 func (s *Server) auth(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// Local site and feed documents contain author-controlled JavaScript.
+		// Give them opaque origins so they cannot impersonate the console,
+		// read wallet capabilities, or mutate shop sessions on this origin.
+		if isPublicPath(r.URL.Path) {
+			w.Header().Set("Content-Security-Policy", "sandbox allow-scripts allow-forms allow-popups allow-downloads")
+			w.Header().Set("Access-Control-Allow-Origin", "*")
+		}
 		if !s.Cfg.HasPasscode() || isPublicPath(r.URL.Path) {
 			next.ServeHTTP(w, r)
 			return
@@ -135,6 +150,7 @@ func (s *Server) ListenAndServe(ctx context.Context, addr string) error {
 		return errors.New("refusing to listen on a non-loopback address without a passcode; run `croptop passcode set` first")
 	}
 	srv := &http.Server{Addr: addr, Handler: s.Handler()}
+	go s.RunComposites(ctx)
 	go func() {
 		<-ctx.Done()
 		srv.Shutdown(context.Background())

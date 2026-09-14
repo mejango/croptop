@@ -26,7 +26,7 @@ const (
 	NameKey = "croptopName"
 )
 
-// DefaultHost is where sites push unless they say otherwise.
+// DefaultHost is where sites push unless they choose a custom host.
 const DefaultHost = "https://crop.top"
 
 func rawString(site *store.Site, key string) string {
@@ -47,13 +47,20 @@ func setRaw(site *store.Site, key, val string) {
 	site.Raw[key] = b
 }
 
-// HostOf is the host base URL a site pushes to, "" when pushing is off.
-func HostOf(site *store.Site) string { return strings.TrimSuffix(rawString(site, HostKey), "/") }
+// HostOf is the host base URL a site pushes to. New and imported sites,
+// including those with a previously saved empty host, use DefaultHost.
+func HostOf(site *store.Site) string {
+	base := strings.TrimSuffix(rawString(site, HostKey), "/")
+	if base == "" {
+		return DefaultHost
+	}
+	return base
+}
 
 // NameOf is the free name the site claimed on its host, or "".
 func NameOf(site *store.Site) string { return rawString(site, NameKey) }
 
-// SetHost turns pushing on (a base URL) or off ("").
+// SetHost chooses a custom host. An empty value restores DefaultHost.
 func SetHost(site *store.Site, base string) {
 	setRaw(site, HostKey, strings.TrimSuffix(strings.TrimSpace(base), "/"))
 }
@@ -80,9 +87,6 @@ const (
 // the last one is marked final. The host checks that the files hash to cid.
 func (p *Publisher) Push(ctx context.Context, site *store.Site, cid string, seq uint64) error {
 	base := HostOf(site)
-	if base == "" {
-		return nil
-	}
 	domain, err := hostDomain(base)
 	if err != nil {
 		return err
@@ -250,10 +254,6 @@ func (p *Publisher) Push(ctx context.Context, site *store.Site, cid string, seq 
 // Claim asks the site's host for a free name and records it on success.
 func (p *Publisher) Claim(ctx context.Context, site *store.Site, name string) error {
 	base := HostOf(site)
-	if base == "" {
-		base = DefaultHost
-		SetHost(site, base)
-	}
 	domain, err := hostDomain(base)
 	if err != nil {
 		return err

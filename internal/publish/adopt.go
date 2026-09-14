@@ -206,6 +206,7 @@ func rebuildSource(st *store.Store, siteID, pubDir string) error {
 
 func postFromPublic(a render.PublicPost) *store.Post {
 	p := &store.Post{
+		OriginalSiteName: a.OriginalSiteName, OriginalSiteDomain: a.OriginalSiteDomain, OriginalPostID: a.OriginalPostID, OriginalPostDate: a.OriginalPostDate, SubmissionTargets: a.SubmissionTargets,
 		ID: a.ID, Title: a.Title, Content: a.Content, Created: a.Created, ArticleType: a.ArticleType,
 		Link: "/" + a.ID + "/", Attachments: a.Attachments, CIDs: a.CIDs, Tags: a.Tags,
 		HeroImageWidth: a.HeroImageWidth, HeroImageHeight: a.HeroImageHeight,

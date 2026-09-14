@@ -4,6 +4,7 @@ package gateway
 
 import (
 	"encoding/json"
+	"fmt"
 	"strings"
 
 	"github.com/mejango/croptop/internal/store"
@@ -40,10 +41,83 @@ func claimedName(site *store.Site) string {
 	return ""
 }
 
-const Default = "sucks"
+const Default = "crop.top"
 
 // SettingKey is the site JSON key (a Croptop addition Planet ignores).
 const SettingKey = "croptopGateway"
+
+// CustomDomainKey stores a conventional DNS hostname separately from the ENS name.
+const CustomDomainKey = "croptopCustomDomain"
+
+func normalizeCustomDomain(domain string) (string, error) {
+	domain = strings.ToLower(strings.TrimSpace(domain))
+	if domain == "" {
+		return "", nil
+	}
+	invalid := fmt.Errorf("enter a DNS domain such as example.com, without a scheme, path, or port (use Punycode for international names)")
+	if len(domain) > 253 {
+		return "", invalid
+	}
+	labels := strings.Split(domain, ".")
+	if len(labels) < 2 {
+		return "", invalid
+	}
+	for _, label := range labels {
+		if len(label) == 0 || len(label) > 63 || label[0] == '-' || label[len(label)-1] == '-' {
+			return "", invalid
+		}
+		for _, c := range label {
+			if !(c >= 'a' && c <= 'z' || c >= '0' && c <= '9' || c == '-') {
+				return "", invalid
+			}
+		}
+	}
+	tld := labels[len(labels)-1]
+	if len(tld) < 2 || (!strings.HasPrefix(tld, "xn--") && strings.Trim(tld, "abcdefghijklmnopqrstuvwxyz") != "") {
+		return "", invalid
+	}
+	switch tld {
+	case "eth", "sol", "bit":
+		return "", fmt.Errorf("enter a conventional DNS domain here; use the name field for blockchain names")
+	case "localhost", "local", "internal", "onion", "invalid":
+		return "", invalid
+	}
+	if domain == "home.arpa" || strings.HasSuffix(domain, ".home.arpa") {
+		return "", invalid
+	}
+	return domain, nil
+}
+
+// CustomDomain returns the valid custom hostname, ignoring malformed saved values.
+func CustomDomain(site *store.Site) string {
+	var domain string
+	if json.Unmarshal(site.Raw[CustomDomainKey], &domain) != nil {
+		return ""
+	}
+	domain, err := normalizeCustomDomain(domain)
+	if err != nil {
+		return ""
+	}
+	return domain
+}
+
+// SetCustomDomain validates and records a hostname. An empty value restores gateway URLs.
+func SetCustomDomain(site *store.Site, domain string) error {
+	domain, err := normalizeCustomDomain(domain)
+	if err != nil {
+		return err
+	}
+	if domain == "" {
+		delete(site.Raw, CustomDomainKey)
+		return nil
+	}
+	if site.Raw == nil {
+		site.Raw = map[string]json.RawMessage{}
+	}
+	b, _ := json.Marshal(domain)
+	site.Raw[CustomDomainKey] = b
+	return nil
+}
 
 func Get(key string) Gateway {
 	for _, g := range Table {
@@ -74,10 +148,14 @@ func Set(site *store.Site, key string) {
 	site.Raw[SettingKey] = b
 }
 
-// URL is the site's canonical public base URL with a trailing slash, the
-// way Planet builds it: an .eth domain on the gateway, else the IPNS name.
-// Other name systems keep Planet's fixed mappings.
-func URL(site *store.Site) string { return urlOn(site, Of(site)) }
+// URL is the site's canonical public base URL with a trailing slash. A custom
+// DNS domain takes precedence; otherwise the site's chosen gateway is used.
+func URL(site *store.Site) string {
+	if domain := CustomDomain(site); domain != "" {
+		return "https://" + domain + "/"
+	}
+	return urlOn(site, Of(site))
+}
 
 func urlOn(site *store.Site, g Gateway) string {
 	if g.Domain != "" {
@@ -161,6 +239,9 @@ func FetchURLs(ipns, cid string) []string {
 func URLs(site *store.Site) []string {
 	chosen := Of(site)
 	out := []string{urlOn(site, chosen)}
+	if domain := CustomDomain(site); domain != "" && URL(site) != out[0] {
+		out = append([]string{URL(site)}, out...)
+	}
 	for _, g := range Table {
 		if g.Key != chosen.Key {
 			out = append(out, urlOn(site, g))

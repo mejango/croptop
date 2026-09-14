@@ -18,69 +18,128 @@ struct EditorView: View {
     @State private var added: [URL] = []             // files to upload on save
     @State private var removed: Set<String> = []
     @State private var saving = false
+    @State private var deleting = false
     @State private var loaded = false
     @State private var dropping = false
+    @State private var editorMode = "Split"
+    @State private var largePreview = false
 
     var isNew: Bool { postID == nil }
     var images: [String] { (existing.filter { !removed.contains($0) } + added.map { $0.lastPathComponent }).filter { ["png", "jpg", "jpeg", "gif", "webp"].contains(($0 as NSString).pathExtension.lowercased()) } }
 
+    var previewAttachments: [PreviewAttachment] {
+        existing.filter { !removed.contains($0) }.map { PreviewAttachment(name: $0, url: API.shared.siteFile(siteID, "\(postID ?? "")/\($0)")) }
+            + added.map { PreviewAttachment(name: $0.lastPathComponent, url: $0) }
+    }
+
+    private var writingArea: some View {
+        TextEditor(text: $content).font(Theme.code).padding(8)
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .fieldOutline()
+    }
+    private var previewArea: some View {
+        PostContentPreview(title: title, content: content, attachments: previewAttachments)
+            .overlay(Rectangle().strokeBorder(Theme.rule, lineWidth: 1))
+    }
+
     var body: some View {
         ScrollView {
-            VStack(alignment: .leading, spacing: 12) {
+            VStack(alignment: .leading, spacing: 24) {
                 ScreenHead(title: isNew ? "New post" : "Edit post", subtitle: model.sites.first { $0.id == siteID }?.name) {
+                    HStack(spacing: 16) {
+                        HStack(spacing: 8) {
+                            IconActionButton("Cancel", systemImage: "xmark") { model.screen = .site(siteID) }
+                            IconActionButton(saving ? "Saving…" : "Save", systemImage: "checkmark") { save(publish: false) }
+                                .disabled(saving || deleting).keyboardShortcut("s")
+                        }
+                        Button("Save & publish") { save(publish: true) }.buttonStyle(BorderedButton(kind: .hot)).disabled(saving || deleting).keyboardShortcut("s", modifiers: [.command, .shift])
+                    }
+                }
+                VStack(alignment: .leading, spacing: 8) {
+                    Labeled(title: "Title") { TextField("Title (optional)", text: $title).field() }
+                    HStack(spacing: 22) {
+                        Toggle("Include in navigation", isOn: $inNav)
+                        Toggle("Pin to the top", isOn: $pinned)
+                    }.font(Theme.formLabel).toggleStyle(.checkbox)
+                }
+                VStack(alignment: .leading, spacing: 8) {
                     HStack(spacing: 8) {
-                        Button("Cancel") { model.screen = .site(siteID) }.buttonStyle(BorderedButton(kind: .quiet))
-                        if !isNew {
-                            Button("Delete") {
-                                Task { try? await API.shared.deletePost(site: siteID, id: postID!); model.screen = .site(siteID); model.toast("Deleted.") }
+                        ForEach(["Write", "Split", "Preview"], id: \.self) { mode in
+                            Button(mode) { editorMode = mode }.buttonStyle(BorderedButton(current: editorMode == mode))
+                        }
+                        Spacer()
+                        Button { largePreview = true } label: {
+                            Label("Expand preview", systemImage: "arrow.up.left.and.arrow.down.right")
+                        }.buttonStyle(TextActionButtonStyle())
+                    }
+                    VStack(alignment: .leading, spacing: 6) {
+                        Group {
+                            if editorMode == "Write" { writingArea }
+                            else if editorMode == "Preview" { previewArea }
+                            else {
+                                HSplitView {
+                                    writingArea.frame(minWidth: 240)
+                                    previewArea.frame(minWidth: 240)
+                                }
+                            }
+                        }.frame(height: 460)
+                        Text("Markdown and HTML. Use an attachment’s file name to include it.").font(Theme.body(13)).foregroundColor(Theme.muted)
+                    }
+                }
+                VStack(alignment: .leading, spacing: 8) {
+                    Text("Attachments").font(Theme.formLabel)
+                    VStack(alignment: .leading, spacing: 6) {
+                        VStack(alignment: .leading, spacing: 8) {
+                            VStack(alignment: .leading, spacing: 16) {
+                                if existing.filter({ !removed.contains($0) }).isEmpty && added.isEmpty {
+                                    Text("None yet.").font(Theme.body(13)).foregroundColor(Theme.muted)
+                                }
+                                ForEach(existing.filter { !removed.contains($0) }, id: \.self) { name in
+                                    AttachmentRow(name: name, url: API.shared.siteFile(siteID, "\(postID ?? "")/\(name)"), isHero: hero == name, canHero: images.contains(name)) { hero = name } remove: { removed.insert(name); if hero == name { hero = "" } }
+                                }
+                                ForEach(added, id: \.self) { u in
+                                    AttachmentRow(name: u.lastPathComponent, url: u, isHero: hero == u.lastPathComponent, canHero: images.contains(u.lastPathComponent)) { hero = u.lastPathComponent } remove: { added.removeAll { $0 == u }; if hero == u.lastPathComponent { hero = "" } }
+                                }
+                            }
+                            Button("Add files…") {
+                                let p = NSOpenPanel(); p.allowsMultipleSelection = true
+                                if p.runModal() == .OK { added += p.urls }
                             }.buttonStyle(BorderedButton(kind: .quiet))
                         }
-                        Button(saving ? "Saving…" : "Save") { save(publish: false) }.buttonStyle(BorderedButton()).disabled(saving).keyboardShortcut("s")
-                        Button("Save and publish") { save(publish: true) }.buttonStyle(BorderedButton(kind: .hot)).disabled(saving).keyboardShortcut("s", modifiers: [.command, .shift])
-                    }
-                }
-                Labeled(title: "Title") { TextField("Title (optional)", text: $title).field() }
-                Labeled(title: "Content", help: "Markdown. Attachments are referenced by file name.") {
-                    TextEditor(text: $content).font(Theme.code).frame(minHeight: 260).padding(6).overlay(Rectangle().stroke(Theme.ink, lineWidth: Theme.border))
-                }
-                Labeled(title: "Attachments", help: "Drop files here, or add them.") {
-                    VStack(alignment: .leading, spacing: 8) {
-                        if existing.filter({ !removed.contains($0) }).isEmpty && added.isEmpty {
-                            Text("None yet.").font(Theme.body(13)).foregroundColor(Theme.muted)
-                        }
-                        ForEach(existing.filter { !removed.contains($0) }, id: \.self) { name in
-                            AttachmentRow(name: name, url: API.shared.siteFile(siteID, "\(postID ?? "")/\(name)"), isHero: hero == name, canHero: images.contains(name)) { hero = name } remove: { removed.insert(name); if hero == name { hero = "" } }
-                        }
-                        ForEach(added, id: \.self) { u in
-                            AttachmentRow(name: u.lastPathComponent, url: u, isHero: hero == u.lastPathComponent, canHero: images.contains(u.lastPathComponent)) { hero = u.lastPathComponent } remove: { added.removeAll { $0 == u }; if hero == u.lastPathComponent { hero = "" } }
-                        }
-                        Button("Add files…") {
-                            let p = NSOpenPanel(); p.allowsMultipleSelection = true
-                            if p.runModal() == .OK { added += p.urls }
-                        }.buttonStyle(BorderedButton(kind: .quiet))
-                    }
-                    .padding(12)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .overlay(Rectangle().strokeBorder(style: StrokeStyle(lineWidth: Theme.border, dash: dropping ? [] : [6, 4])).foregroundColor(dropping ? Theme.hot : Theme.rule))
-                    .onDrop(of: [UTType.fileURL], isTargeted: $dropping) { providers in
-                        Task {
-                            for p in providers {
-                                if let d = try? await p.loadItem(forTypeIdentifier: UTType.fileURL.identifier) as? Data, let u = URL(dataRepresentation: d, relativeTo: nil) { added.append(u) }
+                        .padding(16)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .overlay(Rectangle().strokeBorder(style: StrokeStyle(lineWidth: Theme.border, dash: dropping ? [] : [6, 4])).foregroundColor(dropping ? Theme.hot : Theme.rule))
+                        .onDrop(of: [UTType.fileURL], isTargeted: $dropping) { providers in
+                            Task {
+                                for p in providers {
+                                    if let d = try? await p.loadItem(forTypeIdentifier: UTType.fileURL.identifier) as? Data, let u = URL(dataRepresentation: d, relativeTo: nil) { added.append(u) }
+                                }
                             }
+                            return true
                         }
-                        return true
+                        Text("Drop files here, or add them.").font(Theme.body(13)).foregroundColor(Theme.muted)
                     }
                 }
-                Labeled(title: "Tags", help: "Comma separated.") { TextField("tags", text: $tags).field() }
-                HStack(spacing: 22) {
-                    Toggle("Include in navigation", isOn: $inNav)
-                    Toggle("Pin to the top", isOn: $pinned)
-                }.font(Theme.body(14)).toggleStyle(.checkbox)
+                VStack(alignment: .leading, spacing: 8) {
+                    Text("Tags").font(Theme.formLabel)
+                    TagSelector(tags: $tags, choices: model.tagChoices(for: siteID))
+                }
+                if !isNew {
+                    VStack(alignment: .leading, spacing: 16) {
+                        Text("Danger zone").font(Theme.formLabel).foregroundColor(.red)
+                        Text("Remove this post from this site.").font(Theme.formHelp).foregroundColor(Theme.muted)
+                        Button(action: deletePost) {
+                            Text(deleting ? "Deleting…" : "Delete post").foregroundColor(.red)
+                        }.buttonStyle(BorderedButton(kind: .quiet)).disabled(saving || deleting)
+                    }.padding(16).frame(maxWidth: 440, alignment: .leading)
+                        .overlay(Rectangle().strokeBorder(Color.red, lineWidth: 1))
+                }
             }
             .padding(Theme.content)
-            .frame(maxWidth: 820, alignment: .leading)
+            .frame(maxWidth: .infinity, alignment: .leading)
         }
-        .task { await loadPost() }
+        .sheet(isPresented: $largePreview) { LargePostPreview(title: title, content: content, attachments: previewAttachments) }
+        .task { await loadPost(); if model.posts[siteID] == nil { await model.loadPosts(siteID) } }
     }
 
     func loadPost() async {
@@ -92,7 +151,22 @@ struct EditorView: View {
         existing = p.attachments
     }
 
+    private func deletePost() {
+        guard let id = postID, !saving, !deleting else { return }
+        deleting = true
+        Task {
+            defer { deleting = false }
+            do {
+                try await API.shared.deletePost(site: siteID, id: id)
+                await model.loadPosts(siteID)
+                if model.screen == .editor(site: siteID, post: id) { model.screen = .site(siteID) }
+                model.toast("Deleted.")
+            } catch { model.show(error) }
+        }
+    }
+
     func save(publish: Bool) {
+        guard !saving, !deleting else { return }
         saving = true
         Task {
             do {
@@ -120,20 +194,34 @@ struct AttachmentRow: View {
     var canHero: Bool
     var makeHero: () -> Void
     var remove: () -> Void
+    @State private var showingPreview = false
     var body: some View {
-        HStack(spacing: 10) {
+        HStack(spacing: 16) {
             if canHero {
-                AsyncImage(url: url) { i in i.resizable().scaledToFill() } placeholder: { Rectangle().fill(Theme.rule) }
-                    .frame(width: 44, height: 44).clipped().overlay(Rectangle().stroke(Theme.ink, lineWidth: 1))
+                Button { showingPreview = true } label: {
+                    AttachmentImage(url: url)
+                        .frame(width: 160, height: 120)
+                        .background(Theme.paper)
+                        .overlay(Rectangle().stroke(Theme.rule, lineWidth: Theme.border))
+                }
+                .buttonStyle(.plain)
+                .help("View full-size image")
+                .accessibilityLabel("Preview " + name)
             } else {
-                Rectangle().fill(Theme.rule).frame(width: 44, height: 44).overlay(Text((name as NSString).pathExtension.uppercased()).font(Theme.pixel(11)))
+                Rectangle().fill(Theme.rule).frame(width: 44, height: 44).overlay(Text((name as NSString).pathExtension.uppercased()).font(Theme.body(11)))
             }
-            Text(name).font(Theme.body(14)).lineLimit(1)
-            Spacer()
-            if canHero {
-                Button(isHero ? "Hero" : "Set as hero", action: makeHero).buttonStyle(BorderedButton(kind: isHero ? .hot : .quiet))
+            VStack(alignment: .leading, spacing: 8) {
+                Text(name).font(Theme.body(14)).lineLimit(2)
+                ChipFlowLayout {
+                    if canHero {
+                        Button("Preview") { showingPreview = true }.buttonStyle(BorderedButton(kind: .quiet))
+                        Button(isHero ? "Hero" : "Set as hero", action: makeHero).buttonStyle(BorderedButton(kind: isHero ? .hot : .quiet))
+                    }
+                    Button("Remove", action: remove).buttonStyle(BorderedButton(kind: .quiet))
+                }
             }
-            Button("Remove", action: remove).buttonStyle(BorderedButton(kind: .quiet))
+            Spacer(minLength: 0)
         }
+        .sheet(isPresented: $showingPreview) { AttachmentPreview(attachment: PreviewAttachment(name: name, url: url)) }
     }
 }

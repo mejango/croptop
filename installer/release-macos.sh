@@ -4,6 +4,7 @@
 # Usage: installer/release-macos.sh <version>   (e.g. 0.11.0, no leading v)
 set -eu
 VER=$1
+: "${SPARKLE_KEY_FILE:?Set SPARKLE_KEY_FILE to the private Sparkle signing key}"
 HERE=$(cd "$(dirname "$0")" && pwd)
 : "${MACOS_SIGN_IDENTITY:=$(security find-identity -v -p codesigning | sed -nE 's/.*"(Developer ID Application: .*)"/\1/p' | head -1)}"
 : "${NOTARY_PROFILE:=croptop-notary}"
@@ -16,6 +17,4 @@ WORK=$(mktemp -d)
 echo "downloading darwin builds for v$VER"
 gh release download "v$VER" --repo mejango/croptop --pattern "croptop_${VER}_darwin_*.tar.gz" --dir "$WORK/in"
 "$HERE/macos.sh" "$VER" "$WORK/in" "$WORK/out"
-echo "uploading signed dmg to v$VER"
-gh release upload "v$VER" "$WORK/out/Croptop.dmg" --clobber --repo mejango/croptop
-echo "done: signed, notarized Croptop.dmg is on release v$VER"
+python3 "$HERE/publish-macos.py" "$VER" "$WORK/out"

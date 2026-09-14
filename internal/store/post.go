@@ -33,30 +33,41 @@ type Post struct {
 	IsIncludedInNavigation *bool
 	NavigationWeight       *int
 
+	OriginalSiteName   string
+	OriginalSiteDomain string
+	OriginalPostID     string
+	OriginalPostDate   *AppleTime
+	SubmissionTargets  []string
+
 	Raw doc
 }
 
 type postJSON struct {
-	ID              string            `json:"id"`
-	Title           string            `json:"title"`
-	Content         string            `json:"content"`
-	Created         AppleTime         `json:"created"`
-	ArticleType     int               `json:"articleType"`
-	Link            string            `json:"link"`
-	Attachments     []string          `json:"attachments"`
-	CIDs            map[string]string `json:"cids"`
-	Tags            map[string]string `json:"tags"`
-	Slug            *string           `json:"slug"`
-	Summary         *string           `json:"summary"`
-	ContentRendered *string           `json:"contentRendered"`
-	HeroImage       *string           `json:"heroImage"`
-	HeroImageWidth  *int              `json:"heroImageWidth"`
-	HeroImageHeight *int              `json:"heroImageHeight"`
-	ExternalLink    *string           `json:"externalLink"`
-	VideoFilename   *string           `json:"videoFilename"`
-	AudioFilename   *string           `json:"audioFilename"`
-	Modified        *AppleTime        `json:"modified"`
-	Pinned          *AppleTime        `json:"pinned"`
+	OriginalSiteName   string            `json:"originalSiteName,omitempty"`
+	OriginalSiteDomain string            `json:"originalSiteDomain,omitempty"`
+	OriginalPostID     string            `json:"originalPostID,omitempty"`
+	OriginalPostDate   *AppleTime        `json:"originalPostDate,omitempty"`
+	SubmissionTargets  []string          `json:"submissionTargets,omitempty"`
+	ID                 string            `json:"id"`
+	Title              string            `json:"title"`
+	Content            string            `json:"content"`
+	Created            AppleTime         `json:"created"`
+	ArticleType        int               `json:"articleType"`
+	Link               string            `json:"link"`
+	Attachments        []string          `json:"attachments"`
+	CIDs               map[string]string `json:"cids"`
+	Tags               map[string]string `json:"tags"`
+	Slug               *string           `json:"slug"`
+	Summary            *string           `json:"summary"`
+	ContentRendered    *string           `json:"contentRendered"`
+	HeroImage          *string           `json:"heroImage"`
+	HeroImageWidth     *int              `json:"heroImageWidth"`
+	HeroImageHeight    *int              `json:"heroImageHeight"`
+	ExternalLink       *string           `json:"externalLink"`
+	VideoFilename      *string           `json:"videoFilename"`
+	AudioFilename      *string           `json:"audioFilename"`
+	Modified           *AppleTime        `json:"modified"`
+	Pinned             *AppleTime        `json:"pinned"`
 
 	IsIncludedInNavigation *bool `json:"isIncludedInNavigation"`
 	NavigationWeight       *int  `json:"navigationWeight"`
@@ -79,6 +90,7 @@ func (p *Post) UnmarshalJSON(b []byte) error {
 		VideoFilename: j.VideoFilename, AudioFilename: j.AudioFilename, Modified: j.Modified,
 		Pinned: j.Pinned, IsIncludedInNavigation: j.IsIncludedInNavigation,
 		NavigationWeight: j.NavigationWeight, Raw: raw,
+		OriginalSiteName: j.OriginalSiteName, OriginalSiteDomain: j.OriginalSiteDomain, OriginalPostID: j.OriginalPostID, OriginalPostDate: j.OriginalPostDate, SubmissionTargets: j.SubmissionTargets,
 	}
 	return nil
 }
@@ -88,6 +100,13 @@ func (p Post) MarshalJSON() ([]byte, error) {
 	if d == nil {
 		d = doc{}
 	}
+	if p.OriginalSiteDomain != "" {
+		d.put("originalSiteName", p.OriginalSiteName)
+		d.put("originalSiteDomain", p.OriginalSiteDomain)
+		d.put("originalPostID", p.OriginalPostID)
+		d.putIfNotNil("originalPostDate", p.OriginalPostDate)
+	}
+	d.putIfNotNil("submissionTargets", p.SubmissionTargets)
 	d.put("id", p.ID)
 	d.put("title", p.Title)
 	d.put("content", p.Content)

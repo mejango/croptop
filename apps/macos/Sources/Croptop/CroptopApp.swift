@@ -2,16 +2,18 @@
 // handed to the app, fonts, quitting. The design lives in docs/design.
 import SwiftUI
 import AppKit
-import CoreText
 
 @main
 struct CroptopApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) var delegate
 
+    init() { AppFonts.register() }
+
     var body: some Scene {
         WindowGroup("Croptop") {
             RootView()
                 .environmentObject(delegate.model)
+                .font(Theme.body())
                 .frame(minWidth: 860, minHeight: 560)
                 .background(Theme.paper)
                 .foregroundColor(Theme.ink)
@@ -20,12 +22,19 @@ struct CroptopApp: App {
         .windowStyle(.hiddenTitleBar)
         .defaultSize(width: 1180, height: 800)
         .commands {
+            CommandGroup(after: .appInfo) { CheckForUpdates(updater: delegate.model.updater) }
             CommandGroup(replacing: .newItem) {
                 Button("New Post") { delegate.model.newPost() }.keyboardShortcut("n")
                 Button("New Site…") { delegate.model.sheet = .newSite }.keyboardShortcut("n", modifiers: [.command, .shift])
                 Button("Follow a Site…") { delegate.model.sheet = .follow }.keyboardShortcut("f", modifiers: [.command, .shift])
                 Divider()
                 Button("Post Files…") { delegate.pickFiles() }.keyboardShortcut("o")
+                Button("Capture Screenshot…") { delegate.model.captureScreenshot() }
+                    .disabled(!delegate.model.ready || delegate.model.capturing)
+                Button(delegate.model.captureShortcutEnabled ? "Disable Screenshot Shortcut (⌘⇧C)" : "Enable Screenshot Shortcut (⌘⇧C)") {
+                    if delegate.model.captureShortcutEnabled { delegate.model.disableCaptureShortcut() }
+                    else { delegate.model.enableCaptureShortcut() }
+                }
             }
             CommandMenu("Site") {
                 Button("Publish") { delegate.model.publishCurrent() }
@@ -48,19 +57,34 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var pending: [URL] = []
 
     func applicationDidFinishLaunching(_ note: Notification) {
-        registerFonts()
+        model.updater.start(model: model)
         NSApp.appearance = NSAppearance(named: .aqua)
         NSApp.setActivationPolicy(.regular)
         Task { await startNode() }
     }
 
-    // The app owns the node: start it if nothing answers, stop it on quit.
+    // A relaunched app starts its own bundled engine, including the one-time
+    // migration from the old login service. Explicit development consoles are untouched.
     func startNode() async {
         let bin = Node.binary
-        if !(await API.shared.ping()), let bin = bin {
-            // A login service holds the port and the datastore; retire it and wait for the lock to free.
-            Node.run(bin, ["service", "uninstall"]).waitUntilExit()
-            for _ in 0..<40 where await API.shared.ping() { try? await Task.sleep(nanoseconds: 250_000_000) }
+        let needsLaunch: Bool
+        do {
+            needsLaunch = try await EngineStartup.needsLaunch(
+                externalConsole: ProcessInfo.processInfo.environment["CROPTOP_CONSOLE"] != nil,
+                bundled: Node.bundledBinary != nil,
+                legacyService: FileManager.default.fileExists(atPath: Node.legacyService.path),
+                retire: {
+                    guard let bin else { return }
+                    let retirement = Node.run(bin, ["service", "uninstall"])
+                    while retirement.isRunning { try await Task.sleep(nanoseconds: 200_000_000) }
+                },
+                ping: { await API.shared.ping() },
+                pause: { try await Task.sleep(nanoseconds: 250_000_000) })
+        } catch {
+            model.fatal = error.localizedDescription
+            return
+        }
+        if needsLaunch, let bin {
             // Start serve; if it exits fast (datastore still locked by the one just stopped), wait and retry.
             retry: for attempt in 0..<6 {
                 let p = Node.run(bin, ["serve", "--no-open"])
@@ -75,12 +99,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             }
         }
         if await API.shared.ping() {
-            model.ready = true
             await model.load()
+            await model.prepareFirstLaunch()
+            model.ready = true
+            model.restoreCaptureShortcut()
             // CROPTOP_SCREEN=site:<id> | editor:<site>[:<post>] | quick:<id> opens the app on a screen (for review).
             if let want = ProcessInfo.processInfo.environment["CROPTOP_SCREEN"] {
                 let p = want.split(separator: ":").map(String.init)
                 switch p.first {
+                case "newsite": model.sheet = .newSite
+                case "follow": model.sheet = .follow
+                case "settings" where p.count > 1: model.screen = .settings(p[1])
                 case "site" where p.count > 1: model.screen = .site(p[1])
                 case "editor" where p.count > 1: model.screen = .editor(site: p[1], post: p.count > 2 ? p[2] : nil)
                 case "quick" where p.count > 1: model.screen = .quick(p[1])
@@ -105,6 +134,23 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { false }
 
+    func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
+        guard AppUpdater.blocksRelaunch(screen: model.screen, sheet: model.sheet, publishing: model.publishing, collaborationOpen: model.collaborationOpen) else { return .terminateNow }
+        let alert = NSAlert()
+        if !model.publishing.isEmpty {
+            alert.messageText = "Publishing is still in progress"
+            alert.informativeText = "Wait for publishing to finish before quitting or installing an update."
+            alert.addButton(withTitle: "Keep Croptop open")
+            alert.runModal()
+            return .terminateCancel
+        }
+        alert.messageText = "Finish editing before quitting?"
+        alert.informativeText = "Unsaved changes will be lost if you quit now."
+        alert.addButton(withTitle: "Keep editing")
+        alert.addButton(withTitle: "Quit without saving")
+        return alert.runModal() == .alertSecondButtonReturn ? .terminateNow : .terminateCancel
+    }
+
     func applicationWillTerminate(_ note: Notification) {
         guard let n = node else { return }   // a console we found running is not ours to stop
         API.shared.quitSync()
@@ -122,26 +168,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         if p.runModal() == .OK { model.postFiles(p.urls) }
     }
 
-    // The brand fonts ship in Contents/Resources/fonts; a dev build finds them in the repo.
-    private func registerFonts() {
-        var dirs: [URL] = []
-        if let r = Bundle.main.resourceURL { dirs.append(r.appendingPathComponent("fonts")) }
-        let src = URL(fileURLWithPath: #filePath)
-        dirs.append(src.deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
-            .deletingLastPathComponent().deletingLastPathComponent().appendingPathComponent("installer/fonts"))
-        for d in dirs {
-            guard let files = try? FileManager.default.contentsOfDirectory(at: d, includingPropertiesForKeys: nil) else { continue }
-            for f in files where f.pathExtension == "ttf" {
-                CTFontManagerRegisterFontsForURL(f as CFURL, .process, nil)
-            }
-            if !files.isEmpty { break }
-        }
-    }
 }
 
 enum Node {
     static let dataDir = FileManager.default.homeDirectoryForCurrentUser
         .appendingPathComponent("Library/Application Support/croptop", isDirectory: true)
+
+    static var legacyService: URL {
+        FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Library/LaunchAgents/top.crop.croptop.plist")
+    }
+    static var bundledBinary: String? {
+        guard let path = Bundle.main.resourceURL?.appendingPathComponent("croptop").path,
+              FileManager.default.isExecutableFile(atPath: path) else { return nil }
+        return path
+    }
 
     // The engine sits in the app bundle; a dev build falls back to the repo build or PATH.
     static var binary: String? {

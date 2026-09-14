@@ -1,7 +1,8 @@
 # Native Croptop apps: macOS, Windows, Linux
 
 Decision (2026-09-10): the desktop apps are fully native on each platform. No
-web view. One design, written once in this document and in `docs/design/`,
+web console wrapper. Post content alone may use a read-only WebKit preview
+with scripts disabled; all editing controls and navigation remain native. One design, written once in this document and in `docs/design/`,
 enacted three times. The user iterates on the design in one place; every
 change is then applied to all three apps before it ships.
 
@@ -42,32 +43,51 @@ Tokens (from the console, the brand):
 | paper | #FFFFFF | background |
 | hot | #F056C1 | the one accent: current item, focus ring, primary action |
 | live | #3BB273 | node up, published |
-| attention | #EFAB1D | update available, unpublished changes |
+| attention | #EFAB1D | unpublished changes |
 | rule | #E2E2E2 | quiet borders |
 | muted | #ADADAF | secondary text |
-| pixel | Capsules (bundled), fallback monospace | headings, brand, buttons, rail headings |
+| heading | Simplon Bold (bundled), fallback system sans | headings and brand |
 | body | Simplon (bundled), fallback system sans | everything else, 16 px, line 1.45 |
 | rail | 220 pt | sidebar width |
 | spacing | 4, 8, 12, 16, 22 | the only gaps used |
 
 Screens, phase 1 (parity with the console home, site and posting flows):
 
-1. **Window**: sidebar (rail) left, content right. Rail: brand "Croptop" in
-   pixel 22; Feed (a boxed button, current when selected); "Sites" list (name,
-   muted second line: ENS or truncated IPNS, hot 4 px left bar when current);
-   "Following" heading and list; bottom: "New site", "Follow", node line ("N
-   peers", live dot) and the update banner when `status.update` is true.
+1. **Window**: sidebar (rail) left, content right. Original square scissors mark
+   at the top;
+   "Your sites" list uses a faint pink background without a left inset when selected, with
+   native whole-row drag-to-reorder with insertion feedback, autoscrolling, and
+   saved order after a valid drop. Muted second line: ENS or truncated IPNS. Your sites and
+   Following have separate scrolling lists, with Following above Your sites. Each
+   section title opens its aggregate feed directly. Titles use larger bold text
+   without underlines and a right-aligned + to follow or create a site. Scrollbars
+   reach the column’s right edge. Peers/live dot aligns to the very top right beside the scissors; a small
+   “Version X” label and adjacent “Update available” text button sit at the bottom left.
+   New site keeps Name, About and Logo together, followed by compact Start fresh /
+   Curate radio options. Curate reveals Sites and a short explanation. Both modes preserve
+   the shared draft; only Curate submits source sites.
+   Croptop → Check for Updates… opens Sparkle's signed install-and-relaunch flow.
+   Open editors and active publishing defer relaunch.
 2. **Feed**: cards newest first from `GET /v0/croptop/feed`: who (avatar,
    site name, date), title, plain text excerpt, hero image when `hasHero`,
-   preview frame when `hasPreview` (phase 2). "Check for new posts" refreshes
-   followed sites. Empty state: suggestions croptop.eth, follo.eth, jango.eth.
+   an interactive-post indicator, and older-post pagination. The same remembered
+   Tiles / More / List options as owned sites fill the content width. Posts open a native
+   reader with full content and scoped attachments. "Refresh" updates
+   followed sites, with Unfollow beside it for an individual followed site. Empty
+   feeds and sidebar sections say “Nothing yet.” Loading uses the standalone
+   template text ticker.
 3. **Site**: header (name, about, URL chip, Publish button, unpublished
-   changes in attention), tag filter bar, post tiles grid (hero or cover, title,
-   date, tags) and the "+ New post" tile. Right-click on a tile: Edit, Delete,
-   Copy link.
-4. **Post editor**: title, content (markdown, monospace), attachments strip
+   changes in attention), tag filter bar and remembered Tiles / More / List
+   controls. Tiles follows the template with three columns of natural-proportion
+   media and hover captions; More fits up to five columns of square crops with
+   visible captions; List uses thumbnail rows. Both grids adapt to narrower
+   windows. Each view includes New post and preserves tag filters and post
+   actions. Right-click on a post: Edit, Delete, Copy link.
+4. **Post editor**: title with include-in-navigation and pin options directly
+   beneath it, content (markdown, monospace), attachments strip
    (drop files here, thumbnails, set as hero, remove), tags, page/post
-   toggle, include in navigation, pin. Save, Save and publish, Cancel, Delete.
+   toggle. Save, Save & publish and Cancel sit in the header; Delete sits in a
+   Danger zone at the bottom of the form.
    `POST /v0/planets/my/{id}/articles` (new) or `/articles/{post}` (edit) as
    multipart.
 5. **Quick post**: media previews (image, video, audio), Post to (site menu,
@@ -76,6 +96,17 @@ Screens, phase 1 (parity with the console home, site and posting flows):
 6. **Publish**: button state (publishing spinner, then live), errors inline.
    Result URL chips (crop.top, eth.sucks) open in the browser.
 7. **New site** and **Follow** sheets (name/about; ENS or IPNS).
+
+All text fields and multiline editors use the Payments treatment: a 1 pt pale
+inset border that becomes muted on focus. Editor Cancel and Save show x/checkmark icons
+with their action names in hover tooltips; the primary action is labeled “Save & publish”. All
+controls use Simplon consistently, including selected tags and editor modes.
+Expand preview uses a text label with an expand glyph. Give the editor’s main
+sections 24 pt spacing, with 12–16 pt within each section. Settings Save settings / Save &
+publish / Cancel actions follow the same treatment: secondary icons use hover tooltips,
+with 8 pt between icons and 16 pt before the visible primary. Website
+and Settings use the same icon actions. Tag chips match the template’s compact
+shaded background, bold selection and trailing × removal mark.
 
 Phase 2: site settings (about, avatar, host, name claim, key export/import),
 node status pane, search, drafts, following management (refresh, unfollow),
@@ -121,3 +152,5 @@ JSON shapes are Planet's (`docs/format.md`): sites `{id,name,about,ipns,created,
 2. Linux phase 1.
 3. Windows phase 1.
 4. Phase 2 on all three, screen by screen, always in that order.
+
+Following site rows open native scoped feeds. Feed items use site-plus-post identities, load older pages, and open a safe native reader with an explicit Website action. Owned feed items retain an Edit action. Settings tabs are Site, Domain, Money, Contributors, and Advanced. Domain starts with the stable site address and free address; Money uses shop terminology and separate Production/Testnets dropdowns for shop addresses and network connections.

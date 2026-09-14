@@ -1,5 +1,6 @@
 // docs/design/tokens.md, in Swift. Change tokens there first.
 import SwiftUI
+import CoreText
 
 enum Theme {
     static let ink = Color(hex: 0x171717)
@@ -15,10 +16,56 @@ enum Theme {
     static let content: CGFloat = 28
     static let border: CGFloat = 2
 
-    static func pixel(_ size: CGFloat) -> Font { .custom("Capsules", size: size) }
+    static func heading(_ size: CGFloat) -> Font { bold(size) }
     static func body(_ size: CGFloat = 16) -> Font { .custom("Simplon", size: size) }
     static func bold(_ size: CGFloat = 16) -> Font { .custom("Simplon Bold", size: size) }
+    static var tab: Font { bold(16) }
+    static var formLabel: Font { bold(14) }
+    static var formSection: Font { formLabel }
+    static var formText: Font { body(14) }
+    static var formHelp: Font { body(13) }
     static let code = Font.system(size: 14, design: .monospaced)
+}
+
+// Native controls and WebKit use the same trusted, bundled Simplon files.
+enum AppFonts {
+    enum Face: String, CaseIterable {
+        case regular = "SimplonNorm-Regular-WebXL.ttf"
+        case bold = "SimplonNorm-Bold-WebXL.ttf"
+        var weight: Int { self == .bold ? 700 : 400 }
+    }
+
+    private static let directories: [URL] = {
+        var result: [URL] = []
+        if let resources = Bundle.main.resourceURL {
+            result.append(resources.appendingPathComponent("fonts"))
+        }
+        let source = URL(fileURLWithPath: #filePath)
+        result.append(source.deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
+            .deletingLastPathComponent().deletingLastPathComponent().appendingPathComponent("installer/fonts"))
+        return result
+    }()
+
+    static func url(for face: Face) -> URL? {
+        directories.lazy.map { $0.appendingPathComponent(face.rawValue) }
+            .first { FileManager.default.fileExists(atPath: $0.path) }
+    }
+
+    // Register once before SwiftUI resolves fonts for the first scene.
+    static func register() { _ = registration }
+
+    private static let registration: Void = {
+        for face in Face.allCases {
+            guard let font = url(for: face) else { continue }
+            CTFontManagerRegisterFontsForURL(font as CFURL, .process, nil)
+        }
+    }()
+
+    // Cache the data URIs once, without granting WebKit filesystem or network access.
+    static let previewFontFaces: String = Face.allCases.compactMap { face -> String? in
+        guard let url = url(for: face), let data = try? Data(contentsOf: url) else { return nil }
+        return "@font-face {font-family:'Simplon';font-style:normal;font-weight:\(face.weight);src:url('data:font/ttf;base64,\(data.base64EncodedString())') format('truetype');}"
+    }.joined(separator: "\n")
 }
 
 extension Color {
@@ -27,31 +74,114 @@ extension Color {
     }
 }
 
-// The bordered button: 2 px ink, paper, Capsules 14. Variants: hot, quiet.
+// The template's four-character loading cycle, without a persistent timer.
+struct LoadingTicker: View {
+    var accessibilityLabel = "Loading"
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @State private var startedAt = Date()
+    private let frames = ["|", "/", "-", "\\"]
+
+    var body: some View {
+        Group {
+            if reduceMotion {
+                Text("|")
+            } else {
+                TimelineView(.periodic(from: startedAt, by: 0.1)) { context in
+                    let step = Int(max(0, context.date.timeIntervalSince(startedAt)) / 0.1)
+                    Text(frames[step % frames.count])
+                }
+            }
+        }
+        .font(Theme.body(16)).foregroundColor(Theme.ink)
+        .frame(width: 16, height: 20)
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(accessibilityLabel)
+    }
+}
+
+// The bordered button: 2 px ink, paper, Simplon 14 in every state. Variants: hot, quiet.
 struct BorderedButton: ButtonStyle {
     enum Kind { case plain, hot, quiet }
     var kind: Kind = .plain
+    var accent: Color = Theme.hot
     var current = false   // a selected state, like the Feed button in the rail
     func makeBody(configuration: Configuration) -> some View {
         configuration.label
-            .font(kind == .quiet ? Theme.body(14) : Theme.pixel(14))
-            .foregroundColor(kind == .hot ? Theme.hot : Theme.ink)
+            .font(Theme.body(14))
+            .foregroundColor(current || configuration.isPressed ? Theme.paper : (kind == .hot ? accent : Theme.ink))
             .padding(.vertical, 8).padding(.horizontal, 14)
-            .background(configuration.isPressed || current ? Theme.hotWash : Theme.paper)
-            .overlay(Rectangle().stroke(kind == .quiet ? Theme.rule : (kind == .hot ? Theme.hot : Theme.ink), lineWidth: Theme.border))
+            .background(configuration.isPressed || current ? Theme.ink : Theme.paper)
+            .overlay(Rectangle().stroke(current || configuration.isPressed ? Theme.ink : (kind == .quiet ? Theme.rule : (kind == .hot ? accent : Theme.ink)), lineWidth: Theme.border))
             .contentShape(Rectangle())
     }
 }
 
-// A text field or editor with the 2 px ink border and 8 x 10 padding.
+// Plain actions use the same simple icon-and-text treatment as the sidebar.
+struct TextActionButtonStyle: ButtonStyle {
+    @Environment(\.isEnabled) private var isEnabled
+
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .labelStyle(.titleAndIcon)
+            .font(Theme.body(14))
+            .foregroundColor(isEnabled ? Theme.ink : Theme.muted)
+            .padding(.vertical, 8).padding(.horizontal, 4)
+            .contentShape(Rectangle())
+            .opacity(configuration.isPressed ? 0.6 : 1)
+    }
+}
+
+// Secondary actions stay compact; tooltips and accessibility carry their names.
+struct IconActionButton: View {
+    private let systemImage: String
+    private let helpText: String
+    private let accessibilityText: String
+    private let action: () -> Void
+    @Environment(\.isEnabled) private var isEnabled
+
+    init(_ title: String, systemImage: String, help: String? = nil,
+         accessibilityLabel: String? = nil, action: @escaping () -> Void) {
+        self.systemImage = systemImage
+        helpText = help ?? title
+        accessibilityText = accessibilityLabel ?? title
+        self.action = action
+    }
+
+    var body: some View {
+        Button(action: action) {
+            Image(systemName: systemImage).frame(width: 20, height: 20)
+                .font(Theme.body(14))
+                .foregroundColor(isEnabled ? Theme.ink : Theme.muted)
+                .padding(.vertical, 8).padding(.horizontal, 4)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .help(helpText)
+        .accessibilityLabel(accessibilityText)
+    }
+}
+
+// Shared by single-line fields and multiline editors, including Payments.
+struct FieldOutline: ViewModifier {
+    @FocusState private var focused: Bool
+
+    func body(content: Content) -> some View {
+        content
+            .focused($focused)
+            .background(Theme.paper)
+            .overlay(Rectangle().strokeBorder(focused ? Theme.muted : Theme.rule, lineWidth: 1))
+    }
+}
+
+// A text field with a quiet 1 pt inset border and 8 x 10 padding.
 struct Field: ViewModifier {
+    var compact = false
     func body(content: Content) -> some View {
         content
             .textFieldStyle(.plain)
-            .font(Theme.body())
-            .padding(.vertical, 8).padding(.horizontal, 10)
-            .background(Theme.paper)
-            .overlay(Rectangle().stroke(Theme.ink, lineWidth: Theme.border))
+            .font(Theme.formText)
+            .padding(.vertical, compact ? 6 : 8).padding(.horizontal, 10)
+            .fieldOutline()
     }
 }
 
@@ -60,11 +190,33 @@ struct Labeled<Content: View>: View {
     var help: String?
     @ViewBuilder var content: Content
     var body: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            Text(title).font(Theme.body(14))
-            content
-            if let h = help { Text(h).font(Theme.body(13)).foregroundColor(Theme.muted) }
+        VStack(alignment: .leading, spacing: 8) {
+            Text(title).font(Theme.formLabel)
+            VStack(alignment: .leading, spacing: 6) {
+                content
+                if let h = help, !h.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { Text(h).font(Theme.formHelp).foregroundColor(Theme.muted).fixedSize(horizontal: false, vertical: true) }
+            }.font(Theme.formText)
         }
+    }
+}
+
+struct SetupStep<Content: View>: View {
+    var number: Int
+    var title: String
+    @ViewBuilder var content: Content
+
+    var body: some View {
+        HStack(alignment: .top, spacing: 8) {
+            Text("\(number).").font(Theme.formLabel)
+                .frame(width: 16, alignment: .leading)
+                .accessibilityHidden(true)
+            VStack(alignment: .leading, spacing: 8) {
+                Text(title).font(Theme.formLabel)
+                    .accessibilityLabel("Step \(number): \(title)")
+                    .accessibilityAddTraits(.isHeader)
+                content.font(Theme.formText)
+            }
+        }.fixedSize(horizontal: false, vertical: true)
     }
 }
 
@@ -75,7 +227,7 @@ struct ScreenHead<Trailing: View>: View {
     var body: some View {
         HStack(alignment: .top, spacing: 16) {
             VStack(alignment: .leading, spacing: 6) {
-                Text(title).font(Theme.pixel(28))
+                Text(title).font(Theme.heading(28))
                 if let s = subtitle, !s.isEmpty { Text(s).font(Theme.body()).foregroundColor(Theme.muted) }
             }
             Spacer()
@@ -86,5 +238,25 @@ struct ScreenHead<Trailing: View>: View {
 }
 
 extension View {
-    func field() -> some View { modifier(Field()) }
+    func field(compact: Bool = false) -> some View { modifier(Field(compact: compact)) }
+    func fieldOutline() -> some View { modifier(FieldOutline()) }
+}
+
+struct FullRowDisclosureStyle: DisclosureGroupStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Button { configuration.isExpanded.toggle() } label: {
+                HStack(spacing: 8) {
+                    Image(systemName: "chevron.right")
+                        .font(.system(size: 11, weight: .semibold))
+                        .rotationEffect(.degrees(configuration.isExpanded ? 90 : 0))
+                        .frame(width: 12, height: 12)
+                        .accessibilityHidden(true)
+                    configuration.label.font(Theme.formSection)
+                    Spacer(minLength: 0)
+                }.contentShape(Rectangle())
+            }.buttonStyle(.plain)
+            if configuration.isExpanded { configuration.content.font(Theme.formText).padding(.leading, 20) }
+        }
+    }
 }

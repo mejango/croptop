@@ -222,6 +222,21 @@ func (s *Server) createSite(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, 400, errors.New("name is required"))
 		return
 	}
+	var sources []store.Contributor
+	if raw := strings.TrimSpace(r.FormValue("sources")); raw != "" {
+		var names []string
+		for _, line := range strings.Split(raw, "\n") {
+			if n := strings.TrimSpace(line); n != "" {
+				names = append(names, n)
+			}
+		}
+		var err error
+		sources, err = s.resolveSources(r.Context(), names)
+		if err != nil {
+			writeErr(w, 400, err)
+			return
+		}
+	}
 	id := newUUID()
 	ipns, err := s.Node.Keystore().Generate(id)
 	if err != nil {
@@ -232,7 +247,7 @@ func (s *Server) createSite(w http.ResponseWriter, r *http.Request) {
 	f := false
 	site := &store.Site{
 		ID: id, Name: name, About: r.FormValue("about"), IPNS: ipns, TemplateName: "Croptop",
-		Created: now, Updated: now, Archived: &f, Tags: map[string]string{},
+		Created: now, Updated: now, Archived: &f, Tags: map[string]string{}, Contributors: sources,
 	}
 	if err := s.Store.SaveSite(site); err != nil {
 		writeErr(w, 500, err)
@@ -245,7 +260,14 @@ func (s *Server) createSite(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, 400, err)
 		return
 	}
-	s.render(r.Context(), site.ID)
+	if len(sources) > 0 {
+		_, err = s.syncComposite(r.Context(), site.ID)
+		if err != nil {
+			s.log("initial merge %s: %v", site.Name, err)
+		}
+	} else {
+		s.render(r.Context(), site.ID)
+	}
 	writeJSON(w, 200, site)
 }
 
@@ -561,6 +583,13 @@ func (s *Server) publishSite(w http.ResponseWriter, r *http.Request, force bool)
 	defer s.mu.Unlock()
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute) // outlives a closed browser tab
 	defer cancel()
+	if len(site.ContributorSites()) > 0 {
+		_, err := s.collaborationManager().Sync(ctx, site.ID)
+		if err != nil {
+			writeErr(w, 500, err)
+			return
+		}
+	}
 	res, err := s.Pub.Publish(ctx, site.ID, force)
 	if err != nil {
 		if errors.Is(err, publish.ErrPublishedElsewhere) || errors.Is(err, publish.ErrWouldResetSequence) {

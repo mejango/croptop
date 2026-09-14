@@ -1,0 +1,18 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Set up posting - Croptop</title><link rel="stylesheet" href="/style.css"><link rel="stylesheet" href="/shop.css">
+<script defer src="/shop-assets/ethers.umd.min.js"></script><script defer src="/shop-assets/scripts/chains.js"></script><script defer src="/shop-assets/scripts/tx.js"></script><script defer src="/shop-setup.js"></script></head>
+<body class="shop-page"><main><header class="shop-header"><span class="shop-logo"><img src="/shop-logo.png" width="108" height="108" alt="Croptop"></span><h1>Set up posting</h1></header>
+<p class="shop-advanced">Set posting permissions and allowances across your shop’s networks.</p>
+<p id="message" role="status" aria-live="polite">Loading…</p>
+<section id="setup" hidden>
+<form id="project-form" class="sheet"><div class="shop-field"><label for="project-chain">Network</label><div class="shop-select"><select id="project-chain"></select></div></div><div class="shop-field"><label for="project-id">Project ID</label><div class="shop-price"><input id="project-id" type="text" inputmode="numeric" pattern="[0-9]+" placeholder="e.g. 7" required></div></div><button id="find-project" class="btn" type="submit">Find project</button></form>
+<p id="project-result" class="help" hidden></p>
+<form id="setup-form" hidden class="sheet"><div class="shop-field"><div class="shop-field-heading"><label for="setup-price">Price</label><p class="help">Set the minimum price for posts added by others.</p></div><div class="shop-price"><span id="price-unit">Ξ</span><input id="setup-price" type="text" value="0.001" inputmode="decimal" required></div></div><button id="review" class="btn" type="submit">Review setup</button></form>
+<div id="networks" class="shop-bundle-networks"></div>
+<section id="authorization" hidden><p class="help">Sign the setup requests on each network, then choose where to pay. Existing posting rules are preserved except for the minimum price.</p><button id="sign" class="btn" type="button">Sign setup requests</button></section>
+<button id="quote" class="btn" type="button" hidden>Get network fee quote</button>
+<section id="funding" hidden><div class="shop-field"><label for="funding-chain">Pay network fees from</label><div class="shop-select"><select id="funding-chain"></select></div></div><p id="funding-cost" class="help"></p><button id="pay" class="btn" type="button">Pay and set up posting</button></section>
+<section id="progress" hidden><p id="payment-status"></p><label for="funding-hash">Funding transaction hash</label><input id="funding-hash" type="text" autocomplete="off" placeholder="0x…"><button id="retry-payment" class="btn" type="button" hidden>Review saved payment</button></section>
+<button id="check" class="btn" type="button" hidden>Check setup</button>
+<p><a id="settings-link">Back to settings</a></p></section>
+<noscript>Enable JavaScript to set up posting.</noscript></main></body></html>

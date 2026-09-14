@@ -6,134 +6,442 @@ struct SiteView: View {
     @EnvironmentObject var model: AppModel
     var siteID: String
     @State private var tags: Set<String> = []
+    @AppStorage("sitePostViewMode") private var viewMode: SitePostViewMode = .tiles
+    @FocusState private var focusedPost: String?
     @State private var url = ""
+    @State private var highlight = Theme.hot
+    @State private var palette = SitePalette()
+    @State private var showingContributors = false
+    @State private var collaborationState: CollaborationState?
 
     var site: Site? { model.sites.first { $0.id == siteID } }
     var posts: [Post] { model.posts[siteID] ?? [] }
     var allTags: [String] { Array(Set(posts.flatMap { $0.tagList })).sorted() }
     var shown: [Post] { tags.isEmpty ? posts : posts.filter { tags.isSubset(of: Set($0.tagList)) } }
     var unpublished: Bool {
-        guard let s = site, let last = s.lastPublished else { return !posts.isEmpty }
-        return posts.contains { $0.created > last }
+        guard let s = site else { return false }
+        guard let last = s.lastPublished else { return true }
+        return (s.updated ?? 0) > last || posts.contains { max($0.created, $0.modified ?? 0) > last }
+    }
+
+    private var contributorCount: Int { collaborationState?.contributors.count ?? ((site?.contributors?.count ?? 0) + (site?.aggregation?.count ?? 0)) }
+    private var headerIdentity: some View {
+        HStack(alignment: .top, spacing: 16) {
+            SiteAvatar(url: API.shared.siteFile(siteID, "avatar.png"), name: site?.name ?? "", size: 64, revision: site?.updated.map { String($0) })
+            VStack(alignment: .leading, spacing: 8) {
+                Text(site?.name ?? "").font(Theme.heading(28))
+                if let about = site?.about, !about.isEmpty {
+                    Text(about).font(Theme.body()).foregroundColor(Theme.muted)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                if site?.isCollaborative == true {
+                    Button { showingContributors = true } label: {
+                        HStack(spacing: 6) {
+                            HStack(spacing: -4) {
+                                ForEach(Array((collaborationState?.contributors ?? site?.contributors ?? []).prefix(3))) { contributor in
+                                    SiteAvatar(url: API.shared.url("/v0/croptop/sites/\(siteID)/collaboration/sources/\(contributor.ipns)/avatar"), name: contributor.label, size: 20)
+                                        .clipShape(Circle()).overlay(Circle().stroke(Theme.paper, lineWidth: 1))
+                                }
+                            }
+                            Image(systemName: "person.2")
+                            Text("\(contributorCount) \(contributorCount == 1 ? "contributor" : "contributors")")
+                        }.font(Theme.body(13)).foregroundColor(Theme.muted)
+                    }.buttonStyle(.plain)
+                }
+            }.frame(maxWidth: .infinity, alignment: .leading)
+        }
+    }
+
+    private var headerActions: some View {
+        HStack(spacing: 16) {
+            HStack(spacing: 8) {
+                if !url.isEmpty {
+                    IconActionButton("Website", systemImage: "globe",
+                                     accessibilityLabel: "Open site: " + url) {
+                        if let u = URL(string: url) { NSWorkspace.shared.open(u) }
+                    }
+                }
+                IconActionButton("Settings", systemImage: "gearshape") { model.screen = .settings(siteID) }
+            }
+            Button(model.publishing.contains(siteID) ? "Publishing…" : "Publish") { model.publish(siteID) }
+                .buttonStyle(BorderedButton(kind: unpublished ? .hot : .quiet))
+                .accessibilityValue(unpublished ? "Unpublished changes" : "Up to date")
+                .disabled(model.publishing.contains(siteID))
+        }.fixedSize(horizontal: true, vertical: false)
+    }
+
+    private var postToolbar: some View {
+        let labels = model.tagChoices(for: siteID)
+        return HStack(spacing: 16) {
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 4) {
+                    if !allTags.isEmpty {
+                        TagChip(title: "all", selected: tags.isEmpty, showsRemoveMark: false) { tags = [] }
+                        ForEach(allTags, id: \.self) { tag in
+                            let label = labels[tag].flatMap { $0.isEmpty ? nil : $0 } ?? tag
+                            TagChip(title: label, selected: tags.contains(tag)) {
+                                if tags.contains(tag) { tags.remove(tag) } else { tags.insert(tag) }
+                            }
+                        }
+                    }
+                }.padding(2)
+            }
+            SitePostViewPicker(selection: $viewMode)
+                .fixedSize()
+        }.padding(.bottom, 20)
+    }
+
+    @ViewBuilder private func postButton(_ post: Post) -> some View {
+        Button {
+            if let original = post.originalURL { NSWorkspace.shared.open(original) }
+            else { model.screen = .editor(site: siteID, post: post.id) }
+        } label: {
+            if viewMode == .list {
+                PostRow(siteID: siteID, post: post, widgetRevision: site?.lastPublished, authorFallback: site?.isCollaborative == true ? site?.name : nil)
+            } else {
+                PostTile(siteID: siteID, post: post, widgetRevision: site?.lastPublished, authorFallback: site?.isCollaborative == true ? site?.name : nil,
+                         square: viewMode == .more, accent: highlight, focused: focusedPost == post.id)
+            }
+        }
+        .buttonStyle(.plain)
+        .focused($focusedPost, equals: post.id)
+        .accessibilityLabel([post.title.isEmpty ? "Untitled post" : post.title,
+                             post.date.formatted(date: .abbreviated, time: .omitted),
+                             post.tagList.joined(separator: ", ")].filter { !$0.isEmpty }.joined(separator: ", "))
+        .accessibilityHint(post.originalURL == nil ? "Edit post" : "View original post")
+        .contextMenu {
+            if post.originalSiteDomain == nil { Button("Edit") { model.screen = .editor(site: siteID, post: post.id) } }
+            if let original = post.originalURL { Button("View original post") { NSWorkspace.shared.open(original) } }
+            Button("Copy link") {
+                NSPasteboard.general.clearContents()
+                NSPasteboard.general.setString(url + post.link.trimmingCharacters(in: CharacterSet(charactersIn: "/")) + "/", forType: .string)
+            }
+            Divider()
+            if post.originalSiteDomain == nil {
+                Button("Delete", role: .destructive) {
+                    Task { try? await API.shared.deletePost(site: siteID, id: post.id); await model.loadPosts(siteID); model.toast("Deleted.") }
+                }
+            }
+        }
+    }
+
+    @ViewBuilder private func postContent(width: CGFloat, height: CGFloat) -> some View {
+        if viewMode == .list {
+            LazyVStack(alignment: .leading, spacing: 0) {
+                Button { model.screen = .editor(site: siteID, post: nil) } label: {
+                    Label("New post", systemImage: "plus")
+                        .font(Theme.body(14)).frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(.vertical, 20).contentShape(Rectangle())
+                }.buttonStyle(.plain)
+                ForEach(shown) { post in postButton(post) }
+            }
+        } else if viewMode == .more {
+            let count = viewMode.columnCount(for: width)
+            LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: viewMode.spacing, alignment: .top), count: count),
+                      alignment: .leading, spacing: viewMode.spacing) {
+                NewTile { model.screen = .editor(site: siteID, post: nil) }
+                ForEach(shown) { post in postButton(post) }
+            }
+        } else {
+            let count = viewMode.columnCount(for: width)
+            // The template assigns posts left to right, then stacks each column independently.
+            let columns = SitePostColumns.distribute([SitePostEntry(post: nil)] + shown.map { SitePostEntry(post: $0) }, count: count)
+            HStack(alignment: .top, spacing: viewMode.spacing) {
+                ForEach(columns.indices, id: \.self) { column in
+                    LazyVStack(spacing: viewMode.spacing) {
+                        ForEach(columns[column]) { entry in
+                            if let post = entry.post { postButton(post).frame(maxHeight: viewMode == .single ? height * 0.85 : .infinity) }
+                            else { NewTile(aspectRatio: viewMode == .single ? 3 : 4 / 3) { model.screen = .editor(site: siteID, post: nil) } }
+                        }
+                    }.frame(maxWidth: .infinity)
+                }
+            }
+        }
+        if !tags.isEmpty && shown.isEmpty {
+            EmptyState(text: "No posts match these tags.")
+        }
     }
 
     var body: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 0) {
-                ScreenHead(title: site?.name ?? "", subtitle: site?.about) {
-                    HStack(spacing: 8) {
-                        if !url.isEmpty {
-                            Button(url.replacingOccurrences(of: "https://", with: "")) { if let u = URL(string: url) { NSWorkspace.shared.open(u) } }
-                                .buttonStyle(BorderedButton(kind: .quiet))
-                        }
-                        Button(model.publishing.contains(siteID) ? "Publishing…" : "Publish") { model.publish(siteID) }
-                            .buttonStyle(BorderedButton(kind: unpublished ? .hot : .plain))
-                            .disabled(model.publishing.contains(siteID))
+        GeometryReader { geometry in
+            ScrollView {
+                VStack(alignment: .leading, spacing: 0) {
+                    HStack(alignment: .top, spacing: 16) {
+                        headerIdentity.frame(maxWidth: .infinity, alignment: .leading)
+                        headerActions
+                    }.padding(.bottom, 22)
+                    if model.posts[siteID]?.isEmpty == true {
+                        CaptureShortcutPrompt().padding(.bottom, 28)
                     }
+                    postToolbar
+                    postContent(width: max(1, geometry.size.width - 2 * Theme.content), height: geometry.size.height)
+                        .id(viewMode)
                 }
-                if unpublished && !model.publishing.contains(siteID) {
-                    HStack(spacing: 6) {
-                        Circle().fill(Theme.attention).frame(width: 8, height: 8)
-                        Text("Changes not published yet.").font(Theme.body(13)).foregroundColor(Theme.muted)
-                    }.padding(.bottom, 16)
-                }
-                if !allTags.isEmpty {
-                    ScrollView(.horizontal, showsIndicators: false) {
-                        HStack(spacing: 6) {
-                            ForEach(allTags, id: \.self) { t in
-                                Button(t) { if tags.contains(t) { tags.remove(t) } else { tags.insert(t) } }
-                                    .buttonStyle(BorderedButton(kind: tags.contains(t) ? .hot : .quiet))
-                            }
-                            if !tags.isEmpty { Button("clear") { tags = [] }.buttonStyle(.plain).font(Theme.body(13)).foregroundColor(Theme.muted) }
-                        }
-                    }.padding(.bottom, 16)
-                }
-                LazyVGrid(columns: [GridItem(.adaptive(minimum: 200, maximum: 240), spacing: 16, alignment: .top)], alignment: .leading, spacing: 16) {
-                    NewTile { model.screen = .editor(site: siteID, post: nil) }
-                    ForEach(shown) { p in
-                        PostTile(siteID: siteID, post: p)
-                            .onTapGesture { model.screen = .editor(site: siteID, post: p.id) }
-                            .contextMenu {
-                                Button("Edit") { model.screen = .editor(site: siteID, post: p.id) }
-                                Button("Copy link") {
-                                    NSPasteboard.general.clearContents()
-                                    NSPasteboard.general.setString(url + p.link.trimmingCharacters(in: CharacterSet(charactersIn: "/")) + "/", forType: .string)
-                                }
-                                Divider()
-                                Button("Delete", role: .destructive) {
-                                    Task { try? await API.shared.deletePost(site: siteID, id: p.id); await model.loadPosts(siteID); model.toast("Deleted.") }
-                                }
-                            }
-                    }
-                }
+                .padding(Theme.content)
+                .foregroundColor(palette.ink)
             }
-            .padding(Theme.content)
+            .background(palette.paper)
+        }
+        .environment(\.sitePalette, palette)
+        .sheet(isPresented: $showingContributors, onDismiss: { Task { await model.load(); await model.loadPosts(siteID); collaborationState = try? await API.shared.collaboration(siteID) } }) {
+            VStack(alignment: .leading, spacing: 16) {
+                HStack { Text("Contributors").font(Theme.heading(24)); Spacer(); Button("Done") { showingContributors = false }.buttonStyle(BorderedButton()) }
+                ScrollView { ContributorsView(siteID: siteID) }
+            }.padding(24).frame(width: 660, height: 680)
+        }
+        .task(id: siteID) {
+            highlight = Theme.hot
+            palette = SitePalette()
+            guard let settings = try? await API.shared.templateSettings(siteID) else { return }
+            palette = SitePalette(settings: settings)
+            if let value = settings["highlightColor"] as? String,
+               let hex = UInt32(value.trimmingCharacters(in: CharacterSet(charactersIn: "#")), radix: 16) {
+                highlight = Color(hex: hex)
+            }
         }
         .task {
             await model.loadPosts(siteID)
+            if site?.isCollaborative == true {
+                do { collaborationState = try await API.shared.mergeSources(siteID); await model.loadPosts(siteID) }
+                catch { collaborationState = try? await API.shared.collaboration(siteID) }
+            }
             url = (try? await API.shared.siteURL(siteID)) ?? ""
         }
     }
 }
 
+private struct SitePostEntry: Identifiable {
+    let post: Post?
+    var id: String { post?.id ?? "new-post" }
+}
+
+// Owned posts and feed posts share the same media, caption, and row presentation.
 struct PostTile: View {
     var siteID: String
     var post: Post
-    var image: String? {
-        if let h = post.heroImage, !h.isEmpty { return h }
-        return post.attachments.first { ["png", "jpg", "jpeg", "gif", "webp"].contains(($0 as NSString).pathExtension.lowercased()) }
-    }
+    var widgetRevision: Double? = nil
+    var authorFallback: String? = nil
+    var square = false
+    var accent = Theme.hot
+    var focused = false
+
     var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            // A square: the image covers it, or the first lines of the post stand in.
-            Color.clear
-                .aspectRatio(1, contentMode: .fit)
-                .overlay {
-                    if let img = image {
-                        AsyncImage(url: API.shared.siteFile(siteID, "\(post.id)/\(img)")) { i in i.resizable().scaledToFill() } placeholder: { Rectangle().fill(Theme.rule) }
-                    } else {
-                        Text(post.content.isEmpty ? post.title : post.content)
-                            .font(Theme.body(13)).lineLimit(9).padding(10)
-                            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-                    }
-                }
-                .clipped()
-                .overlay(Rectangle().stroke(Theme.ink, lineWidth: Theme.border))
-                .overlay(alignment: .topTrailing) {
-                    HStack(spacing: 4) {
-                        if post.pinned != nil { Text("pinned").font(Theme.pixel(11)).padding(4).background(Theme.paper) }
-                        if post.isPage { Text("page").font(Theme.pixel(11)).padding(4).background(Theme.paper) }
-                    }.padding(6)
-                }
-            Text(post.title.isEmpty ? post.date.formatted(date: .abbreviated, time: .omitted) : post.title).font(Theme.body(14)).lineLimit(1)
-            HStack(spacing: 6) {
-                Text(post.date.formatted(date: .numeric, time: .omitted)).font(Theme.body(13)).foregroundColor(Theme.muted)
-                ForEach(post.tagList.prefix(3), id: \.self) { t in Text(t).font(Theme.body(13)).foregroundColor(Theme.muted) }
-            }.lineLimit(1)
+        PostMediaTile(
+            imageURL: post.tileImage.map { API.shared.siteFile(siteID, "\(post.id)/\($0)") },
+            revision: max(post.modified ?? post.created, widgetRevision ?? 0),
+            widgetSource: WidgetPreviewSource.owned(siteID: siteID, post: post, baseURL: API.shared.base),
+            fallbackText: post.content.isEmpty ? (post.title.isEmpty ? "Untitled" : post.title) : post.content,
+            knownAspectRatio: post.hasWidgetPreview ? 4 / 3 : post.hasTileAspectRatio ? CGFloat(post.tileAspectRatio) : nil,
+            pinned: post.pinned != nil, square: square, accent: accent, focused: focused
+        ) {
+            PostCaption(post: post, authorFallback: authorFallback)
         }
+    }
+}
+
+// Large tiles keep the complete image; More uses a dense grid of square crops.
+struct PostMediaTile<Caption: View>: View {
+    var imageURL: URL?
+    var revision: Double
+    var widgetSource: WidgetPreviewSource? = nil
+    var fallbackText: String
+    var knownAspectRatio: CGFloat? = nil
+    var pinned = false
+    var square = false
+    var accent = Theme.hot
+    var focused = false
+    @ViewBuilder var caption: Caption
+    @State private var hovering = false
+    @State private var measuredImage: (key: URL, ratio: CGFloat)?
+    @Environment(\.sitePalette) private var palette
+
+    private var imageKey: URL? { imageURL.map { CachedPostImage.requestURL($0, revision: revision) } }
+    private var ratio: CGFloat {
+        if square { return 1 }
+        if let knownAspectRatio, knownAspectRatio.isFinite, knownAspectRatio > 0 { return knownAspectRatio }
+        if let measuredImage, measuredImage.key == imageKey { return measuredImage.ratio }
+        if let imageKey, let image = PostImageCache.shared.cached(imageKey), image.size.width > 0, image.size.height > 0 {
+            return image.size.width / image.size.height
+        }
+        return 1
+    }
+    private var showCaption: Bool { square || hovering || focused }
+
+    var body: some View {
+        Color.clear
+            .aspectRatio(ratio, contentMode: .fit)
+            .background(palette.paper)
+            .overlay {
+                if let widgetSource {
+                    WidgetPostPreview(source: widgetSource, revision: revision, compact: false)
+                } else if let imageURL {
+                    CachedPostImage(url: imageURL, revision: revision,
+                                    contentMode: square ? .fill : .fit, fallbackText: fallbackText) { size in
+                        guard size.width > 0, size.height > 0, let key = imageKey else { return }
+                        measuredImage = (key, size.width / size.height)
+                    }
+                } else {
+                    Text(fallbackText)
+                        .font(Theme.body(square ? 13 : 16)).lineLimit(square ? 9 : 16).padding(16)
+                        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+                }
+            }
+            .clipped()
+            .overlay(alignment: .bottomLeading) {
+                caption
+                    .padding(10)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .background(palette.ink.opacity(0.78))
+                    .opacity(showCaption ? 1 : 0)
+                    .allowsHitTesting(false)
+            }
+            .clipped()
+            .overlay(alignment: .topTrailing) {
+                if pinned {
+                    Image(systemName: "pin.fill").font(.system(size: 11))
+                        .padding(6).background(palette.paper).padding(6)
+                        .accessibilityLabel("Pinned")
+                }
+            }
+            .overlay(Rectangle().strokeBorder(hovering || focused ? accent : Theme.rule, lineWidth: 1))
+            .contentShape(Rectangle())
+            .onHover { hovering = $0 }
+            .animation(.easeOut(duration: 0.2), value: showCaption)
+    }
+}
+
+struct PostCaption: View {
+    var post: Post
+    var authorFallback: String? = nil
+    var onImage = true
+
+    private var authorAvatarURL: URL? {
+        guard post.originalURL != nil, let source = post.originalSiteDomain else { return nil }
+        return URL(string: "https://\(source).crop.top/avatar.png")
+    }
+
+    var body: some View {
+        PostMediaCaption(
+            title: post.title, date: post.date,
+            author: post.originalSiteName ?? authorFallback, authorAvatarURL: authorAvatarURL,
+            isPage: post.isPage, tags: post.tagList, onImage: onImage
+        )
+    }
+}
+
+struct PostMediaCaption: View {
+    var title: String
+    var date: Date
+    var author: String? = nil
+    var authorAvatarURL: URL? = nil
+    var avatarRevision: String? = nil
+    var isPage = false
+    var tags: [String] = []
+    var onImage = true
+    @Environment(\.sitePalette) private var palette
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            if !title.isEmpty {
+                Text(title).font(Theme.bold(14)).foregroundColor(onImage ? palette.paper : palette.ink).lineLimit(2)
+            }
+            if let name = author, !name.isEmpty {
+                HStack(spacing: 5) {
+                    if let authorAvatarURL {
+                        SiteAvatar(url: authorAvatarURL, name: name, size: 16, revision: avatarRevision).clipShape(Circle())
+                    } else { Image(systemName: "person.crop.circle").font(.system(size: 11)) }
+                    Text(name).lineLimit(1)
+                }.font(Theme.body(12)).foregroundColor(onImage ? palette.paper.opacity(0.9) : Theme.muted)
+            }
+            HStack(spacing: 6) {
+                if isPage { Image(systemName: "doc.text").font(.system(size: 11)).help("Page") }
+                Text(date.formatted(date: .numeric, time: .omitted)).fixedSize()
+                if !tags.isEmpty { Text(tags.prefix(3).joined(separator: " · ")).lineLimit(1) }
+            }.font(Theme.body(12)).foregroundColor(onImage ? palette.paper.opacity(0.85) : Theme.muted)
+        }
+    }
+}
+
+struct PostRow: View {
+    var siteID: String
+    var post: Post
+    var widgetRevision: Double? = nil
+    var authorFallback: String? = nil
+
+    var body: some View {
+        PostMediaRow(
+            imageURL: post.tileImage.map { API.shared.siteFile(siteID, "\(post.id)/\($0)") },
+            revision: max(post.modified ?? post.created, widgetRevision ?? 0),
+            widgetSource: WidgetPreviewSource.owned(siteID: siteID, post: post, baseURL: API.shared.base),
+            fallbackSymbol: post.audioFilename == nil ? "doc.text" : "waveform",
+            pinned: post.pinned != nil
+        ) {
+            VStack(alignment: .leading, spacing: 6) {
+                if post.title.isEmpty { Text("Untitled").font(Theme.bold(14)) }
+                PostCaption(post: post, authorFallback: authorFallback, onImage: false)
+                if let summary = post.summary, !summary.isEmpty {
+                    Text(summary).font(Theme.body(13)).foregroundColor(Theme.muted).lineLimit(2)
+                }
+            }
+        }
+    }
+}
+
+struct PostMediaRow<Details: View>: View {
+    var imageURL: URL?
+    var revision: Double
+    var widgetSource: WidgetPreviewSource? = nil
+    var fallbackSymbol = "doc.text"
+    var pinned = false
+    @ViewBuilder var details: Details
+    @State private var hovering = false
+
+    var body: some View {
+        HStack(alignment: .center, spacing: 16) {
+            Color.clear.frame(width: 80, height: 80)
+                .background(Theme.rule.opacity(0.3))
+                .overlay {
+                    if let widgetSource {
+                    WidgetPostPreview(source: widgetSource, revision: revision, compact: true)
+                } else if let imageURL {
+                        CachedPostImage(url: imageURL, revision: revision)
+                    } else {
+                        Image(systemName: fallbackSymbol)
+                            .font(.system(size: 24)).foregroundColor(Theme.muted)
+                    }
+                }.clipped()
+            details.frame(maxWidth: .infinity, alignment: .leading)
+            if pinned { Image(systemName: "pin.fill").foregroundColor(Theme.muted).accessibilityLabel("Pinned") }
+        }
+        .padding(.vertical, 12)
+        .background(hovering ? Theme.rule.opacity(0.2) : Color.clear)
+        .overlay(alignment: .bottom) { Rectangle().fill(Theme.rule).frame(height: 1) }
         .contentShape(Rectangle())
+        .onHover { hovering = $0 }
     }
 }
 
 struct NewTile: View {
+    var aspectRatio: CGFloat = 1
     var action: () -> Void
+    @State private var hovering = false
+    @Environment(\.sitePalette) private var palette
+
     var body: some View {
         Button(action: action) {
-            VStack(alignment: .leading, spacing: 8) {
-                Color.clear
-                    .aspectRatio(1, contentMode: .fit)
-                    .overlay {
-                        VStack(spacing: 8) {
-                            Text("+").font(Theme.pixel(28))
-                            Text("New post").font(Theme.pixel(14))
-                        }
+            Color.clear
+                .aspectRatio(aspectRatio, contentMode: .fit)
+                .overlay {
+                    VStack(spacing: 8) {
+                        Image(systemName: "plus").font(.system(size: 24))
+                        Text("New post").font(Theme.body(14))
                     }
-                    .overlay(Rectangle().strokeBorder(style: StrokeStyle(lineWidth: Theme.border, dash: [6, 4])).foregroundColor(Theme.ink))
-                Text(" ").font(Theme.body(14))
-                Text(" ").font(Theme.body(13))
-            }
-            .contentShape(Rectangle())
+                }
+                .overlay(Rectangle().strokeBorder(style: StrokeStyle(lineWidth: 1, dash: [6, 4])).foregroundColor(hovering ? palette.ink : Theme.rule))
+                .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
+        .onHover { hovering = $0 }
+        .accessibilityLabel("New post")
     }
 }

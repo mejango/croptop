@@ -7,14 +7,25 @@
 # the file system is case-insensitive), the brand fonts in Resources/fonts.
 set -eu
 VER=$1; IN=$2; OUT=$3
+if [ -e "$OUT/Croptop.app" ] || [ -e "$OUT/Croptop.dmg" ]; then
+  echo "Use a fresh output directory; a previous Croptop build exists in $OUT" >&2
+  exit 2
+fi
 HERE=$(cd "$(dirname "$0")" && pwd)
+BUILD=${CROPTOP_BUILD_NUMBER:-$(cat "$HERE/macos-build-number")}
+PUBLIC_KEY=$(cat "$HERE/sparkle-public-key.txt")
+case "$BUILD" in *[!0-9]*|"") echo "Build number must be numeric" >&2; exit 2;; esac
 WORK=$(mktemp -d)
 for a in amd64 arm64; do mkdir -p "$WORK/$a"; tar -xzf "$IN/croptop_${VER}_darwin_${a}.tar.gz" -C "$WORK/$a" croptop; done
 APP="$WORK/Croptop.app"
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
-swift build -c release --arch arm64 --arch x86_64 --package-path "$HERE/../apps/macos" --scratch-path "$WORK/swift"
+swift build --disable-keychain --disable-netrc -c release --arch arm64 --arch x86_64 --package-path "$HERE/../apps/macos" --scratch-path "$WORK/swift"
 cp "$WORK/swift/apple/Products/Release/Croptop" "$APP/Contents/MacOS/Croptop"
-mkdir -p "$APP/Contents/Resources/fonts" && cp "$HERE/fonts/"*.ttf "$APP/Contents/Resources/fonts/"
+cp -R "$WORK/swift/apple/Products/Release/Croptop_Croptop.bundle" "$APP/Contents/Resources/"
+mkdir -p "$APP/Contents/Frameworks"
+ditto "$WORK/swift/apple/Products/Release/Sparkle.framework" "$APP/Contents/Frameworks/Sparkle.framework"
+mkdir -p "$APP/Contents/Resources/fonts"
+cp "$HERE/fonts/SimplonNorm-Regular-WebXL.ttf" "$HERE/fonts/SimplonNorm-Bold-WebXL.ttf" "$APP/Contents/Resources/fonts/"
 lipo -create -output "$APP/Contents/Resources/croptop" "$WORK/amd64/croptop" "$WORK/arm64/croptop"
 chmod +x "$APP/Contents/MacOS/Croptop" "$APP/Contents/Resources/croptop"
 lipo -info "$APP/Contents/Resources/croptop"
@@ -26,7 +37,13 @@ cat > "$APP/Contents/Info.plist" <<PLIST
   <key>CFBundleName</key><string>Croptop</string>
   <key>CFBundleDisplayName</key><string>Croptop</string>
   <key>CFBundleIdentifier</key><string>top.crop.croptop</string>
-  <key>CFBundleVersion</key><string>$VER</string>
+  <key>CFBundleVersion</key><string>$BUILD</string>
+  <key>SUFeedURL</key><string>https://github.com/mejango/croptop/releases/latest/download/appcast.xml</string>
+  <key>SUPublicEDKey</key><string>$PUBLIC_KEY</string>
+  <key>SUEnableAutomaticChecks</key><true/>
+  <key>SUAllowsAutomaticUpdates</key><false/>
+  <key>SUVerifyUpdateBeforeExtraction</key><true/>
+  <key>SURequireSignedFeed</key><true/>
   <key>CFBundleShortVersionString</key><string>$VER</string>
   <key>CFBundleExecutable</key><string>Croptop</string>
   <key>CFBundleIconFile</key><string>Croptop</string>
@@ -52,9 +69,14 @@ plutil -lint "$APP/Contents/Info.plist"
 # then seal the app bundle (no --deep, which is deprecated).
 ENTITLEMENTS="$HERE/Croptop.entitlements"
 if [ -n "${MACOS_SIGN_IDENTITY:-}" ]; then
+  SPARKLE="$APP/Contents/Frameworks/Sparkle.framework/Versions/B"
+  for component in "$SPARKLE/XPCServices/Installer.xpc" "$SPARKLE/XPCServices/Downloader.xpc" "$SPARKLE/Autoupdate" "$SPARKLE/Updater.app"; do
+    codesign --force --options runtime --timestamp --sign "$MACOS_SIGN_IDENTITY" "$component"
+  done
+  codesign --force --options runtime --timestamp --sign "$MACOS_SIGN_IDENTITY" "$APP/Contents/Frameworks/Sparkle.framework"
   codesign --force --options runtime --timestamp --entitlements "$ENTITLEMENTS" --sign "$MACOS_SIGN_IDENTITY" "$APP/Contents/Resources/croptop"
   codesign --force --options runtime --timestamp --entitlements "$ENTITLEMENTS" --sign "$MACOS_SIGN_IDENTITY" "$APP"
-  codesign --verify --strict --verbose=2 "$APP"
+  codesign --verify --deep --strict --verbose=2 "$APP"
 else
   codesign --force --deep -s - "$APP"
 fi

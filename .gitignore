@@ -10,3 +10,6 @@ worker/.dev.vars
 !.dev.vars.example
 .env*
 !.env.example
+
+# URLCache dir the debug app writes next to its cwd
+croptop-post-previews/

@@ -10,6 +10,8 @@ AppName=Croptop
 AppVersion={#Version}
 AppPublisher=mejango
 AppPublisherURL=https://crop.top
+SetupIconFile=Croptop.ico
+UninstallDisplayIcon={app}\Croptop.ico
 DefaultDirName={autopf}\Croptop
 DefaultGroupName=Croptop
 OutputBaseFilename=croptop-setup-{#Arch}
@@ -26,10 +28,11 @@ ArchitecturesAllowed=x64compatible
 ArchitecturesInstallIn64BitMode=x64compatible
 #endif
 [Files]
+Source: "Croptop.ico"; DestDir: "{app}"; Flags: ignoreversion
 Source: "..\dist\windows_{#Arch}\croptop.exe"; DestDir: "{app}"; Flags: ignoreversion
 [Icons]
-Name: "{group}\Croptop"; Filename: "{app}\croptop.exe"; Parameters: "serve"
-Name: "{autodesktop}\Croptop"; Filename: "{app}\croptop.exe"; Parameters: "serve"; Tasks: desktopicon
+Name: "{group}\Croptop"; Filename: "{app}\croptop.exe"; Parameters: "serve"; IconFilename: "{app}\Croptop.ico"
+Name: "{autodesktop}\Croptop"; Filename: "{app}\croptop.exe"; Parameters: "serve"; IconFilename: "{app}\Croptop.ico"; Tasks: desktopicon
 [Tasks]
 Name: "desktopicon"; Description: "Create a desktop shortcut"; Flags: unchecked
 Name: "startup"; Description: "Start Croptop when you sign in"; Flags: unchecked

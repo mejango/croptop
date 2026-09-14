@@ -130,10 +130,13 @@ answers from local blocks.
 
 ## The app side
 
-In a site's Settings, set Host to `https://crop.top` and optionally claim a free
-name. From then on every publish pushes the site to the host in the background,
-signed with the site's IPNS key; the log line `pushed <site> to <host>` confirms
-it. Choosing crop.top as the site's gateway makes `yoursite.crop.top` or
+Every publish automatically pushes the site to `https://crop.top` in the
+background, signed with the site's IPNS key. A custom Host URL sends the push
+there instead; an empty or missing Host uses crop.top, including for imported
+sites. Published content also remains available for any IPFS peer to fetch.
+The log line `pushed <site> to <host>` confirms the host received the version.
+You can optionally claim a free name. Choosing crop.top as the site's gateway
+makes `yoursite.crop.top` or
 `crop.top/yoursite/` the address written into the site's absolute links.
 
 ## API

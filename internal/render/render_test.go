@@ -11,6 +11,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/mejango/croptop/internal/gateway"
 	"github.com/mejango/croptop/internal/ipfs"
 	"github.com/mejango/croptop/internal/store"
 	"github.com/mejango/croptop/templates"
@@ -44,6 +45,16 @@ func fixtureRenderer(t *testing.T) (*Renderer, *store.Store) {
 		t.Fatal(err)
 	}
 	s := &store.Store{Root: root}
+	// This fixture was published by Planet using eth.sucks. Keep that explicit
+	// so the comparison tests the original output independently of new defaults.
+	site, err := s.Site(fixtureID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	gateway.Set(site, "sucks")
+	if err := s.SaveSite(site); err != nil {
+		t.Fatal(err)
+	}
 	return &Renderer{Store: s, Templates: templates.FS, CIDs: fakeCIDs{}}, s
 }
 

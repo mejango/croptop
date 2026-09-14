@@ -30,6 +30,7 @@ jobs:
     runs-on: macos-latest
     # Secrets reach steps as env, since the secrets context is not allowed in step `if`.
     env:
+      SPARKLE_ED25519_KEY: ${{ secrets.SPARKLE_ED25519_KEY }}
       MACOS_CERT_P12: ${{ secrets.MACOS_CERT_P12 }}
       MACOS_CERT_PASSWORD: ${{ secrets.MACOS_CERT_PASSWORD }}
       AC_API_KEY_P8: ${{ secrets.AC_API_KEY_P8 }}
@@ -69,7 +70,12 @@ jobs:
           mkdir -p in out
           gh release download "$GITHUB_REF_NAME" --pattern "croptop_${VER}_darwin_*.tar.gz" --dir in
           installer/macos.sh "$VER" in out
-          gh release upload "$GITHUB_REF_NAME" out/Croptop.dmg --clobber
+          test -n "$SPARKLE_ED25519_KEY" || { echo "Missing Sparkle signing key; refusing to publish an unsigned update"; exit 1; }
+          umask 077
+          export SPARKLE_KEY_FILE="$RUNNER_TEMP/sparkle-ed25519.key"
+          trap 'rm -f "$SPARKLE_KEY_FILE"' EXIT
+          printf '%s' "$SPARKLE_ED25519_KEY" > "$SPARKLE_KEY_FILE"
+          python3 installer/publish-macos.py "$VER" out
 
   windows-installer:
     needs: goreleaser

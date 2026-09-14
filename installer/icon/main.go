@@ -1,62 +1,41 @@
-// Draws the app icon: a pink square with a white pixel C. Run from the repo
-// root: go run ./installer/icon
+// Wraps the original Croptop scissors PNG artwork in a Windows ICO.
+// icon.png is exported from Croptop.icns using iconutil. Run from the repo root:
+// go run ./installer/icon
 package main
 
 import (
-	"image"
-	"image/color"
+	"bytes"
+	"encoding/binary"
+	"fmt"
 	"image/png"
 	"os"
-
-	"golang.org/x/image/font"
-	"golang.org/x/image/font/opentype"
-	"golang.org/x/image/math/fixed"
 )
 
 func main() {
-	ttf, err := os.ReadFile("internal/render/fonts/PressStart2P-Regular.ttf")
-	if err != nil {
-		panic(err)
+	data, err := os.ReadFile("installer/icon.png")
+	must(err)
+	cfg, err := png.DecodeConfig(bytes.NewReader(data))
+	must(err)
+	width := cfg.Width
+	if width < 1 || width > 256 || width != cfg.Height {
+		panic("icon.png must be square and at most 256px")
 	}
-	f, err := opentype.Parse(ttf)
-	if err != nil {
-		panic(err)
-	}
-	const size = 1024
-	img := image.NewRGBA(image.Rect(0, 0, size, size))
-	pink := color.RGBA{0xf0, 0x56, 0xc1, 0xff}
-	// rounded square, like macOS icons
-	r := size * 22 / 100
-	for y := 0; y < size; y++ {
-		for x := 0; x < size; x++ {
-			cx, cy := clamp(x, r, size-r), clamp(y, r, size-r)
-			if (x-cx)*(x-cx)+(y-cy)*(y-cy) <= r*r {
-				img.Set(x, y, pink)
-			}
-		}
-	}
-	face, err := opentype.NewFace(f, &opentype.FaceOptions{Size: 560, DPI: 72, Hinting: font.HintingFull})
-	if err != nil {
-		panic(err)
-	}
-	d := &font.Drawer{Dst: img, Src: image.White, Face: face}
-	w := d.MeasureString("C").Ceil()
-	d.Dot = fixed.P((size-w)/2, size/2+230)
-	d.DrawString("C")
-	out, err := os.Create("installer/icon.png")
-	if err != nil {
-		panic(err)
-	}
-	defer out.Close()
-	png.Encode(out, img)
+	best := data
+	// ICO supports an unmodified PNG payload. A zero dimension represents 256px.
+	header := make([]byte, 22)
+	binary.LittleEndian.PutUint16(header[2:4], 1)
+	binary.LittleEndian.PutUint16(header[4:6], 1)
+	header[6], header[7] = byte(width%256), byte(width%256)
+	binary.LittleEndian.PutUint16(header[10:12], 1)
+	binary.LittleEndian.PutUint16(header[12:14], 32)
+	binary.LittleEndian.PutUint32(header[14:18], uint32(len(best)))
+	binary.LittleEndian.PutUint32(header[18:22], 22)
+	must(os.WriteFile("installer/Croptop.ico", append(header, best...), 0644))
+	fmt.Printf("Exported original scissors artwork (%dpx) to ICO\n", width)
 }
 
-func clamp(v, lo, hi int) int {
-	if v < lo {
-		return lo
+func must(err error) {
+	if err != nil {
+		panic(err)
 	}
-	if v > hi {
-		return hi
-	}
-	return v
 }

@@ -1,0 +1,70 @@
+<article class="ct-document">
+<h2>How Croptop works</h2>
+<p class="ct-document-subtitle">Technical overview · September 2026</p>
+<p>Croptop is a local publishing application with an IPFS node. It turns editable site files into a published directory, distributes that directory to peers, and signs a name record that points to the current version. Reading a published site does not require the editing application.</p>
+<div class="ct-spec-flow" aria-label="Publishing pipeline"><span>Source files</span><span>↓ Render</span><span>Site directory</span><span>↓ Add to IPFS</span><span>Content ID</span><span>↓ Sign with the site key</span><span>IPNS name → current version</span></div>
+<section><h3>01 · Application and node</h3>
+<p>The node is written in Go and runs on macOS, Windows, and Linux. It manages site files, renders pages, runs the publishing and following services, and exposes the browser console and API. The native macOS application is another interface to the same local node.</p>
+<p>The default IPFS engine runs inside the Croptop process using Boxo, the libraries also used by Kubo. An alternative engine manages a Kubo child process. Both implement the same publishing operations and share site keys.</p>
+<p>The console normally opens at <code>http://127.0.0.1:8086</code>. A node can also run on an always-on computer and accept edits from other devices. Remote access needs deliberate network configuration and authentication; a published website is a separate, public surface.</p>
+</section>
+<section><h3>02 · Editable source</h3>
+<p>Each site has a UUID and a directory under the node’s data root. Site metadata and template settings are JSON. Each post has its own JSON record and attachment folder. The format is compatible with the Planet-derived Croptop library format.</p>
+<pre><code>sites/&lt;site-id&gt;/
+  planet.json
+  templateSettings.json
+  avatar.png
+  Articles/
+    &lt;post-id&gt;.json
+    &lt;post-id&gt;/
+      attachments…</code></pre>
+<p>A post record contains its title, Markdown or HTML content, timestamps, tags, attachment names, and display settings. IDs provide stable references even when titles change. Tags are stored as name-to-name mappings. Most timestamps use seconds since 1 January 2001, rather than the Unix epoch.</p>
+<p>Source files and generated pages have different roles. Saving a draft changes editable source. Rendering prepares a view of it. Publishing makes a version available through the site’s public name. Keeping the source directory also preserves edits that have not been published.</p>
+</section>
+<section><h3>03 · Rendering</h3>
+<p>The renderer reads the site, its posts, template settings, and template files. It builds a static directory under <code>public/&lt;site-id&gt;/</code>. The built-in template uses Django-style templates, rendered by Pongo2 in the Go application. A site can use an editable template fork.</p>
+<p>The output includes feed and post pages, an RSS feed, template assets, attachments, and machine-readable metadata. Published <code>planet.json</code> contains the site and article list. Each post folder includes <code>article.json</code>, <code>article.md</code>, and rendered HTML. Pages can be rendered without appearing in the main post feed; pinned posts sort before ordinary posts.</p>
+<p>This directory is the portable website. A gateway can serve it as ordinary web files. There is no application database query required to deliver a paragraph or an attachment. Features implemented in the page, such as wallet connections, can make their own network requests.</p>
+</section>
+<section><h3>04 · Content addressing</h3>
+<p>Publishing adds the rendered directory to IPFS and receives a root content identifier, or CID. That CID identifies a specific directory and its contents. Changed content produces a different version; an existing CID continues to identify the original content.</p>
+<p>IPFS separates identification from location. Peers discover providers and request the required blocks. More than one machine can provide the same content. The CID provides a way to verify which content was requested, but does not guarantee that a provider will always be online.</p>
+<p>A published version is therefore an immutable snapshot with an availability requirement: someone must keep and serve its data. Croptop’s local node, following nodes, and configured hosts can contribute to that availability.</p>
+</section>
+<section><h3>05 · Site identity and updates</h3>
+<p>Each site has an Ed25519 publishing key. Its public identity determines an IPNS name. The private key authorizes signed records that connect that name to a directory CID. It is distinct from an Ethereum wallet and is not published with the website.</p>
+<p>For an update, Croptop renders and adds the site, reads the network’s current IPNS record, and chooses a sequence number above the local and network values. It signs and publishes the new mapping, then records the CID and sequence locally.</p>
+<p>The publisher checks whether another machine has moved the name to an unexpected version. In that case it marks the site as published elsewhere and asks for a sync. This helps two machines avoid repeatedly overwriting each other’s publication.</p>
+<p>Background renewals keep the current record announced. Publishing also asks gateways to fetch the new version and can push files to a configured host. These steps improve delivery, but separate caches can refresh at different times. A successful publication does not mean every gateway has already replaced every cached file.</p>
+</section>
+<section><h3>06 · Domains and browser delivery</h3>
+<p>The IPNS name is the site’s underlying updateable address. A readable domain provides another way to reach it. ENS names can refer to IPNS through their content records; conventional domains can be connected through the site’s domain and hosting configuration.</p>
+<p>An ordinary browser commonly reaches the files through an HTTP gateway. The gateway resolves the name, obtains the content, and serves HTML, scripts, images, and other attachments. It is one delivery path to the published files. Another peer can hold and provide those same files.</p>
+<p>Name-resolution caches and browser asset caches are independent. During an update, an address may temporarily show an older page or image. A URL containing a fixed CID is useful when checking an exact version; a name-based URL is useful for returning to the evolving site.</p>
+</section>
+<section><h3>07 · Following and hosting copies</h3>
+<p>Following a site in Croptop resolves its IPNS identity, fetches the published directory, and stores a local copy. The following service records the fetched CID, title, and refresh status under <code>following/&lt;ipns&gt;/</code>. The node also provides the content to the network.</p>
+<p>On refresh, it checks the current record. If the CID changed, it fetches the new site into a temporary directory and replaces its current local copy after the fetch succeeds. If the CID is unchanged, it can reannounce the existing content. Following keeps the current site available; it is not a promise to archive every past version.</p>
+<p>Reading through a browser gateway and following with a node are different operations. A browser visit alone does not enroll that reader as a long-term host. Following makes keeping a copy an explicit part of using the application.</p>
+</section>
+<section><h3>08 · Moving between devices</h3>
+<p>A new node can adopt a published site using its address and publishing key. Croptop fetches the published directory, reconstructs editable records from its metadata, and learns the current IPNS sequence before taking over publication.</p>
+<p>Sync supports taking turns between machines. It fetches the network version and merges posts by ID, choosing the newer edit for each post, then publishes the result. It does not merge individual sentences or offer simultaneous collaborative text editing. Sync before starting edits on another machine.</p>
+<p>Back up the source and publishing key. A published directory can recover published content while a copy remains available. It cannot recover a lost private key or an unpublished draft that existed only on the lost machine.</p>
+</section>
+<section><h3>09 · Programmable posts</h3>
+<p>A post can include HTML and attached JavaScript alongside media. Those attachments travel with the published directory. Relative paths keep the post’s resources together across gateways. The template exposes a <code>window.croptop</code> runtime for widgets that need site information or supported integrations.</p>
+<p>The rhythm machine and garden on this site demonstrate this model. Their source code is published content; their sound and animation are generated in the reader’s browser. A self-contained widget can run without a remote service. A widget that deliberately calls an external API retains that dependency.</p>
+<p>Local previews are isolated from privileged console operations. Site-authored code runs under a browser sandbox, while the node’s administrative routes remain a separate surface. Published scripts still execute as website code and should be reviewed as part of a template or post.</p>
+</section>
+<section><h3>10 · Optional shops</h3>
+<p>Content publication uses IPFS and IPNS. Optional commerce uses blockchain contracts. A reader does not need a wallet to read ordinary posts, and an author does not need one to publish them.</p>
+<p>Shop settings connect a site to collection contracts on selected networks. The integrated creation flow opens a browser wallet page, constructs deployment transactions, and requests approval separately for each network. The wallet holds signing keys; the node tracks progress and verifies receipts.</p>
+<p>Verified addresses are saved back into the corresponding site settings. Interrupted and partially completed deployments can be resumed. The normal Publish action then includes those settings in the public website. Creating a shop and publishing a site remain separate operations.</p>
+<p>Posts with suitable attachments can also have generated <code>nft.json</code> metadata and a recorded metadata CID. The exact metadata bytes matter because collecting can refer to that specific version. A later editorial change does not rewrite content already identified by an older CID.</p>
+</section>
+<section><h3>11 · Operating model</h3>
+<p>Croptop combines editable local files, portable rendered output, a signed mutable name, and shared content delivery. The author controls publication through the site key. Peers and hosts supply availability. Gateways let ordinary browsers participate without running the editor.</p>
+<p>The system’s practical limits follow from those roles. Keep the key to retain publishing control. Keep source backups to retain drafts. Keep copies online to retain availability. Allow for caches when verifying a new version.</p>
+</section>
+</article>

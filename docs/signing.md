@@ -20,8 +20,9 @@ Run the commands on the Mac that holds your Developer ID Application certificate
 
 With those set, the `macos-app` job imports the cert into a throwaway keychain,
 signs with hardened runtime and a secure timestamp, notarizes the app and the
-dmg, and staples both. Without them the job still builds an unsigned dmg, so
-forks and PRs keep working. If you have the banny App Store Connect key, reuse
+dmg, and staples both. Publishing also requires `SPARKLE_ED25519_KEY`. Without
+signing credentials a local build can still be ad-hoc signed, but the release
+publisher refuses to upload it. If you have the banny App Store Connect key, reuse
 it here.
 
 ## B. Locally, on the Mac that has the certificate
@@ -52,7 +53,44 @@ uploads the stapled `Croptop.dmg` to the release. It reads:
 - The app carries hardened runtime with `installer/Croptop.entitlements` (no App
   Sandbox: it runs a bundled node that binds a local port and writes the data
   dir). The bundled Go engine is signed too, so hardened runtime accepts it.
-- The signed app cannot replace its own binary, so its update banner sends you
-  to the download instead of self-updating. The CLI install keeps self-update.
+- Sparkle 2 updates the complete app through its signed helper. Use Croptop →
+  Check for Updates… or “Update available” beside the version at the bottom of
+  the sidebar, then Install and Relaunch.
+  Editing and publishing defer relaunch. The CLI keeps its own self-update.
 - Developer ID team is `SY2W527QJA`; the identity is `Developer ID Application: Jango De La Noche (SY2W527QJA)`.
 - On this release Mac the signing keychain, private key and `.p12` live under `~/Documents/croptop-signing/`, and the App Store Connect notary key under `~/Downloads/` (see local notes for the exact ids). Keep them out of the repo.
+
+## Sparkle updates
+
+Existing installations without Sparkle need one manual installation of the new
+DMG. Subsequent versions install through Sparkle. The feed is the latest GitHub
+release's `appcast.xml`; it and every update archive are Ed25519 signed.
+`SUVerifyUpdateBeforeExtraction` and `SURequireSignedFeed` are required.
+
+Increment `installer/macos-build-number` for every distributed Mac build,
+including rebuilds with the same marketing version. Never reuse a published
+build number. `CROPTOP_BUILD_NUMBER` may override this for isolated local tests.
+The feed uses `Croptop-<build>.dmg`, an immutable asset; `Croptop.dmg` remains the
+manual download alias. The publisher refuses rollbacks and conflicting builds,
+and uploads the feed last. It never creates tags.
+
+The private key lives outside the repository. On this signing Mac it is
+`~/Documents/croptop-signing/sparkle-ed25519.key` (mode 0600). Back it up securely;
+losing it breaks updates for existing installations. Only the public key in
+`installer/sparkle-public-key.txt` is shipped. To publish an already built app:
+
+```sh
+export SPARKLE_KEY_FILE="$HOME/Documents/croptop-signing/sparkle-ed25519.key"
+python3 installer/publish-macos.py 0.11.0 /path/to/build/out --prepare-only
+python3 installer/publish-macos.py 0.11.0 /path/to/build/out
+```
+
+Preparation validates Developer ID notarization and creates the signed appcast
+with checksum-pinned Sparkle tools. The release must already exist and be the
+latest release. Preserve the same key for all future releases. Never put it in
+command arguments, logs, or source control. In CI use the `SPARKLE_ED25519_KEY`
+secret, written to a temporary file with restricted permissions.
+
+An already running external console service is not owned by the GUI app and is
+not stopped during updates. The bundled engine updates with the app; an older
+external service still needs its own upgrade/restart.

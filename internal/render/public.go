@@ -46,29 +46,34 @@ func escapePath(name string) string {
 // PublicPost is what Planet writes to <post>/article.json and inlines into
 // planet.json (PublicArticleModel). Key set matches the Mac app's output.
 type PublicPost struct {
-	ArticleType       int               `json:"articleType"`
-	ID                string            `json:"id"`
-	Link              string            `json:"link"`
-	Slug              string            `json:"slug"`
-	ExternalLink      string            `json:"externalLink"`
-	Title             string            `json:"title"`
-	Content           string            `json:"content"`
-	ContentRendered   string            `json:"contentRendered"`
-	Created           store.AppleTime   `json:"created"`
-	Modified          *store.AppleTime  `json:"modified,omitempty"`
-	HasVideo          bool              `json:"hasVideo"`
-	VideoFilename     *string           `json:"videoFilename,omitempty"`
-	HasAudio          bool              `json:"hasAudio"`
-	AudioFilename     *string           `json:"audioFilename,omitempty"`
-	Attachments       []string          `json:"attachments"`
-	HeroImage         *string           `json:"heroImage,omitempty"`
-	HeroImageWidth    *int              `json:"heroImageWidth,omitempty"`
-	HeroImageHeight   *int              `json:"heroImageHeight,omitempty"`
-	HeroImageURL      *string           `json:"heroImageURL,omitempty"`
-	HeroImageFilename *string           `json:"heroImageFilename,omitempty"`
-	CIDs              map[string]string `json:"cids"`
-	Tags              map[string]string `json:"tags"`
-	Pinned            *store.AppleTime  `json:"pinned,omitempty"`
+	OriginalSiteName   string            `json:"originalSiteName,omitempty"`
+	OriginalSiteDomain string            `json:"originalSiteDomain,omitempty"`
+	OriginalPostID     string            `json:"originalPostID,omitempty"`
+	OriginalPostDate   *store.AppleTime  `json:"originalPostDate,omitempty"`
+	SubmissionTargets  []string          `json:"submissionTargets,omitempty"`
+	ArticleType        int               `json:"articleType"`
+	ID                 string            `json:"id"`
+	Link               string            `json:"link"`
+	Slug               string            `json:"slug"`
+	ExternalLink       string            `json:"externalLink"`
+	Title              string            `json:"title"`
+	Content            string            `json:"content"`
+	ContentRendered    string            `json:"contentRendered"`
+	Created            store.AppleTime   `json:"created"`
+	Modified           *store.AppleTime  `json:"modified,omitempty"`
+	HasVideo           bool              `json:"hasVideo"`
+	VideoFilename      *string           `json:"videoFilename,omitempty"`
+	HasAudio           bool              `json:"hasAudio"`
+	AudioFilename      *string           `json:"audioFilename,omitempty"`
+	Attachments        []string          `json:"attachments"`
+	HeroImage          *string           `json:"heroImage,omitempty"`
+	HeroImageWidth     *int              `json:"heroImageWidth,omitempty"`
+	HeroImageHeight    *int              `json:"heroImageHeight,omitempty"`
+	HeroImageURL       *string           `json:"heroImageURL,omitempty"`
+	HeroImageFilename  *string           `json:"heroImageFilename,omitempty"`
+	CIDs               map[string]string `json:"cids"`
+	Tags               map[string]string `json:"tags"`
+	Pinned             *store.AppleTime  `json:"pinned,omitempty"`
 }
 
 func NewPublicPost(site *store.Site, p *store.Post) PublicPost {
@@ -81,9 +86,16 @@ func NewPublicPost(site *store.Site, p *store.Post) PublicPost {
 		}
 	}
 	pub := PublicPost{
+		OriginalSiteName: p.OriginalSiteName, OriginalSiteDomain: p.OriginalSiteDomain, OriginalPostID: p.OriginalPostID, OriginalPostDate: p.OriginalPostDate, SubmissionTargets: p.SubmissionTargets,
 		ArticleType: p.ArticleType, ID: p.ID, Link: link, Slug: slug,
 		Title: p.Title, Content: p.Content, Created: p.Created, Modified: p.Modified,
 		Attachments: p.Attachments, CIDs: p.CIDs, Tags: p.Tags, Pinned: p.Pinned,
+	}
+	if pub.OriginalSiteDomain == "" && len(site.ContributorSites()) > 0 {
+		pub.OriginalSiteName = site.Name
+		pub.OriginalSiteDomain = site.IPNS
+		pub.OriginalPostID = p.ID
+		pub.OriginalPostDate = &p.Created
 	}
 	if pub.Attachments == nil {
 		pub.Attachments = []string{}

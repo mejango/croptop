@@ -5,6 +5,8 @@ import AVKit
 struct QuickView: View {
     @EnvironmentObject var model: AppModel
     var groupID: String
+    var presentedAsSheet = false
+    @Environment(\.dismiss) private var dismiss
     @State private var files: [String] = []
     @State private var site = ""
     @State private var title = ""
@@ -15,8 +17,8 @@ struct QuickView: View {
 
     var body: some View {
         ScrollView {
-            VStack(alignment: .leading, spacing: 12) {
-                ScreenHead(title: "Quick post", subtitle: "\(files.count) file\(files.count == 1 ? "" : "s"). Command Enter posts, Command Shift Enter posts and publishes.") { EmptyView() }
+            VStack(alignment: .leading, spacing: 24) {
+                ScreenHead(title: "New post", subtitle: "Choose a site, then add a title or a few words.") { EmptyView() }
                 if gone {
                     EmptyState(text: "These files are gone. Drop them on Croptop again.")
                 } else {
@@ -27,23 +29,32 @@ struct QuickView: View {
                         Picker("", selection: $site) {
                             ForEach(model.sites) { s in Text(s.name).tag(s.id) }
                         }
-                        .labelsHidden().fixedSize()
+                        .font(Theme.body(14)).labelsHidden().fixedSize()
                     }
                     Labeled(title: "Title") { TextField("Title (optional)", text: $title).field() }
-                    Labeled(title: "Words") {
-                        TextEditor(text: $words).font(Theme.body()).frame(minHeight: 90).padding(6).overlay(Rectangle().stroke(Theme.ink, lineWidth: Theme.border))
+                    Labeled(title: "Body") {
+                        TextEditor(text: $words).font(Theme.body(14)).frame(minHeight: 90).padding(8).fieldOutline()
                     }
-                    Labeled(title: "Tags") { TextField("tags, comma separated", text: $tags).field() }
-                    HStack(spacing: 8) {
-                        Button(busy ? "Posting…" : "Post") { submit(publish: false) }.buttonStyle(BorderedButton(kind: .hot)).disabled(busy).keyboardShortcut(.return, modifiers: .command)
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text("Tags").font(Theme.formLabel)
+                        TagSelector(tags: $tags, choices: model.tagChoices(for: site))
+                    }
+                    HStack(spacing: 16) {
+                        HStack(spacing: 8) {
+                            IconActionButton("Discard", systemImage: "xmark") {
+                                Task { await API.shared.discardQuick(groupID); if presentedAsSheet { dismiss() } else { model.screen = .feed } }
+                            }
+                            IconActionButton(busy ? "Posting…" : "Post", systemImage: "checkmark") { submit(publish: false) }
+                                .disabled(busy).keyboardShortcut(.return, modifiers: .command)
+                        }
                         Button("Post and publish") { submit(publish: true) }.buttonStyle(BorderedButton()).disabled(busy).keyboardShortcut(.return, modifiers: [.command, .shift])
-                        Button("Discard") { Task { await API.shared.discardQuick(groupID); model.screen = .feed } }.buttonStyle(BorderedButton(kind: .quiet))
-                    }
+                    }.frame(maxWidth: .infinity, alignment: .trailing)
                 }
             }
             .padding(Theme.content)
             .frame(maxWidth: 720, alignment: .leading)
         }
+        .task(id: site) { if !site.isEmpty && model.posts[site] == nil { await model.loadPosts(site) } }
         .task {
             if let g = try? await API.shared.quick(groupID) { files = g.files } else { gone = true }
             site = UserDefaults.standard.string(forKey: "quickSite").flatMap { id in model.sites.first { $0.id == id }?.id } ?? model.sites.first?.id ?? ""
@@ -85,7 +96,7 @@ struct QuickView: View {
                 let post = try await API.shared.savePost(site: site, id: nil, form: f)
                 await API.shared.discardQuick(groupID)
                 await model.loadPosts(site)
-                model.screen = .editor(site: site, post: post.id)
+                if presentedAsSheet { dismiss() } else { model.screen = .editor(site: site, post: post.id) }
                 if publish { model.publish(site) } else { model.toast("Posted. Publish the site when you're ready.") }
             } catch { model.show(error) }
             busy = false

@@ -105,40 +105,40 @@ func (s *Server) routesCroptop(mux *http.ServeMux) {
 		}
 		writeJSON(w, 200, meta.SettingsWithDefaults(stored))
 	})
-	mux.HandleFunc("PUT /v0/croptop/sites/{id}/settings", func(w http.ResponseWriter, r *http.Request) {
-		site, ok := s.site(w, r)
-		if !ok {
-			return
-		}
-		var m map[string]any
-		if err := json.NewDecoder(r.Body).Decode(&m); err != nil {
-			writeErr(w, 400, err)
-			return
-		}
-		if err := s.Store.SaveTemplateSettings(site.ID, m); err != nil {
-			writeErr(w, 500, err)
-			return
-		}
-		s.render(r.Context(), site.ID)
-		writeJSON(w, 200, m)
-	})
+	mux.HandleFunc("PUT /v0/croptop/sites/{id}/settings", s.saveShopAwareSettings)
+	mux.HandleFunc("PATCH /v0/croptop/sites/{id}/settings", s.saveShopAwareSettings)
 	mux.HandleFunc("PUT /v0/croptop/sites/{id}", func(w http.ResponseWriter, r *http.Request) {
+		s.mu.Lock()
+		changedID := ""
+		defer func() {
+			s.mu.Unlock()
+			if changedID != "" {
+				s.render(r.Context(), changedID)
+			}
+		}()
 		site, ok := s.site(w, r)
 		if !ok {
 			return
 		}
 		var in struct {
-			Name, About *string
-			Domain      *string
-			Tags        map[string]string
-			Archived    *bool
-			Gateway     *string
-			Host        *string                    // croptop host base URL to push to, "" turns pushing off
-			Custom      map[string]json.RawMessage // customCodeHead etc, passed through to Raw
+			Name, About  *string
+			Domain       *string
+			CustomDomain *string
+			Tags         map[string]string
+			Archived     *bool
+			Gateway      *string
+			Host         *string                    // custom host base URL; empty uses crop.top
+			Custom       map[string]json.RawMessage // customCodeHead etc, passed through to Raw
 		}
 		if err := json.NewDecoder(r.Body).Decode(&in); err != nil {
 			writeErr(w, 400, err)
 			return
+		}
+		if in.CustomDomain != nil {
+			if err := gateway.SetCustomDomain(site, *in.CustomDomain); err != nil {
+				writeErr(w, 400, err)
+				return
+			}
 		}
 		if in.Name != nil && strings.TrimSpace(*in.Name) != "" {
 			site.Name = *in.Name
@@ -166,7 +166,7 @@ func (s *Server) routesCroptop(mux *http.ServeMux) {
 			site.Raw = map[string]json.RawMessage{}
 		}
 		for k, v := range in.Custom {
-			if strings.HasPrefix(k, "customCode") || k == "doNotIndex" || strings.HasSuffix(k, "Username") || k == "discordLink" {
+			if strings.HasPrefix(k, "customCode") || k == "doNotIndex" || strings.HasSuffix(k, "Username") || k == "discordLink" || k == "plausibleEnabled" || k == "plausibleDomain" || k == "plausibleAPIServer" {
 				site.Raw[k] = v
 			}
 		}
@@ -175,7 +175,7 @@ func (s *Server) routesCroptop(mux *http.ServeMux) {
 			writeErr(w, 500, err)
 			return
 		}
-		s.render(r.Context(), site.ID)
+		changedID = site.ID
 		writeJSON(w, 200, site)
 	})
 	mux.HandleFunc("POST /v0/croptop/sites/{id}/name", func(w http.ResponseWriter, r *http.Request) {
