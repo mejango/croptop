@@ -1,8 +1,9 @@
 import SwiftUI
 
+// Raw values are the template's postViewMode setting, so the site opens in the owner's view.
 enum SitePostViewMode: String, CaseIterable, Identifiable {
     case single
-    case tiles
+    case tiles = "frames"
     case more
     case list
 

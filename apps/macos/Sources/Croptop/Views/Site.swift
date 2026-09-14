@@ -6,7 +6,8 @@ struct SiteView: View {
     @EnvironmentObject var model: AppModel
     var siteID: String
     @State private var tags: Set<String> = []
-    @AppStorage("sitePostViewMode") private var viewMode: SitePostViewMode = .tiles
+    @State private var viewMode: SitePostViewMode = .tiles
+    @State private var savedViewMode: SitePostViewMode = .tiles
     @FocusState private var focusedPost: String?
     @State private var url = ""
     @State private var highlight = Theme.hot
@@ -88,10 +89,16 @@ struct SiteView: View {
             }
             SitePostViewPicker(selection: $viewMode)
                 .fixedSize()
+                .onChange(of: viewMode) { mode in
+                    // The site opens in the owner's view: the picker writes the template setting.
+                    guard mode != savedViewMode else { return }
+                    savedViewMode = mode
+                    Task { try? await API.shared.saveTemplateSettings(siteID, values: ["postViewMode": mode.rawValue]); await model.load() }
+                }
         }.padding(.bottom, 20)
     }
 
-    @ViewBuilder private func postButton(_ post: Post) -> some View {
+    @ViewBuilder private func postButton(_ post: Post, aspectFloor: CGFloat? = nil) -> some View {
         Button {
             if let original = post.originalURL { NSWorkspace.shared.open(original) }
             else { model.screen = .editor(site: siteID, post: post.id) }
@@ -100,7 +107,7 @@ struct SiteView: View {
                 PostRow(siteID: siteID, post: post, widgetRevision: site?.lastPublished, authorFallback: site?.isCollaborative == true ? site?.name : nil)
             } else {
                 PostTile(siteID: siteID, post: post, widgetRevision: site?.lastPublished, authorFallback: site?.isCollaborative == true ? site?.name : nil,
-                         square: viewMode == .more, accent: highlight, focused: focusedPost == post.id)
+                         square: viewMode == .more, minimumAspectRatio: aspectFloor, accent: highlight, focused: focusedPost == post.id)
             }
         }
         .buttonStyle(.plain)
@@ -126,6 +133,8 @@ struct SiteView: View {
     }
 
     @ViewBuilder private func postContent(width: CGFloat, height: CGFloat) -> some View {
+        // Single keeps the New post width and crops tall media to about a window height.
+        let singleAspectFloor = width / max(1, height * 0.85)
         if viewMode == .list {
             LazyVStack(alignment: .leading, spacing: 0) {
                 Button { model.screen = .editor(site: siteID, post: nil) } label: {
@@ -150,7 +159,7 @@ struct SiteView: View {
                 ForEach(columns.indices, id: \.self) { column in
                     LazyVStack(spacing: viewMode.spacing) {
                         ForEach(columns[column]) { entry in
-                            if let post = entry.post { postButton(post).frame(maxHeight: viewMode == .single ? height * 0.85 : .infinity) }
+                            if let post = entry.post { postButton(post, aspectFloor: viewMode == .single ? singleAspectFloor : nil) }
                             else { NewTile(aspectRatio: viewMode == .single ? 3 : 4 / 3) { model.screen = .editor(site: siteID, post: nil) } }
                         }
                     }.frame(maxWidth: .infinity)
@@ -194,6 +203,8 @@ struct SiteView: View {
             palette = SitePalette()
             guard let settings = try? await API.shared.templateSettings(siteID) else { return }
             palette = SitePalette(settings: settings)
+            savedViewMode = SitePostViewMode(rawValue: settings["postViewMode"] as? String ?? "") ?? .tiles
+            viewMode = savedViewMode
             if let value = settings["highlightColor"] as? String,
                let hex = UInt32(value.trimmingCharacters(in: CharacterSet(charactersIn: "#")), radix: 16) {
                 highlight = Color(hex: hex)
@@ -222,6 +233,7 @@ struct PostTile: View {
     var widgetRevision: Double? = nil
     var authorFallback: String? = nil
     var square = false
+    var minimumAspectRatio: CGFloat? = nil
     var accent = Theme.hot
     var focused = false
 
@@ -232,7 +244,7 @@ struct PostTile: View {
             widgetSource: WidgetPreviewSource.owned(siteID: siteID, post: post, baseURL: API.shared.base),
             fallbackText: post.content.isEmpty ? (post.title.isEmpty ? "Untitled" : post.title) : post.content,
             knownAspectRatio: post.hasWidgetPreview ? 4 / 3 : post.hasTileAspectRatio ? CGFloat(post.tileAspectRatio) : nil,
-            pinned: post.pinned != nil, square: square, accent: accent, focused: focused
+            pinned: post.pinned != nil, square: square, minimumAspectRatio: minimumAspectRatio, accent: accent, focused: focused
         ) {
             PostCaption(post: post, authorFallback: authorFallback)
         }
@@ -248,6 +260,7 @@ struct PostMediaTile<Caption: View>: View {
     var knownAspectRatio: CGFloat? = nil
     var pinned = false
     var square = false
+    var minimumAspectRatio: CGFloat? = nil
     var accent = Theme.hot
     var focused = false
     @ViewBuilder var caption: Caption
@@ -256,7 +269,8 @@ struct PostMediaTile<Caption: View>: View {
     @Environment(\.sitePalette) private var palette
 
     private var imageKey: URL? { imageURL.map { CachedPostImage.requestURL($0, revision: revision) } }
-    private var ratio: CGFloat {
+    private var ratio: CGFloat { max(naturalRatio, minimumAspectRatio ?? 0) }
+    private var naturalRatio: CGFloat {
         if square { return 1 }
         if let knownAspectRatio, knownAspectRatio.isFinite, knownAspectRatio > 0 { return knownAspectRatio }
         if let measuredImage, measuredImage.key == imageKey { return measuredImage.ratio }
@@ -276,7 +290,7 @@ struct PostMediaTile<Caption: View>: View {
                     WidgetPostPreview(source: widgetSource, revision: revision, compact: false)
                 } else if let imageURL {
                     CachedPostImage(url: imageURL, revision: revision,
-                                    contentMode: square ? .fill : .fit, fallbackText: fallbackText) { size in
+                                    contentMode: square || minimumAspectRatio != nil ? .fill : .fit, fallbackText: fallbackText) { size in
                         guard size.width > 0, size.height > 0, let key = imageKey else { return }
                         measuredImage = (key, size.width / size.height)
                     }
