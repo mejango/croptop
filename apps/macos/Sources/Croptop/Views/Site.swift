@@ -64,6 +64,7 @@ struct SiteView: View {
                 }
                 IconActionButton("Settings", systemImage: "gearshape") { model.screen = .settings(siteID) }
             }
+            Button("New post") { model.screen = .editor(site: siteID, post: nil) }.buttonStyle(BorderedButton(kind: .quiet))
             Button(model.publishing.contains(siteID) ? "Publishing…" : "Publish") { model.publish(siteID) }
                 .buttonStyle(BorderedButton(kind: unpublished ? .hot : .quiet))
                 .accessibilityValue(unpublished ? "Unpublished changes" : "Up to date")
@@ -133,34 +134,27 @@ struct SiteView: View {
     }
 
     @ViewBuilder private func postContent(width: CGFloat, height: CGFloat) -> some View {
-        // Single keeps the New post width and crops tall media to about a window height.
+        // Single crops tall media to about a window height.
         let singleAspectFloor = width / max(1, height * 0.85)
         if viewMode == .list {
             LazyVStack(alignment: .leading, spacing: 0) {
-                Button { model.screen = .editor(site: siteID, post: nil) } label: {
-                    Label("New post", systemImage: "plus")
-                        .font(Theme.body(14)).frame(maxWidth: .infinity, alignment: .leading)
-                        .padding(.vertical, 20).contentShape(Rectangle())
-                }.buttonStyle(.plain)
                 ForEach(shown) { post in postButton(post) }
             }
         } else if viewMode == .more {
             let count = viewMode.columnCount(for: width)
             LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: viewMode.spacing, alignment: .top), count: count),
                       alignment: .leading, spacing: viewMode.spacing) {
-                NewTile { model.screen = .editor(site: siteID, post: nil) }
                 ForEach(shown) { post in postButton(post) }
             }
         } else {
             let count = viewMode.columnCount(for: width)
             // The template assigns posts left to right, then stacks each column independently.
-            let columns = SitePostColumns.distribute([SitePostEntry(post: nil)] + shown.map { SitePostEntry(post: $0) }, count: count)
+            let columns = SitePostColumns.distribute(shown.map { SitePostEntry(post: $0) }, count: count)
             HStack(alignment: .top, spacing: viewMode.spacing) {
                 ForEach(columns.indices, id: \.self) { column in
                     LazyVStack(spacing: viewMode.spacing) {
                         ForEach(columns[column]) { entry in
                             if let post = entry.post { postButton(post, aspectFloor: viewMode == .single ? singleAspectFloor : nil) }
-                            else { NewTile(aspectRatio: viewMode == .single ? 3 : 4 / 3) { model.screen = .editor(site: siteID, post: nil) } }
                         }
                     }.frame(maxWidth: .infinity)
                 }
@@ -435,27 +429,3 @@ struct PostMediaRow<Details: View>: View {
     }
 }
 
-struct NewTile: View {
-    var aspectRatio: CGFloat = 1
-    var action: () -> Void
-    @State private var hovering = false
-    @Environment(\.sitePalette) private var palette
-
-    var body: some View {
-        Button(action: action) {
-            Color.clear
-                .aspectRatio(aspectRatio, contentMode: .fit)
-                .overlay {
-                    VStack(spacing: 8) {
-                        Image(systemName: "plus").font(.system(size: 24))
-                        Text("New post").font(Theme.body(14))
-                    }
-                }
-                .overlay(Rectangle().strokeBorder(style: StrokeStyle(lineWidth: 1, dash: [6, 4])).foregroundColor(hovering ? palette.ink : Theme.rule))
-                .contentShape(Rectangle())
-        }
-        .buttonStyle(.plain)
-        .onHover { hovering = $0 }
-        .accessibilityLabel("New post")
-    }
-}
