@@ -62,7 +62,7 @@ struct RailView: View {
                 Text(title).font(Theme.bold(18)).foregroundColor(Theme.ink)
                     .padding(.vertical, 10).padding(.leading, 16)
                     .contentShape(Rectangle())
-            }.buttonStyle(.plain)
+            }.buttonStyle(.hover)
                 .accessibilityLabel(title == "Following" ? "Following, all posts" : "Your sites, all posts")
                 .accessibilityAddTraits(.isHeader)
                 .accessibilityAddTraits(model.screen == allScreen ? .isSelected : [])
@@ -70,7 +70,7 @@ struct RailView: View {
             Button { model.sheet = createSheet } label: {
                 Image(systemName: "plus").font(Theme.body(16))
                     .frame(width: 24, height: 24).contentShape(Rectangle())
-            }.buttonStyle(.plain)
+            }.buttonStyle(.hover)
                 .accessibilityLabel(title == "Following" ? "Follow a site" : "Create a site or curation")
                 .help(title == "Following" ? "Follow a site" : "New site")
         }.padding(.trailing, 16).padding(.bottom, 12)
@@ -100,7 +100,7 @@ struct RailItem: View {
             }
             .contentShape(Rectangle())
         }
-        .buttonStyle(.plain)
+        .buttonStyle(.hover)
         .focused($focused)
         .accessibilityAddTraits(current ? .isSelected : [])
     }

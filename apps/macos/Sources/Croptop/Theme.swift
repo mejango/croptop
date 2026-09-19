@@ -100,19 +100,36 @@ struct LoadingTicker: View {
 }
 
 // The bordered button: 2 px ink, paper, Simplon 14 in every state. Variants: hot, quiet.
+// Every button gets a subtle hover state: bordered ones tint their background, plain ones dim.
+struct HoverState<Content: View>: View {
+    @State private var hovering = false
+    @ViewBuilder var content: (Bool) -> Content
+    var body: some View { content(hovering).onHover { hovering = $0 } }
+}
+
+struct HoverButtonStyle: ButtonStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        HoverState { hovering in configuration.label.opacity(configuration.isPressed ? 0.5 : hovering ? 0.7 : 1) }
+    }
+}
+extension ButtonStyle where Self == HoverButtonStyle { static var hover: HoverButtonStyle { HoverButtonStyle() } }
+
 struct BorderedButton: ButtonStyle {
     enum Kind { case plain, hot, quiet }
     var kind: Kind = .plain
     var accent: Color = Theme.hot
     var current = false   // a selected state, like the Feed button in the rail
     func makeBody(configuration: Configuration) -> some View {
-        configuration.label
-            .font(Theme.body(14))
-            .foregroundColor(current || configuration.isPressed ? Theme.paper : (kind == .hot ? accent : Theme.ink))
-            .padding(.vertical, 8).padding(.horizontal, 14)
-            .background(configuration.isPressed || current ? Theme.ink : Theme.paper)
-            .overlay(Rectangle().stroke(current || configuration.isPressed ? Theme.ink : (kind == .quiet ? Theme.rule : (kind == .hot ? accent : Theme.ink)), lineWidth: Theme.border))
-            .contentShape(Rectangle())
+        HoverState { hovering in
+            let inverted = current || configuration.isPressed
+            configuration.label
+                .font(Theme.body(14))
+                .foregroundColor(inverted ? Theme.paper : (kind == .hot ? accent : Theme.ink))
+                .padding(.vertical, 8).padding(.horizontal, 14)
+                .background(inverted ? Theme.ink : (hovering ? (kind == .hot ? Theme.hotWash : Theme.rule.opacity(0.35)) : Theme.paper))
+                .overlay(Rectangle().stroke(inverted ? Theme.ink : (kind == .quiet ? (hovering ? Theme.ink : Theme.rule) : (kind == .hot ? accent : Theme.ink)), lineWidth: Theme.border))
+                .contentShape(Rectangle())
+        }
     }
 }
 
@@ -127,8 +144,14 @@ struct TextActionButtonStyle: ButtonStyle {
             .foregroundColor(isEnabled ? Theme.ink : Theme.muted)
             .padding(.vertical, 8).padding(.horizontal, 4)
             .contentShape(Rectangle())
-            .opacity(configuration.isPressed ? 0.6 : 1)
+            .modifier(HoverDim(pressed: configuration.isPressed))
     }
+}
+
+struct HoverDim: ViewModifier {
+    var pressed = false
+    @State private var hovering = false
+    func body(content: Content) -> some View { content.opacity(pressed ? 0.5 : hovering ? 0.7 : 1).onHover { hovering = $0 } }
 }
 
 // Secondary actions stay compact; tooltips and accessibility carry their names.
@@ -155,7 +178,7 @@ struct IconActionButton: View {
                 .padding(.vertical, 8).padding(.horizontal, 4)
                 .contentShape(Rectangle())
         }
-        .buttonStyle(.plain)
+        .buttonStyle(.hover)
         .help(helpText)
         .accessibilityLabel(accessibilityText)
     }

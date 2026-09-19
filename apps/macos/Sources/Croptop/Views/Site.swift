@@ -47,7 +47,7 @@ struct SiteView: View {
                             Image(systemName: "person.2")
                             Text("\(contributorCount) \(contributorCount == 1 ? "contributor" : "contributors")")
                         }.font(Theme.body(13)).foregroundColor(Theme.muted)
-                    }.buttonStyle(.plain)
+                    }.buttonStyle(.hover)
                 }
             }.frame(maxWidth: .infinity, alignment: .leading)
         }
@@ -64,11 +64,11 @@ struct SiteView: View {
                 }
                 IconActionButton("Settings", systemImage: "gearshape") { model.screen = .settings(siteID) }
             }
-            Button("New post") { model.screen = .editor(site: siteID, post: nil) }.buttonStyle(BorderedButton(kind: .quiet))
             Button(model.publishing.contains(siteID) ? "Publishing…" : "Publish") { model.publish(siteID) }
-                .buttonStyle(BorderedButton(kind: unpublished ? .hot : .quiet))
+                .buttonStyle(BorderedButton(kind: unpublished ? .plain : .quiet))
                 .accessibilityValue(unpublished ? "Unpublished changes" : "Up to date")
                 .disabled(model.publishing.contains(siteID))
+            Button("New post") { model.screen = .editor(site: siteID, post: nil) }.buttonStyle(BorderedButton(kind: .hot))
         }.fixedSize(horizontal: true, vertical: false)
     }
 

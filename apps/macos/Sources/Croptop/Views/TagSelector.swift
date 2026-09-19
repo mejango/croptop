@@ -26,7 +26,7 @@ struct TagChip: View {
             .background(Theme.rule)
             .contentShape(Rectangle())
         }
-        .buttonStyle(.plain)
+        .buttonStyle(.hover)
         .onHover { hovering = $0 }
         .accessibilityLabel(title)
         .accessibilityValue(selected ? "Selected" : "Not selected")

@@ -234,7 +234,7 @@ struct AttachmentRow: View {
                         .background(Theme.paper)
                         .overlay(Rectangle().stroke(Theme.rule, lineWidth: Theme.border))
                 }
-                .buttonStyle(.plain)
+                .buttonStyle(.hover)
                 .help("View full-size image")
                 .accessibilityLabel("Preview " + name)
             } else {

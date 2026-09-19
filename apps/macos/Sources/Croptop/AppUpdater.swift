@@ -43,6 +43,12 @@ final class AppUpdater: NSObject, ObservableObject, SPUUpdaterDelegate {
                 self?.gate.blocked = Self.blocksRelaunch(screen: screen, sheet: sheet, publishing: publishing, collaborationOpen: collaborationOpen)
             }.store(in: &observations)
         controller.startUpdater()
+        // Sparkle's own scheduled check runs once a day; probe the feed quietly on launch and hourly so the rail
+        // shows "Update available" without anyone opening the menu.
+        Timer.scheduledTimer(withTimeInterval: 3600, repeats: true) { [weak controller] _ in
+            Task { @MainActor in controller?.updater.checkForUpdateInformation() }
+        }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 5) { [weak controller] in controller?.updater.checkForUpdateInformation() }
     }
 
     static func blocksRelaunch(screen: Screen, sheet: Sheet?, publishing: Set<String>, collaborationOpen: Bool = false) -> Bool {
@@ -89,7 +95,7 @@ struct UpdateIndicator: View {
         } else if let version = updater.availableVersion {
             Button("Update available") { updater.check() }
                 .font(Theme.body(11)).foregroundColor(Theme.ink)
-                .buttonStyle(.plain).disabled(!updater.canCheck)
+                .buttonStyle(.hover).disabled(!updater.canCheck)
                 .help("Update Croptop to " + version)
                 .accessibilityLabel("Update available: Croptop " + version)
         }

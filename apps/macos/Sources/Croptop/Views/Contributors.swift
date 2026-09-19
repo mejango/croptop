@@ -94,7 +94,7 @@ struct CurateSheet: View {
                             Image(systemName: "xmark").font(.system(size: 16, weight: .medium))
                                 .frame(width: 32, height: 32).contentShape(Rectangle())
                         }
-                        .buttonStyle(.plain)
+                        .buttonStyle(.hover)
                         .accessibilityLabel("Close Curate")
                         .help("Close")
                         .keyboardShortcut(.cancelAction)

@@ -19,7 +19,7 @@ struct SiteLogoPicker: View {
                 VStack(alignment: .leading, spacing: 8) {
                     Button("Choose image…", action: choose).buttonStyle(BorderedButton())
                     if selection != nil {
-                        Button("Remove selection") { selection = nil; error = nil }.buttonStyle(.plain).font(Theme.body(13))
+                        Button("Remove selection") { selection = nil; error = nil }.buttonStyle(.hover).font(Theme.body(13))
                     }
                     Text("PNG, JPEG or GIF. Optional.").font(Theme.body(13)).foregroundColor(Theme.muted)
                 }
@@ -103,7 +103,7 @@ struct SiteSettingsView: View {
                         Text(item).font(Theme.tab).foregroundColor(section == item ? Theme.ink : Theme.muted)
                             .padding(.vertical, 10)
                             .overlay(alignment: .bottom) { Rectangle().fill(section == item ? Theme.rule : .clear).frame(height: 1) }
-                    }.buttonStyle(.plain).accessibilityAddTraits(section == item ? .isSelected : [])
+                    }.buttonStyle(.hover).accessibilityAddTraits(section == item ? .isSelected : [])
                 }
                 Spacer(minLength: 0)
             }
@@ -245,7 +245,7 @@ struct SiteSettingsView: View {
                                     } else { ensNotice = "Site address copied. Open app.ens.domains in your browser to continue." }
                                 } label: {
                                     Text("Copy site address and open ENS").font(Theme.formLabel).underline()
-                                }.buttonStyle(.plain)
+                                }.buttonStyle(.hover)
                                     .accessibilityLabel("Step 1: Copy site address and open ENS")
                                     .disabled(domain.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || original?.ipns.isEmpty != false)
                                 if domain.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {

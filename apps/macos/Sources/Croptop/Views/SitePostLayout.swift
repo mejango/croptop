@@ -73,7 +73,7 @@ struct SitePostViewPicker: View {
                         .frame(width: 28, height: 28)
                         .contentShape(Rectangle())
                 }
-                .buttonStyle(.plain)
+                .buttonStyle(.hover)
                 .help(mode.help)
                 .accessibilityLabel(mode.title)
                 .accessibilityAddTraits(selection == mode ? .isSelected : [])
