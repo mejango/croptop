@@ -5,8 +5,9 @@ import UniformTypeIdentifiers
 
 struct EditorView: View {
     @EnvironmentObject var model: AppModel
-    var siteID: String
+    @State var siteID: String
     var postID: String?
+    init(siteID: String, postID: String?) { _siteID = State(initialValue: siteID); self.postID = postID }
 
     @State private var title = ""
     @State private var content = ""
@@ -45,7 +46,7 @@ struct EditorView: View {
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 24) {
-                ScreenHead(title: isNew ? "New post" : "Edit post", subtitle: model.sites.first { $0.id == siteID }?.name) {
+                ScreenHead(title: isNew ? "New post" : "Edit post", subtitle: isNew ? nil : model.sites.first { $0.id == siteID }?.name) {
                     HStack(spacing: 16) {
                         HStack(spacing: 8) {
                             IconActionButton("Cancel", systemImage: "xmark") { model.screen = .site(siteID) }
@@ -56,6 +57,12 @@ struct EditorView: View {
                     }
                 }
                 VStack(alignment: .leading, spacing: 8) {
+                    if isNew && model.sites.count > 1 {
+                        Labeled(title: "Post to") {
+                            Picker("", selection: $siteID) { ForEach(model.sites) { s in Text(s.name).tag(s.id) } }
+                                .font(Theme.body(14)).labelsHidden().fixedSize()
+                        }
+                    }
                     Labeled(title: "Title") { TextField("Title (optional)", text: $title).field() }
                     HStack(spacing: 22) {
                         Toggle("Include in navigation", isOn: $inNav)
@@ -140,6 +147,28 @@ struct EditorView: View {
         }
         .sheet(isPresented: $largePreview) { LargePostPreview(title: title, content: content, attachments: previewAttachments) }
         .task { await loadPost(); if model.posts[siteID] == nil { await model.loadPosts(siteID) } }
+        .task(id: siteID) { if model.posts[siteID] == nil { await model.loadPosts(siteID) } }
+        .task(id: model.droppedFiles) { takeDroppedFiles() }
+    }
+
+    // Dropped media is attached and inlined at the top of the post; the first image is the hero.
+    func takeDroppedFiles() {
+        let files = model.droppedFiles
+        guard isNew, !files.isEmpty else { return }
+        model.droppedFiles = []
+        added += files
+        var inline: [String] = []
+        for u in files {
+            let name = u.lastPathComponent
+            let esc = name.replacingOccurrences(of: "\"", with: "&quot;")
+            switch QuickView.kind(name) {
+            case "image": inline.append("<img alt=\"\(esc)\" src=\"\(esc)\">"); if hero.isEmpty { hero = name }
+            case "video": inline.append("<video controls playsinline src=\"\(esc)\"></video>")
+            case "audio": inline.append("<audio controls src=\"\(esc)\"></audio>")
+            default: inline.append("<a href=\"\(esc)\">\(name)</a>")
+            }
+        }
+        content = inline.joined(separator: "\n") + "\n\n" + content
     }
 
     func loadPost() async {
@@ -178,6 +207,7 @@ struct EditorView: View {
                 f.close()
                 for name in removed { if let id = postID { try? await API.shared.deleteAttachment(site: siteID, post: id, name: name) } }
                 _ = try await API.shared.savePost(site: siteID, id: postID, form: f)
+                UserDefaults.standard.set(siteID, forKey: "quickSite")
                 await model.loadPosts(siteID)
                 model.screen = .site(siteID)
                 if publish { model.publish(siteID) } else { model.toast("Saved. Publish the site when you're ready.") }

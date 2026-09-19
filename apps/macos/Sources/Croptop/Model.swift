@@ -39,6 +39,7 @@ final class AppModel: ObservableObject {
     @Published var sheet: Sheet?
     @Published var toast: Toast?
     @Published var publishing: Set<String> = []
+    @Published var droppedFiles: [URL] = []          // handed to the next new-post editor
     @Published var updating = false
     @Published var collaborationOpen = false
 
@@ -192,7 +193,6 @@ final class AppModel: ObservableObject {
         Task { if let u = try? await api.siteURL(id), let url = URL(string: u) { NSWorkspace.shared.open(url) } }
     }
 
-    // Files from the Dock, Finder, a drop, or File > Post Files become one quick post.
     func prepareFirstLaunch() async {
         let setup = FirstLaunchSetup(preferences: preferences, scope: api.base.absoluteString,
             sites: { try await API.shared.sites() }, following: { try await API.shared.following() },
@@ -261,12 +261,13 @@ final class AppModel: ObservableObject {
         }
     }
 
+    // Files from the Dock, Finder, a drop, or File > Post Files open the post editor with them attached.
     func postFiles(_ urls: [URL]) {
         let media = urls.filter { !$0.hasDirectoryPath }
         guard !media.isEmpty else { return }
-        Task {
-            do { screen = .quick(try await api.uploadQuick(media)) } catch { show(error) }
-        }
+        guard let site = currentSiteID ?? preferences.string(forKey: "quickSite").flatMap({ id in sites.first { $0.id == id }?.id }) ?? sites.first?.id else { sheet = .newSite; return }
+        droppedFiles = media
+        screen = .editor(site: site, post: nil)
     }
 
     func update() {
