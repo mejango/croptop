@@ -109,6 +109,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         if await API.shared.ping() {
             await model.load()
             await model.prepareFirstLaunch()
+            // Open on the first site in the rail rather than an empty feed.
+            if model.screen == .feed, let first = model.following.first.map({ Screen.followingSite($0.ipns) }) ?? model.sites.first.map({ Screen.site($0.id) }) { model.screen = first }
             model.ready = true
             model.restoreCaptureShortcut()
             // CROPTOP_SCREEN=site:<id> | editor:<site>[:<post>] opens the app on a screen (for review).
