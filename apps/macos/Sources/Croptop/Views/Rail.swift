@@ -102,7 +102,6 @@ struct RailItem: View {
         }
         .buttonStyle(.plain)
         .focused($focused)
-        .modifier(RailFocusStyle())
         .accessibilityAddTraits(current ? .isSelected : [])
     }
 }
@@ -143,12 +142,6 @@ struct RailItemContent: View {
     }
 }
 
-private struct RailFocusStyle: ViewModifier {
-    @ViewBuilder func body(content: Content) -> some View {
-        if #available(macOS 14, *) { content.focusEffectDisabled() }
-        else { content }
-    }
-}
 
 private struct RailHeader: View {
     var body: some View {

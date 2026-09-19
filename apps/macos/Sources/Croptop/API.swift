@@ -156,7 +156,6 @@ struct GatewayChoice: Codable, Identifiable {
     var id: String { Key }
 }
 
-struct QuickGroup: Codable { var id: String; var files: [String] }
 
 struct APIError: LocalizedError {
     var message: String
@@ -231,7 +230,6 @@ final class API {
     }
     func posts(site: String) async throws -> [Post] { try await get("/v0/planets/my/\(site)/articles") }
     func post(site: String, id: String) async throws -> Post { try await get("/v0/planets/my/\(site)/articles/\(id)") }
-    func quick(_ id: String) async throws -> QuickGroup { try await get("/v0/croptop/quick/\(id)") }
     func collaboration(_ id: String) async throws -> CollaborationState {
         return try await get("/v0/croptop/sites/\(id)/collaboration")
     }
@@ -329,17 +327,6 @@ final class API {
     func deleteAttachment(site: String, post: String, name: String) async throws {
         _ = try await send("DELETE", "/v0/planets/my/\(site)/articles/\(post)/attachments/\(name.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? name)")
     }
-    func uploadQuick(_ files: [URL]) async throws -> String {
-        let f = Multipart()
-        for u in files { f.file("files", u) }
-        let d = try await send("POST", "/v0/croptop/quick", form: f)
-        let g = try decoder.decode(QuickGroup.self, from: d)
-        return g.id
-    }
-    func quickFile(_ id: String, _ name: String) -> URL {
-        url("/v0/croptop/quick/\(id)/\(name.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? name)")
-    }
-    func discardQuick(_ id: String) async { _ = try? await send("DELETE", "/v0/croptop/quick/\(id)") }
 
     // A file of one of my sites as the console serves it (attachments, covers).
     func siteFile(_ site: String, _ path: String) -> URL {

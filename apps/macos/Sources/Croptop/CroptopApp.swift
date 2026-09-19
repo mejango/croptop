@@ -18,8 +18,10 @@ struct CroptopApp: App {
                 .background(Theme.paper)
                 .foregroundColor(Theme.ink)
                 .preferredColorScheme(.light)   // the design is paper and ink; no dark mode yet
+                .modifier(NoFocusRing())        // fields draw their own focus outline; nothing else gets the system ring
         }
         .windowStyle(.hiddenTitleBar)
+        .handlesExternalEvents(matching: [])   // files opened from the Dock go to the delegate, not a new window
         .defaultSize(width: 1180, height: 800)
         .commands {
             CommandGroup(after: .appInfo) { CheckForUpdates(updater: delegate.model.updater) }
@@ -47,6 +49,12 @@ struct CroptopApp: App {
                 Button("Reload") { Task { await delegate.model.load() } }.keyboardShortcut("r")
             }
         }
+    }
+}
+
+private struct NoFocusRing: ViewModifier {
+    @ViewBuilder func body(content: Content) -> some View {
+        if #available(macOS 14, *) { content.focusEffectDisabled() } else { content }
     }
 }
 
@@ -103,7 +111,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             await model.prepareFirstLaunch()
             model.ready = true
             model.restoreCaptureShortcut()
-            // CROPTOP_SCREEN=site:<id> | editor:<site>[:<post>] | quick:<id> opens the app on a screen (for review).
+            // CROPTOP_SCREEN=site:<id> | editor:<site>[:<post>] opens the app on a screen (for review).
             if let want = ProcessInfo.processInfo.environment["CROPTOP_SCREEN"] {
                 let p = want.split(separator: ":").map(String.init)
                 switch p.first {
@@ -112,7 +120,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 case "settings" where p.count > 1: model.screen = .settings(p[1])
                 case "site" where p.count > 1: model.screen = .site(p[1])
                 case "editor" where p.count > 1: model.screen = .editor(site: p[1], post: p.count > 2 ? p[2] : nil)
-                case "quick" where p.count > 1: model.screen = .quick(p[1])
                 default: break
                 }
             }

@@ -9,13 +9,11 @@ enum Screen: Hashable {
     case site(String)
     case settings(String)
     case editor(site: String, post: String?)
-    case quick(String)
 }
 
 enum Sheet: Identifiable {
     case newSite, follow, curate
-    case capture(String)
-    var id: Int { switch self { case .newSite: return 0; case .follow: return 1; case .curate: return 2; case .capture: return 3 } }
+    var id: Int { switch self { case .newSite: return 0; case .follow: return 1; case .curate: return 2 } }
 }
 
 struct Toast: Equatable { var text: String; var error = false }
@@ -238,8 +236,8 @@ final class AppModel: ObservableObject {
         NSApp.hide(nil)
         Task {
             defer { capturing = false }
+            // The file stays until the editor has uploaded it on save; macOS sweeps the temp dir.
             let directory = FileManager.default.temporaryDirectory.appendingPathComponent("croptop-capture-" + UUID().uuidString, isDirectory: true)
-            defer { try? FileManager.default.removeItem(at: directory) }
             do {
                 try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
                 let format = DateFormatter(); format.dateFormat = "yyyy-MM-dd 'at' HH.mm.ss"
@@ -249,9 +247,7 @@ final class AppModel: ObservableObject {
                     if wasActive { NSApp.activate(ignoringOtherApps: true) }
                     return
                 }
-                let group = try await api.uploadQuick([file])
-                // The capture is now staged by the engine; its temporary input can be removed.
-                sheet = .capture(group)
+                postFiles([file])
                 NSApp.activate(ignoringOtherApps: true)
                 NSApp.windows.first(where: { $0.canBecomeMain })?.makeKeyAndOrderFront(nil)
             } catch {

@@ -36,7 +36,6 @@ struct RootView: View {
             case .newSite: NewSiteSheet()
             case .follow: FollowSheet()
             case .curate: CurateSheet()
-            case .capture(let id): QuickView(groupID: id, presentedAsSheet: true).frame(width: 720, height: 720)
             }
         }
     }
@@ -58,7 +57,6 @@ struct RootView: View {
             case .site(let id): SiteView(siteID: id).id(id)
             case .settings(let id): SiteSettingsView(siteID: id).id(id)
             case .editor(let site, let post): EditorView(siteID: site, postID: post).id(site + (post ?? "new"))
-            case .quick(let id): QuickView(groupID: id).id(id)
             }
         }
     }

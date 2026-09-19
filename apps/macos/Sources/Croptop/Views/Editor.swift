@@ -161,7 +161,7 @@ struct EditorView: View {
         for u in files {
             let name = u.lastPathComponent
             let esc = name.replacingOccurrences(of: "\"", with: "&quot;")
-            switch QuickView.kind(name) {
+            switch mediaKind(name) {
             case "image": inline.append("<img alt=\"\(esc)\" src=\"\(esc)\">"); if hero.isEmpty { hero = name }
             case "video": inline.append("<video controls playsinline src=\"\(esc)\"></video>")
             case "audio": inline.append("<audio controls src=\"\(esc)\"></audio>")
@@ -253,5 +253,14 @@ struct AttachmentRow: View {
             Spacer(minLength: 0)
         }
         .sheet(isPresented: $showingPreview) { AttachmentPreview(attachment: PreviewAttachment(name: name, url: url)) }
+    }
+}
+
+func mediaKind(_ name: String) -> String {
+    switch (name as NSString).pathExtension.lowercased() {
+    case "png", "jpg", "jpeg", "gif", "webp", "avif", "heic": return "image"
+    case "mp4", "mov", "webm", "m4v": return "video"
+    case "mp3", "m4a", "wav", "ogg", "aac", "flac": return "audio"
+    default: return "file"
     }
 }

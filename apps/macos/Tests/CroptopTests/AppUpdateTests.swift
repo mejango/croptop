@@ -53,7 +53,7 @@ final class AppUpdateTests: XCTestCase {
 
     func testEditingAndPublishingBlockRelaunch() async {
         await MainActor.run {
-            for screen: Screen in [.editor(site: "a", post: nil), .quick("a"), .settings("a")] {
+            for screen: Screen in [.editor(site: "a", post: nil), .settings("a")] {
                 XCTAssertTrue(AppUpdater.blocksRelaunch(screen: screen, sheet: nil, publishing: []))
             }
             XCTAssertTrue(AppUpdater.blocksRelaunch(screen: .feed, sheet: .newSite, publishing: []))
