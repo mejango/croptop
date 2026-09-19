@@ -14,6 +14,7 @@ if [ -z "$MACOS_SIGN_IDENTITY" ]; then
 fi
 export MACOS_SIGN_IDENTITY NOTARY_PROFILE
 WORK=$(mktemp -d)
+trap 'rm -r "$WORK"' EXIT   # each run is ~600 MB; 77 of them once filled the disk
 echo "downloading darwin builds for v$VER"
 gh release download "v$VER" --repo mejango/croptop --pattern "croptop_${VER}_darwin_*.tar.gz" --dir "$WORK/in"
 "$HERE/macos.sh" "$VER" "$WORK/in" "$WORK/out"
