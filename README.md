@@ -196,6 +196,11 @@ The console speaks Planet's REST API at `/v0` (see Planet's
 `Technotes/API.md`), so Planet's `pn` CLI and other clients work. The
 console's own routes live under `/v0/croptop/`.
 
+Selling a site's posts into a Juicebox project (pointing its collection
+addresses at a project's NFT hook and opening posting) is a recipe in
+[docs/selling-posts.md](docs/selling-posts.md); shop creation and the wallet
+flows are in [docs/shop-creation.md](docs/shop-creation.md).
+
 ## Gateways
 
 Sites are reachable through any gateway that resolves ENS and IPNS names:
