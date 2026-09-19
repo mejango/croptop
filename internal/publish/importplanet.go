@@ -122,25 +122,12 @@ func copyFile(src, dst string) error {
 // planet.json.
 // ponytail: newer-mtime wins per post; no three-way merge, no deletions.
 func mergeLibraryPosts(st *store.Store, id, myDir, pubDir string) (int, error) {
-	entries, err := os.ReadDir(filepath.Join(myDir, "Articles"))
-	if err != nil {
-		return 0, nil
-	}
 	n := 0
-	for _, e := range entries {
-		if e.IsDir() || !strings.HasSuffix(e.Name(), ".json") {
-			continue
-		}
-		src := filepath.Join(myDir, "Articles", e.Name())
-		dst := filepath.Join(st.ArticlesDir(id), e.Name())
-		si, _ := os.Stat(src)
-		if di, err := os.Stat(dst); err == nil && !si.ModTime().After(di.ModTime()) {
-			continue
-		}
-		if err := copyFile(src, dst); err != nil {
+	for _, name := range newerLibraryPosts(st, id, myDir) {
+		if err := copyFile(filepath.Join(myDir, "Articles", name), filepath.Join(st.ArticlesDir(id), name)); err != nil {
 			return n, err
 		}
-		pid := strings.TrimSuffix(e.Name(), ".json")
+		pid := strings.TrimSuffix(name, ".json")
 		if p, err := st.Post(id, pid); err == nil {
 			for _, name := range append([]string{"_cover.png", "_videoThumbnail.png"}, p.Attachments...) {
 				from := filepath.Join(pubDir, pid, name)
@@ -158,4 +145,67 @@ func mergeLibraryPosts(st *store.Store, id, myDir, pubDir string) (int, error) {
 		n++
 	}
 	return n, nil
+}
+
+// newerLibraryPosts lists the article files in a Planet library that this
+// store lacks or that the Mac app wrote after our copy.
+func newerLibraryPosts(st *store.Store, id, myDir string) []string {
+	entries, err := os.ReadDir(filepath.Join(myDir, "Articles"))
+	if err != nil {
+		return nil
+	}
+	var names []string
+	for _, e := range entries {
+		if e.IsDir() || !strings.HasSuffix(e.Name(), ".json") {
+			continue
+		}
+		si, _ := os.Stat(filepath.Join(myDir, "Articles", e.Name()))
+		if di, err := os.Stat(filepath.Join(st.ArticlesDir(id), e.Name())); err == nil && !si.ModTime().After(di.ModTime()) {
+			continue
+		}
+		names = append(names, e.Name())
+	}
+	return names
+}
+
+// Legacy is a site the old Croptop Mac app still holds alongside this node.
+// Two apps publishing one IPNS name overwrite each other, so the console
+// offers to import and retire it.
+type Legacy struct {
+	ID    string `json:"id"`
+	Name  string `json:"name"`
+	Newer int    `json:"newer"` // posts the old app has that this node lacks or that are newer here
+}
+
+// LegacySites lists the sites of this store that the Planet container at
+// container also has, unless they were already retired.
+func LegacySites(st *store.Store, container string) []Legacy {
+	if container == "" {
+		return nil
+	}
+	sites, _ := st.Sites()
+	var out []Legacy
+	for _, site := range sites {
+		myDir := filepath.Join(container, "Documents", "Planet", "My", site.ID)
+		if _, err := os.Stat(filepath.Join(myDir, "planet.json")); err != nil {
+			continue
+		}
+		out = append(out, Legacy{ID: site.ID, Name: site.Name, Newer: len(newerLibraryPosts(st, site.ID, myDir))})
+	}
+	return out
+}
+
+// RetireLegacy merges the old app's newer posts for one site into this store,
+// then renames the site's folder in the Planet container so the old app stops
+// loading and republishing it. Renaming back undoes it.
+func RetireLegacy(st *store.Store, container, id string) (int, error) {
+	myDir := filepath.Join(container, "Documents", "Planet", "My", id)
+	if _, err := os.Stat(filepath.Join(myDir, "planet.json")); err != nil {
+		return 0, fmt.Errorf("the old Croptop app does not have %s", id)
+	}
+	n, err := mergeLibraryPosts(st, id, myDir, filepath.Join(container, "Documents", "Planet", "Public", id))
+	if err != nil {
+		return n, err
+	}
+	return n, os.Rename(myDir, myDir+".retired")
 }

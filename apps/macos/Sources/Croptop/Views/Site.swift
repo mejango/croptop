@@ -173,6 +173,9 @@ struct SiteView: View {
                         headerIdentity.frame(maxWidth: .infinity, alignment: .leading)
                         headerActions
                     }.padding(.bottom, 22)
+                    if let legacy = model.status?.legacy?.first(where: { $0.id == siteID }) {
+                        LegacyNotice(legacy: legacy).padding(.bottom, 22)
+                    }
                     if model.posts[siteID]?.isEmpty == true {
                         CaptureShortcutPrompt().padding(.bottom, 28)
                     }
@@ -429,3 +432,38 @@ struct PostMediaRow<Details: View>: View {
     }
 }
 
+
+/// The old Planet-based Croptop app still publishes this site. Two apps on one
+/// IPNS name overwrite each other, so offer the one-way move here.
+struct LegacyNotice: View {
+    @EnvironmentObject var model: AppModel
+    var legacy: Status.Legacy
+    @State private var working = false
+
+    private var text: String {
+        var t = "The old Croptop app also publishes this site"
+        if legacy.newer > 0 { t += " and has \(legacy.newer) \(legacy.newer == 1 ? "post that isn’t" : "posts that aren’t") here" }
+        return t + ". Two apps on one site overwrite each other. Quit it, then import its posts and retire it there."
+    }
+
+    var body: some View {
+        HStack(alignment: .center, spacing: 16) {
+            Text(text).font(Theme.body(14)).fixedSize(horizontal: false, vertical: true)
+            Spacer(minLength: 0)
+            Button(working ? "Importing…" : "Import and retire") {
+                working = true
+                Task {
+                    do {
+                        let merged = try await API.shared.retireLegacy(legacy.id)
+                        model.toast("\(legacy.name) is now published from here only (\(merged) \(merged == 1 ? "post" : "posts") imported).")
+                        await model.load(); await model.loadPosts(legacy.id)
+                    } catch { model.toast(error.localizedDescription, error: true) }
+                    working = false
+                }
+            }.buttonStyle(BorderedButton(kind: .hot)).disabled(working)
+        }
+        .padding(14)
+        .background(Theme.hotWash)
+        .overlay(Rectangle().stroke(Theme.ink, lineWidth: Theme.border))
+    }
+}
