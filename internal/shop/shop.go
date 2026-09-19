@@ -35,14 +35,14 @@ type Network struct {
 }
 
 var Networks = []Network{
-	{1, "Ethereum", "ethereumMainnet", "https://ethereum-rpc.publicnode.com", false},
-	{10, "Optimism", "optimismMainnet", "https://optimism-rpc.publicnode.com", false},
-	{42161, "Arbitrum", "arbitrumMainnet", "https://arbitrum-one-rpc.publicnode.com", false},
-	{8453, "Base", "baseMainnet", "https://base-rpc.publicnode.com", false},
-	{11155111, "Ethereum Sepolia", "ethereumSepolia", "https://ethereum-sepolia-rpc.publicnode.com", true},
-	{11155420, "Optimism Sepolia", "optimismSepolia", "https://sepolia.optimism.io", true},
-	{421614, "Arbitrum Sepolia", "arbitrumSepolia", "https://arbitrum-sepolia.gateway.tenderly.co", true},
-	{84532, "Base Sepolia", "baseSepolia", "https://sepolia.base.org", true},
+	{1, "Ethereum", "ethereumMainnet", "https://juicebox.center/v1/rpc/1", false},
+	{10, "Optimism", "optimismMainnet", "https://juicebox.center/v1/rpc/10", false},
+	{42161, "Arbitrum", "arbitrumMainnet", "https://juicebox.center/v1/rpc/42161", false},
+	{8453, "Base", "baseMainnet", "https://juicebox.center/v1/rpc/8453", false},
+	{11155111, "Ethereum Sepolia", "ethereumSepolia", "https://juicebox.center/v1/rpc/11155111", true},
+	{11155420, "Optimism Sepolia", "optimismSepolia", "https://juicebox.center/v1/rpc/11155420", true},
+	{421614, "Arbitrum Sepolia", "arbitrumSepolia", "https://juicebox.center/v1/rpc/421614", true},
+	{84532, "Base Sepolia", "baseSepolia", "https://juicebox.center/v1/rpc/84532", true},
 }
 
 func NetworkFor(id int) (Network, bool) {

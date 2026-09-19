@@ -27,10 +27,10 @@ under `~/Documents/jb/v6/evm/deploy-all-v6/script/*.s.sol` carry
 
 Artifacts first: `~/Documents/jb/v6/evm/deploy-all-v6/deployments/<chain>/JB721TiersHook__Project<NAME>.json`
 has `address`. For anything not in the artifacts, read it on chain (Foundry's
-`cast` is installed, publicnode RPCs are the ones in `assets/scripts/chains.js`):
+`cast` is installed; RPCs are `https://juicebox.center/v1/rpc/<chainId>`, the table in `assets/scripts/chains.js`):
 
 ```sh
-RPC=https://ethereum-rpc.publicnode.com
+RPC=https://juicebox.center/v1/rpc/1
 REVOWNER=0x2ba4705ad0332cdfb299b452068438bcba3faaf3
 cast call $REVOWNER 'tiered721HookOf(uint256)(address)' <projectId> --rpc-url $RPC   # revnets
 # Ordinary projects: JBRulesets.currentOf(projectId).metadata, data hook = (metadata >> 82) & (2^160 - 1)
@@ -80,7 +80,9 @@ curl -X POST -H 'Content-Type: application/json' -d '{}' http://127.0.0.1:8086/v
 
 While there, check the `<chain>RPC` keys: old sites carry llamarpc URLs, which
 fail CORS preflight in browsers, so the header shows `Balance: $0`, `Owners: 0`
-and posts never load. The template's defaults in `template.json` are publicnode.
+and posts never load. The template's defaults in `template.json` are
+`https://juicebox.center/v1/rpc/<chainId>` (CORS `*`, all eight networks; its
+`eth_getLogs` wants hex block bounds and at most 50,000 blocks per call).
 Only `ethereumMainnetCollectionAddress` has a default; set the other chains
 explicitly when a site should sell on all of them. The `collectionCategory`
 key is ignored by the built-in template (it reads rules on chain).
@@ -108,6 +110,5 @@ wallet has to sign.
 ## Worked example (2026-09-19)
 
 CROPTOP (`DFF00C4E-05B8-4DD3-8CF4-95DF628F4C95`, https://crop.top) was pointed
-at CPN on all eight networks, its RPCs moved to publicnode, and published at
-sequence 2197. Posting is still closed until the CPN operator runs Set up
+at CPN on all eight networks, its RPCs moved to juicebox.center, and published. Posting is still closed until the CPN operator runs Set up
 posting for project 2.
