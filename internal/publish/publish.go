@@ -7,6 +7,7 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/mejango/croptop/internal/ipfs"
@@ -30,6 +31,11 @@ type Publisher struct {
 	// of in the background; the command line sets it so the process does
 	// not exit with the upload half done.
 	Wait bool
+	// mu serializes Publish and Keepalive: both read the site, spend tens of
+	// seconds on the network, then save it. Interleaved, the keepalive saved
+	// a stale copy over a fresh publish and flagged the site as published
+	// elsewhere (CROPTOP, 2026-09-19).
+	mu sync.Mutex
 }
 
 func (p *Publisher) log(format string, a ...any) {
@@ -45,6 +51,8 @@ type Result struct {
 
 // Publish renders, adds, and publishes one site.
 func (p *Publisher) Publish(ctx context.Context, siteID string, force bool) (Result, error) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
 	site, err := p.Store.Site(siteID)
 	if err != nil {
 		return Result{}, err
@@ -117,6 +125,8 @@ func (p *Publisher) Publish(ctx context.Context, siteID string, force bool) (Res
 // Keepalive republishes the current CID so the record does not expire, but
 // only while this machine still owns the name.
 func (p *Publisher) Keepalive(ctx context.Context, siteID string) error {
+	p.mu.Lock()
+	defer p.mu.Unlock()
 	site, err := p.Store.Site(siteID)
 	if err != nil {
 		return err
