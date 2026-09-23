@@ -125,7 +125,7 @@ struct RailItemContent: View {
                 }
                 if publishing {
                     HStack(spacing: 5) {
-                        ProgressView().controlSize(.mini).accessibilityHidden(true)
+                        LoadingTicker().frame(height: 16).accessibilityHidden(true)
                         Text("Publishing…").font(Theme.body(13)).foregroundColor(Theme.hot).lineLimit(1)
                     }
                     .accessibilityElement(children: .ignore)
