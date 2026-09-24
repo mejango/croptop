@@ -1,7 +1,9 @@
 package publish
 
 import (
+	"errors"
 	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -190,6 +192,9 @@ func LegacySites(st *store.Store, container string) []Legacy {
 		if _, err := os.Stat(filepath.Join(myDir, "planet.json")); err != nil {
 			continue
 		}
+		if _, err := os.Stat(retiredMarker(st, site.ID)); err == nil {
+			continue
+		}
 		out = append(out, Legacy{ID: site.ID, Name: site.Name, Newer: len(newerLibraryPosts(st, site.ID, myDir))})
 	}
 	return out
@@ -207,5 +212,21 @@ func RetireLegacy(st *store.Store, container, id string) (int, error) {
 	if err != nil {
 		return n, err
 	}
-	return n, os.Rename(myDir, myDir+".retired")
+	if _, err := os.Stat(retiredMarker(st, id)); err == nil {
+		return n, fmt.Errorf("%s is already retired", id)
+	}
+	err = os.Rename(myDir, myDir+".retired")
+	if !errors.Is(err, fs.ErrPermission) {
+		return n, err
+	}
+	// macOS 14+ keeps other apps out of a sandbox container, so remember the
+	// retirement here. The old app would still load the site if run again.
+	if err := os.MkdirAll(filepath.Dir(retiredMarker(st, id)), 0o755); err != nil {
+		return n, err
+	}
+	return n, os.WriteFile(retiredMarker(st, id), nil, 0o644)
+}
+
+func retiredMarker(st *store.Store, id string) string {
+	return filepath.Join(st.Root, "planet-retired", id)
 }

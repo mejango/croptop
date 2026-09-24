@@ -109,4 +109,19 @@ func TestLegacySitesAndRetire(t *testing.T) {
 	if _, err := RetireLegacy(st, container, fixtureID); err == nil {
 		t.Fatal("retiring twice should fail")
 	}
+
+	// macOS refuses to rename inside another app's container: retire in our store instead.
+	os.Rename(my+".retired", my)
+	parent := filepath.Dir(my)
+	os.Chmod(parent, 0o555)
+	defer os.Chmod(parent, 0o755)
+	if _, err := RetireLegacy(st, container, fixtureID); err != nil {
+		t.Fatalf("retire without rename permission: %v", err)
+	}
+	if LegacySites(st, container) != nil {
+		t.Fatal("retired site still reported when the container is read-only")
+	}
+	if _, err := RetireLegacy(st, container, fixtureID); err == nil {
+		t.Fatal("retiring twice should fail when the container is read-only")
+	}
 }
