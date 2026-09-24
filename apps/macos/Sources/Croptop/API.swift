@@ -138,13 +138,10 @@ struct Following: Codable, Identifiable, Hashable {
 
 struct Status: Codable {
     struct IPFS: Codable { var running: Bool; var peers: Int }
-    /// A site the old Planet-based Croptop app still holds; two apps publishing one name overwrite each other.
-    struct Legacy: Codable, Identifiable { var id: String; var name: String; var newer: Int }
     var version: String
     var latest: String?
     var update: Bool
     var ipfs: IPFS
-    var legacy: [Legacy]?
 }
 
 struct TemplateSetting: Codable {
@@ -222,10 +219,6 @@ final class API {
     }
 
     func status() async throws -> Status { try await get("/v0/croptop/status") }
-    func retireLegacy(_ id: String) async throws -> Int {
-        struct R: Codable { var merged: Int }
-        return try decoder.decode(R.self, from: try await send("POST", "/v0/croptop/legacy/\(id)/retire", json: [:], timeout: 300)).merged
-    }
     func sites() async throws -> [Site] { try await get("/v0/planets/my") }
     func following() async throws -> [Following] { try await get("/v0/croptop/following") }
     func feed(limit: Int = 60, source: String = "following", ipns: String? = nil, offset: Int = 0) async throws -> [FeedItem] {

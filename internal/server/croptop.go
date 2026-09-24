@@ -31,7 +31,6 @@ func (s *Server) routesCroptop(mux *http.ServeMux) {
 			"latest":    latest,
 			"update":    update.Newer(s.Version, latest),
 			"appBundle": appBundle(),
-			"legacy":    publish.LegacySites(s.Store, s.planetContainer()),
 			"dataDir":   s.DataDir,
 			"listen":    s.Cfg.Listen,
 			"passcode":  s.Cfg.HasPasscode(),
@@ -40,26 +39,6 @@ func (s *Server) routesCroptop(mux *http.ServeMux) {
 				"version": info.Version, "lastError": s.Node.LastError(),
 			},
 		})
-	})
-	mux.HandleFunc("POST /v0/croptop/legacy/{id}/retire", func(w http.ResponseWriter, r *http.Request) {
-		site, ok := s.site(w, r)
-		if !ok {
-			return
-		}
-		s.mu.Lock()
-		defer s.mu.Unlock()
-		n, err := publish.RetireLegacy(s.Store, s.planetContainer(), site.ID)
-		if err != nil {
-			writeErr(w, 500, err)
-			return
-		}
-		if n > 0 {
-			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
-			defer cancel()
-			s.Pub.Render.Render(ctx, site.ID)
-		}
-		s.log("retired %s from the old Croptop app (%d posts merged)", site.Name, n)
-		writeJSON(w, 200, map[string]int{"merged": n})
 	})
 	mux.HandleFunc("POST /v0/croptop/update", func(w http.ResponseWriter, r *http.Request) {
 		rel, err := update.Latest(r.Context())
@@ -298,13 +277,6 @@ func (s *Server) routesCroptop(mux *http.ServeMux) {
 }
 
 // latestRelease is the newest release tag, checked at most hourly.
-func (s *Server) planetContainer() string {
-	if s.PlanetContainer != "" {
-		return s.PlanetContainer
-	}
-	return publish.DefaultPlanetContainer()
-}
-
 // appBundle reports whether this node runs inside a macOS .app, where the app,
 // not the node, applies updates.
 func appBundle() bool {

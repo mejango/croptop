@@ -72,19 +72,6 @@
         } }, "Update")));
       }
     }
-    if (state.status.legacy?.length) {
-      // The old Planet-based Croptop app still holds these sites; two publishers on one name overwrite each other.
-      const retire = (l) => h("a", { href: "#", onclick: async (e) => {
-        e.preventDefault(); e.target.textContent = "importing…";
-        try {
-          const r = await api("POST", `/v0/croptop/legacy/${l.id}/retire`, {});
-          toast(`${l.name} is now published from here only (${r.merged} post${r.merged === 1 ? "" : "s"} imported).`);
-          await loadStatus(); await loadSites(); route();
-        } catch (err) { toast(err.message, true); e.target.textContent = "import and retire"; }
-      } }, "import and retire");
-      n.append(h("div", { class: "update" }, h("b", {}, "The old Croptop app"), " also publishes these sites. Two apps on one site overwrite each other. Quit it, then:",
-        ...state.status.legacy.map((l) => h("div", {}, l.name, l.newer ? ` (${l.newer} post${l.newer === 1 ? "" : "s"} not here)` : "", " — ", retire(l)))));
-    }
     n.append(h("div", { class: "quit" }, h("a", { href: "#", onclick: async (e) => {
       e.preventDefault();
       if (!confirm("Quit Croptop? Your sites stay online on IPFS and on their host; publishing needs the console.")) return;

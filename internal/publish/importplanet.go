@@ -1,9 +1,7 @@
 package publish
 
 import (
-	"errors"
 	"fmt"
-	"io/fs"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -168,65 +166,4 @@ func newerLibraryPosts(st *store.Store, id, myDir string) []string {
 		names = append(names, e.Name())
 	}
 	return names
-}
-
-// Legacy is a site the old Croptop Mac app still holds alongside this node.
-// Two apps publishing one IPNS name overwrite each other, so the console
-// offers to import and retire it.
-type Legacy struct {
-	ID    string `json:"id"`
-	Name  string `json:"name"`
-	Newer int    `json:"newer"` // posts the old app has that this node lacks or that are newer here
-}
-
-// LegacySites lists the sites of this store that the Planet container at
-// container also has, unless they were already retired.
-func LegacySites(st *store.Store, container string) []Legacy {
-	if container == "" {
-		return nil
-	}
-	sites, _ := st.Sites()
-	var out []Legacy
-	for _, site := range sites {
-		myDir := filepath.Join(container, "Documents", "Planet", "My", site.ID)
-		if _, err := os.Stat(filepath.Join(myDir, "planet.json")); err != nil {
-			continue
-		}
-		if _, err := os.Stat(retiredMarker(st, site.ID)); err == nil {
-			continue
-		}
-		out = append(out, Legacy{ID: site.ID, Name: site.Name, Newer: len(newerLibraryPosts(st, site.ID, myDir))})
-	}
-	return out
-}
-
-// RetireLegacy merges the old app's newer posts for one site into this store,
-// then renames the site's folder in the Planet container so the old app stops
-// loading and republishing it. Renaming back undoes it.
-func RetireLegacy(st *store.Store, container, id string) (int, error) {
-	myDir := filepath.Join(container, "Documents", "Planet", "My", id)
-	if _, err := os.Stat(filepath.Join(myDir, "planet.json")); err != nil {
-		return 0, fmt.Errorf("the old Croptop app does not have %s", id)
-	}
-	n, err := mergeLibraryPosts(st, id, myDir, filepath.Join(container, "Documents", "Planet", "Public", id))
-	if err != nil {
-		return n, err
-	}
-	if _, err := os.Stat(retiredMarker(st, id)); err == nil {
-		return n, fmt.Errorf("%s is already retired", id)
-	}
-	err = os.Rename(myDir, myDir+".retired")
-	if !errors.Is(err, fs.ErrPermission) {
-		return n, err
-	}
-	// macOS 14+ keeps other apps out of a sandbox container, so remember the
-	// retirement here. The old app would still load the site if run again.
-	if err := os.MkdirAll(filepath.Dir(retiredMarker(st, id)), 0o755); err != nil {
-		return n, err
-	}
-	return n, os.WriteFile(retiredMarker(st, id), nil, 0o644)
-}
-
-func retiredMarker(st *store.Store, id string) string {
-	return filepath.Join(st.Root, "planet-retired", id)
 }
