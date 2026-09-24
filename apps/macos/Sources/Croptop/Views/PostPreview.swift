@@ -64,7 +64,7 @@ enum PreviewDocument {
         let remoteSources = allowRemoteMedia ? " http: https:" : ""
         return """
         <!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
-        <meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src croptop-preview: data:\(remoteSources); media-src croptop-preview:\(remoteSources); font-src data:; style-src 'unsafe-inline'; base-uri croptop-preview:; form-action 'none'">
+        <meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src croptop-preview: data:\(remoteSources); media-src croptop-preview: data:\(remoteSources); font-src data:; style-src 'unsafe-inline'; base-uri croptop-preview:; form-action 'none'">
         <style>
         \(AppFonts.previewFontFaces)
         :root {color-scheme:light} * {box-sizing:border-box} body {margin:0;padding:24px;color:#171717;background:white;font:17px/1.6 'Simplon',-apple-system,Helvetica,Arial,sans-serif;overflow-wrap:anywhere}

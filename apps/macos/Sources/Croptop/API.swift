@@ -56,6 +56,8 @@ struct Post: Codable, Identifiable, Hashable {
     var audioFilename: String?
     var pinned: Double?
     var isIncludedInNavigation: Bool?
+    var navigationWeight: Int?
+    var externalLink: String?
     var summary: String?
     var modified: Double?
     var originalSiteName: String?

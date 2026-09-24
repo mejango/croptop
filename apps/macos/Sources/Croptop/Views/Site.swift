@@ -17,6 +17,10 @@ struct SiteView: View {
 
     var site: Site? { model.sites.first { $0.id == siteID } }
     var posts: [Post] { model.posts[siteID] ?? [] }
+    private var navigation: [Post] {
+        posts.filter { $0.isIncludedInNavigation == true }.enumerated()
+            .sorted { ($0.element.navigationWeight ?? 1, $0.offset) < ($1.element.navigationWeight ?? 1, $1.offset) }.map(\.element)
+    }
     var allTags: [String] { Array(Set(posts.flatMap { $0.tagList })).sorted() }
     var shown: [Post] { tags.isEmpty ? posts : posts.filter { tags.isSubset(of: Set($0.tagList)) } }
     var unpublished: Bool {
@@ -34,6 +38,17 @@ struct SiteView: View {
                 if let about = site?.about, !about.isEmpty {
                     Text(about).font(Theme.body()).foregroundColor(Theme.muted)
                         .fixedSize(horizontal: false, vertical: true)
+                }
+                if !navigation.isEmpty {
+                    // The site's navigation, as its header shows it: weight order, external links open in the browser.
+                    HStack(spacing: 16) {
+                        ForEach(navigation) { post in
+                            Button(post.title) {
+                                if let link = post.externalLink.flatMap(URL.init(string:)), !link.absoluteString.isEmpty { NSWorkspace.shared.open(link) }
+                                else { model.screen = .editor(site: siteID, post: post.id) }
+                            }.buttonStyle(.hover).font(Theme.heading(15))
+                        }
+                    }
                 }
                 if site?.isCollaborative == true {
                     Button { showingContributors = true } label: {

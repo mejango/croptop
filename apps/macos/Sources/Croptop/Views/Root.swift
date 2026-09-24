@@ -40,6 +40,14 @@ struct RootView: View {
         }
     }
 
+    private var gridSite: String? {
+        switch model.screen {
+        case .site(let id), .editor(let id, _): id
+        default: nil
+        }
+    }
+    private var editing: Bool { if case .editor = model.screen { true } else { false } }
+
     @ViewBuilder var content: some View {
         if let f = model.fatal {
             VStack(spacing: 12) {
@@ -50,13 +58,21 @@ struct RootView: View {
             LoadingTicker(accessibilityLabel: "Starting your node")
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
         } else {
-            switch model.screen {
-            case .feed: FeedView(scope: .following).id("following-feed")
-            case .ownedFeed: FeedView(scope: .owned).id("owned-feed")
-            case .followingSite(let ipns): FeedView(scope: .site(ipns)).id("following:" + ipns)
-            case .site(let id): SiteView(siteID: id).id(id)
-            case .settings(let id): SiteSettingsView(siteID: id).id(id)
-            case .editor(let site, let post): EditorView(siteID: site, postID: post).id(site + (post ?? "new"))
+            ZStack {
+                // The site stays alive under its editor: its tiles are web views, and
+                // rebuilding the grid on close would reload every one of them.
+                if let id = gridSite {
+                    SiteView(siteID: id).id(id)
+                        .opacity(editing ? 0 : 1).allowsHitTesting(!editing).accessibilityHidden(editing)
+                }
+                switch model.screen {
+                case .feed: FeedView(scope: .following).id("following-feed")
+                case .ownedFeed: FeedView(scope: .owned).id("owned-feed")
+                case .followingSite(let ipns): FeedView(scope: .site(ipns)).id("following:" + ipns)
+                case .site: EmptyView()
+                case .settings(let id): SiteSettingsView(siteID: id).id(id)
+                case .editor(let site, let post): EditorView(siteID: site, postID: post).id(site + (post ?? "new"))
+                }
             }
         }
     }
