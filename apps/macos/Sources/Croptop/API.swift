@@ -142,6 +142,8 @@ struct Status: Codable {
     var latest: String?
     var update: Bool
     var ipfs: IPFS
+    /// The old Planet-based Croptop app is installed; it may still publish some of these sites.
+    var legacyApp: Bool?
 }
 
 struct TemplateSetting: Codable {
@@ -219,6 +221,11 @@ final class API {
     }
 
     func status() async throws -> Status { try await get("/v0/croptop/status") }
+    func retireLegacy() async throws -> (sites: Int, merged: Int) {
+        struct R: Codable { var sites: Int; var merged: Int }
+        let r = try decoder.decode(R.self, from: try await send("POST", "/v0/croptop/legacy/retire", json: [:], timeout: 300))
+        return (r.sites, r.merged)
+    }
     func sites() async throws -> [Site] { try await get("/v0/planets/my") }
     func following() async throws -> [Following] { try await get("/v0/croptop/following") }
     func feed(limit: Int = 60, source: String = "following", ipns: String? = nil, offset: Int = 0) async throws -> [FeedItem] {

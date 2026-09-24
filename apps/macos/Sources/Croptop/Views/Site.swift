@@ -173,6 +173,9 @@ struct SiteView: View {
                         headerIdentity.frame(maxWidth: .infinity, alignment: .leading)
                         headerActions
                     }.padding(.bottom, 22)
+                    if model.status?.legacyApp == true {
+                        LegacyNotice().padding(.bottom, 22)
+                    }
                     if model.posts[siteID]?.isEmpty == true {
                         CaptureShortcutPrompt().padding(.bottom, 28)
                     }
@@ -429,4 +432,32 @@ struct PostMediaRow<Details: View>: View {
     }
 }
 
+/// The old Planet-based Croptop app is still installed. Two apps on one IPNS
+/// name overwrite each other, so offer the one-way move. Its data is read only
+/// on this click, where macOS may ask about access to other apps' data.
+struct LegacyNotice: View {
+    @EnvironmentObject var model: AppModel
+    @State private var working = false
 
+    var body: some View {
+        HStack(alignment: .center, spacing: 16) {
+            Text("The old Croptop app is still installed. If it publishes any of these sites, the two apps overwrite each other. Quit it, then import its posts and retire it.")
+                .font(Theme.body(14)).fixedSize(horizontal: false, vertical: true)
+            Spacer(minLength: 0)
+            Button(working ? "Importing…" : "Import and retire") {
+                working = true
+                Task {
+                    do {
+                        let r = try await API.shared.retireLegacy()
+                        model.toast("Retired the old app from \(r.sites) \(r.sites == 1 ? "site" : "sites") (\(r.merged) \(r.merged == 1 ? "post" : "posts") imported).")
+                        await model.load()
+                    } catch { model.toast(error.localizedDescription, error: true) }
+                    working = false
+                }
+            }.buttonStyle(BorderedButton(kind: .hot)).disabled(working)
+        }
+        .padding(14)
+        .background(Theme.hotWash)
+        .overlay(Rectangle().stroke(Theme.ink, lineWidth: Theme.border))
+    }
+}

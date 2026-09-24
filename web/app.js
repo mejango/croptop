@@ -72,6 +72,18 @@
         } }, "Update")));
       }
     }
+    if (state.status.legacyApp) {
+      // The old Planet-based Croptop app is installed; its data is read only on this click.
+      n.append(h("div", { class: "update" }, h("b", {}, "The old Croptop app"), " is still installed. If it publishes any of these sites, the two apps overwrite each other. Quit it, then ",
+        h("a", { href: "#", onclick: async (e) => {
+          e.preventDefault(); e.target.textContent = "importing…";
+          try {
+            const r = await api("POST", "/v0/croptop/legacy/retire", {});
+            toast(`Retired the old app from ${r.sites} site${r.sites === 1 ? "" : "s"} (${r.merged} post${r.merged === 1 ? "" : "s"} imported).`);
+            await loadStatus(); await loadSites(); route();
+          } catch (err) { toast(err.message, true); e.target.textContent = "import and retire"; }
+        } }, "import and retire"), "."));
+    }
     n.append(h("div", { class: "quit" }, h("a", { href: "#", onclick: async (e) => {
       e.preventDefault();
       if (!confirm("Quit Croptop? Your sites stay online on IPFS and on their host; publishing needs the console.")) return;

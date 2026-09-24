@@ -8,8 +8,10 @@ import (
 	"io"
 	"net/http"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/mejango/croptop/internal/gateway"
@@ -31,6 +33,7 @@ func (s *Server) routesCroptop(mux *http.ServeMux) {
 			"latest":    latest,
 			"update":    update.Newer(s.Version, latest),
 			"appBundle": appBundle(),
+			"legacyApp": s.PlanetContainer == "" && oldAppInstalled() && !publish.AppRetired(s.Store),
 			"dataDir":   s.DataDir,
 			"listen":    s.Cfg.Listen,
 			"passcode":  s.Cfg.HasPasscode(),
@@ -39,6 +42,28 @@ func (s *Server) routesCroptop(mux *http.ServeMux) {
 				"version": info.Version, "lastError": s.Node.LastError(),
 			},
 		})
+	})
+	mux.HandleFunc("POST /v0/croptop/legacy/retire", func(w http.ResponseWriter, r *http.Request) {
+		container := s.PlanetContainer
+		if container == "" {
+			container = publish.DefaultPlanetContainer()
+		}
+		s.mu.Lock()
+		defer s.mu.Unlock()
+		sites, merged, err := publish.RetireAll(s.Store, container)
+		if err != nil {
+			writeErr(w, 500, err)
+			return
+		}
+		if merged > 0 {
+			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+			defer cancel()
+			for _, id := range sites {
+				s.Pub.Render.Render(ctx, id)
+			}
+		}
+		s.log("retired the old Croptop app (%d sites, %d posts merged)", len(sites), merged)
+		writeJSON(w, 200, map[string]int{"sites": len(sites), "merged": merged})
 	})
 	mux.HandleFunc("POST /v0/croptop/update", func(w http.ResponseWriter, r *http.Request) {
 		rel, err := update.Latest(r.Context())
@@ -277,6 +302,15 @@ func (s *Server) routesCroptop(mux *http.ServeMux) {
 }
 
 // latestRelease is the newest release tag, checked at most hourly.
+// oldAppInstalled asks Spotlight, once per run, whether the old Croptop Mac
+// app is on this machine, without looking inside its container (that makes
+// macOS ask the user about other apps' data). ponytail: Spotlight off means
+// no banner, the quiet side.
+var oldAppInstalled = sync.OnceValue(func() bool {
+	out, err := exec.Command("mdfind", "kMDItemCFBundleIdentifier == 'xyz.planetable.Lite'").Output()
+	return err == nil && strings.TrimSpace(string(out)) != ""
+})
+
 // appBundle reports whether this node runs inside a macOS .app, where the app,
 // not the node, applies updates.
 func appBundle() bool {

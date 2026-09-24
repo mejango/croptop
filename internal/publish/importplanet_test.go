@@ -71,3 +71,80 @@ func TestImportPlanet(t *testing.T) {
 		t.Fatalf("force import: %v", err)
 	}
 }
+
+func TestLegacySitesAndRetire(t *testing.T) {
+	container := t.TempDir()
+	my := filepath.Join(container, "Documents", "Planet", "My", fixtureID)
+	if err := os.CopyFS(my, os.DirFS("../store/testdata/site")); err != nil {
+		t.Fatal(err)
+	}
+	root := t.TempDir()
+	st := &store.Store{Root: root}
+	ks := &ipfs.Keystore{Dir: filepath.Join(root, "ipfs", "keystore")}
+	if LegacySites(st, container) != nil {
+		t.Fatal("nothing imported yet, so nothing is legacy")
+	}
+	if _, err := ImportPlanet(st, ks, container, false, nil); err != nil {
+		t.Fatal(err)
+	}
+	// The old app writes a post after the import.
+	os.WriteFile(filepath.Join(my, "Articles", "NEW-POST.json"), []byte(`{"id":"NEW-POST","title":"later","content":"","created":1,"articleType":0,"link":"/NEW-POST/"}`), 0o644)
+	got := LegacySites(st, container)
+	if len(got) != 1 || got[0].ID != fixtureID || got[0].Newer != 1 {
+		t.Fatalf("legacy: %+v", got)
+	}
+	n, err := RetireLegacy(st, container, fixtureID)
+	if err != nil || n != 1 {
+		t.Fatalf("retire: n=%d err=%v", n, err)
+	}
+	if p, err := st.Post(fixtureID, "NEW-POST"); err != nil || p.Title != "later" {
+		t.Fatalf("post not merged: %v %v", p, err)
+	}
+	if _, err := os.Stat(my + ".retired"); err != nil {
+		t.Fatal("library folder not renamed")
+	}
+	if LegacySites(st, container) != nil {
+		t.Fatal("retired site still reported")
+	}
+	if _, err := RetireLegacy(st, container, fixtureID); err == nil {
+		t.Fatal("retiring twice should fail")
+	}
+
+	// macOS refuses to rename inside another app's container: retire in our store instead.
+	os.Rename(my+".retired", my)
+	parent := filepath.Dir(my)
+	os.Chmod(parent, 0o555)
+	defer os.Chmod(parent, 0o755)
+	if _, err := RetireLegacy(st, container, fixtureID); err != nil {
+		t.Fatalf("retire without rename permission: %v", err)
+	}
+	if LegacySites(st, container) != nil {
+		t.Fatal("retired site still reported when the container is read-only")
+	}
+	if _, err := RetireLegacy(st, container, fixtureID); err == nil {
+		t.Fatal("retiring twice should fail when the container is read-only")
+	}
+}
+
+func TestRetireAll(t *testing.T) {
+	container := t.TempDir()
+	my := filepath.Join(container, "Documents", "Planet", "My", fixtureID)
+	if err := os.CopyFS(my, os.DirFS("../store/testdata/site")); err != nil {
+		t.Fatal(err)
+	}
+	root := t.TempDir()
+	st := &store.Store{Root: root}
+	if _, err := ImportPlanet(st, &ipfs.Keystore{Dir: filepath.Join(root, "ipfs", "keystore")}, container, false, nil); err != nil {
+		t.Fatal(err)
+	}
+	if AppRetired(st) {
+		t.Fatal("retired before RetireAll")
+	}
+	sites, _, err := RetireAll(st, container)
+	if err != nil || len(sites) != 1 || sites[0] != fixtureID {
+		t.Fatalf("retire all: %v %v", sites, err)
+	}
+	if !AppRetired(st) || LegacySites(st, container) != nil {
+		t.Fatal("old app still reported after RetireAll")
+	}
+}

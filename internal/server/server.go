@@ -49,6 +49,9 @@ type Server struct {
 	relAt   time.Time
 	DataDir string
 	Log     func(string)
+	// PlanetContainer is the old Croptop Mac app's data folder; empty means
+	// publish.DefaultPlanetContainer (none off macOS).
+	PlanetContainer string
 
 	mu sync.Mutex // serializes render/publish per process
 }
