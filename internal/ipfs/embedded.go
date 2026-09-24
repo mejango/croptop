@@ -146,7 +146,7 @@ func (e *Embedded) Start(ctx context.Context) error {
 	if e.Offline {
 		listen = []string{fmt.Sprintf("/ip4/127.0.0.1/tcp/%d", e.port)}
 	}
-	cm, err := connmgr.NewConnManager(64, 192, connmgr.WithGracePeriod(20*time.Second))
+	cm, err := connmgr.NewConnManager(32, 96, connmgr.WithGracePeriod(20*time.Second)) // kubo defaults: enough peers for gateways and pubsub, fewer than a server
 	if err != nil {
 		return err
 	}
@@ -168,7 +168,7 @@ func (e *Embedded) Start(ctx context.Context) error {
 		opts = append(opts, libp2p.AddrsFactory(func([]ma.Multiaddr) []ma.Multiaddr { return announce }), libp2p.ForceReachabilityPublic())
 	}
 	if !e.Offline {
-		opts = append(opts, libp2p.NATPortMap(), libp2p.EnableHolePunching(), libp2p.EnableNATService(),
+		opts = append(opts, libp2p.NATPortMap(), libp2p.EnableHolePunching(),
 			libp2p.EnableAutoRelayWithPeerSource(e.relaySource, autorelay.WithMinInterval(30*time.Second)))
 	}
 	h, err := libp2p.New(opts...)
@@ -177,8 +177,11 @@ func (e *Embedded) Start(ctx context.Context) error {
 	}
 	e.host = h
 
+	// Client mode unless we announce public addresses: in auto mode a reachable
+	// laptop becomes a DHT server and answers lookups for the whole network.
+	// Publishing, providing and resolving all work as a client.
 	dopts := []dht.Option{
-		dht.Mode(dht.ModeAuto),
+		dht.Mode(dht.ModeClient),
 		dht.NamespacedValidator("ipns", ipns.Validator{KeyBook: h.Peerstore()}),
 		dht.Datastore(e.mds),
 	}
