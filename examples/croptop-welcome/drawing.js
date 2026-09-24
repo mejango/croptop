@@ -30,10 +30,29 @@ function drawCroptopArt(ctx, options) {
   line(34,62,24,59,2.5);line(38,44,32,36,2.5);line(150,73,160,68,2.5);
  }else if(kind==='writing'){
   page(46,28,113,145);line(61,61,132,60,3.5);line(61,80,137,81,3);line(61,101,126,101,3);line(61,122,138,121,3);line(61,143,106,144,3);
- }else if(kind==='audio'){
+ }else if(kind==='music'){
   ctx.translate(100,100);ctx.rotate(-.32);ctx.translate(-100,-100);
   oval(90,123,39,48);shape([[91,100],[98,31],[111,29],[109,104]],paper,true,4);shape([[98,31],[99,17],[113,18],[111,31]],paper,true,4);oval(91,119,12,13,ink,2);
   for(let i=0;i<3;i++)line(86+i*5,151,101+i*3,25,1.4);line(76,151,105,151,5);for(let i=0;i<3;i++)line(99,21+i*5,94,20+i*5,3);
+ }else if(kind==='audio'){
+  // A radio microphone on its stand, with sound leaving both sides.
+  shape([[64,74],[64,100],[78,122],[122,122],[136,100],[136,74]],null,false,4.5);
+  oval(100,72,25,39);
+  for(let y=48;y<=96;y+=12){const half=25*Math.sqrt(Math.max(0,1-((y-72)/39)**2))-6;if(half>4)line(100-half,y,100+half,y,2.4)}
+  line(100,122,100,160,5);shape([[72,174],[128,174],[121,160],[79,160]],paper,true,4);
+  const wave=(x,dir,r)=>{const points=[];for(let i=0;i<=10;i++){const a=(i/10-.5)*1.3;points.push([x+dir*Math.cos(a)*r,72+Math.sin(a)*r])}shape(points,null,false,3)};
+  wave(100,-1,44);wave(100,-1,56);wave(100,1,44);wave(100,1,56);
+ }else if(kind==='film'){
+  // A clapperboard: the striped stick lifts off the slate.
+  page(38,84,124,92);
+  shape([[38,84],[162,84],[162,102],[38,102]],paper,true,4);
+  for(let i=0;i<5;i++){const x=48+i*24;shape([[x,84],[x+12,84],[x+4,102],[x-8,102]],ink,true,2)}
+  const lift=.3+Math.sin(phase*2)*.08;
+  ctx.save();ctx.translate(40,82);ctx.rotate(-lift);
+  shape([[0,-18],[124,-18],[124,0],[0,0]],paper,true,4);
+  for(let i=0;i<5;i++){const x=10+i*24;shape([[x,-18],[x+12,-18],[x+4,0],[x-8,0]],ink,true,2)}
+  ctx.restore();oval(40,83,4,4,ink,2);
+  line(52,122,96,122,3);line(112,122,148,122,3);line(52,144,88,144,3);line(112,144,138,144,3);line(52,162,122,162,2.5);
  }else if(kind==='video'){
   page(24,47,152,105);line(33,164,168,163,5);shape([[87,76],[122,101],[87,124]],ink,true,3);line(52,37,72,28,3);line(130,30,151,38,3);
  }else if(kind==='studio'){

@@ -16,9 +16,9 @@
     "order": 1
   },
   {
-    "key": "audio",
-    "title": "Audio",
-    "label": "Audio",
+    "key": "music",
+    "title": "Music",
+    "label": "Music",
     "tag": "posts",
     "id": "C7215628-0976-4CC6-AC20-7950C93A83F3",
     "order": 2
@@ -48,12 +48,28 @@
     "order": 5
   },
   {
+    "key": "audio",
+    "title": "Audio",
+    "label": "Audio",
+    "tag": "posts",
+    "id": "394192CB-EC08-44C2-8D8D-9A7065D333B8",
+    "order": 6
+  },
+  {
+    "key": "film",
+    "title": "Film",
+    "label": "Film",
+    "tag": "posts",
+    "id": "50A1BEF8-7D31-48C5-AC60-F4A47C2E6480",
+    "order": 7
+  },
+  {
     "key": "studio",
     "title": "Custom",
     "label": "Custom",
     "tag": "custom",
     "id": "71E4547B-9F51-490B-B8CB-7FEA4FBF9DA7",
-    "order": 6
+    "order": 8
   },
   {
     "key": "art",
@@ -61,7 +77,7 @@
     "label": "Embeds",
     "tag": "custom",
     "id": "D4C68DAB-4CB6-4B26-B157-FC8CC7D54A50",
-    "order": 7
+    "order": 9
   },
   {
     "key": "bots",
@@ -69,7 +85,7 @@
     "label": "Bots",
     "tag": "start here",
     "id": "D174A1AD-E36E-4F81-AE29-93107150749D",
-    "order": 8
+    "order": 10
   },
   {
     "key": "network",
@@ -77,7 +93,7 @@
     "label": "Peers",
     "tag": "how it works",
     "id": "EDAA9F21-873F-47E2-B5EB-689003FB9B47",
-    "order": 9
+    "order": 11
   },
   {
     "key": "faq",
@@ -85,6 +101,6 @@
     "label": "Basics",
     "tag": "start here",
     "id": "35C0796C-B6AC-4613-AB17-56083B645539",
-    "order": 10
+    "order": 12
   }
 ]

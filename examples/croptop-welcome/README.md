@@ -1,6 +1,6 @@
 # Croptop welcome posts
 
-Eleven editable posts for croptop.eth. `manifest.json` maps their stable post IDs and display order.
+Thirteen editable posts for croptop.eth. `manifest.json` maps their stable post IDs and display order.
 
 `build.py` generates each `posts/<name>/post.html` and `preview.js`. `welcome.js` is a classic script so it can mount again when a feed modal reopens. CSS is scoped to `.ct-welcome`. Every post attaches its HTML, the script, and a feed preview. The playgrounds have no dependencies. Embeds reads a remote manifest and loads the approved external website; the other examples run locally.
 

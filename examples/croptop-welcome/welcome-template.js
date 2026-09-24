@@ -18,7 +18,7 @@
   };
   if (mode === 'start') {
     const canvas=$('[data-start-art]'), ctx=canvas.getContext('2d');
-    const examples={writing:'9CB0B19C-061C-4378-9D27-9E434C796B76',audio:'C7215628-0976-4CC6-AC20-7950C93A83F3',video:'77E6E2AE-B847-4BF2-B904-93E59021712E',studio:'71E4547B-9F51-490B-B8CB-7FEA4FBF9DA7'};
+    const examples={writing:'9CB0B19C-061C-4378-9D27-9E434C796B76',music:'C7215628-0976-4CC6-AC20-7950C93A83F3',video:'77E6E2AE-B847-4BF2-B904-93E59021712E',studio:'71E4547B-9F51-490B-B8CB-7FEA4FBF9DA7'};
     canvas.width=600;canvas.height=440;
     const show=kind=>{ctx.clearRect(0,0,600,440);ctx.save();ctx.translate(80,0);drawCroptopArt(ctx,{kind,width:440,height:440});ctx.restore();$('[data-start-link]').href=new URL('../'+examples[kind]+'/',scriptURL).href;root.querySelectorAll('[data-start-kind]').forEach(b=>b.setAttribute('aria-pressed',String(b.dataset.startKind===kind)));};
     root.querySelectorAll('[data-start-kind]').forEach(b=>b.onclick=()=>show(b.dataset.startKind));show('writing');
