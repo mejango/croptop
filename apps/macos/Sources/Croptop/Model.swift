@@ -248,8 +248,6 @@ final class AppModel: ObservableObject {
                     return
                 }
                 postFiles([file])
-                NSApp.activate(ignoringOtherApps: true)
-                NSApp.windows.first(where: { $0.canBecomeMain })?.makeKeyAndOrderFront(nil)
             } catch {
                 NSApp.activate(ignoringOtherApps: true)
                 show(error)
@@ -261,6 +259,9 @@ final class AppModel: ObservableObject {
     func postFiles(_ urls: [URL]) {
         let media = urls.filter { !$0.hasDirectoryPath }
         guard !media.isEmpty else { return }
+        // Files arrive from the Dock or a capture while another app is in front; bring the new post forward.
+        NSApp.activate(ignoringOtherApps: true)
+        NSApp.windows.first(where: { $0.canBecomeMain })?.makeKeyAndOrderFront(nil)
         guard let site = currentSiteID ?? preferences.string(forKey: "quickSite").flatMap({ id in sites.first { $0.id == id }?.id }) ?? sites.first?.id else { sheet = .newSite; return }
         droppedFiles = media
         screen = .editor(site: site, post: nil)
