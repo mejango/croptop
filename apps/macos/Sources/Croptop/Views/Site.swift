@@ -41,12 +41,12 @@ struct SiteView: View {
                 }
                 if !navigation.isEmpty {
                     // The site's navigation, as its header shows it: weight order, external links open in the browser.
-                    HStack(spacing: 16) {
+                    ChipFlowLayout(spacing: 12, rowSpacing: 2) {
                         ForEach(navigation) { post in
                             Button(post.title) {
                                 if let link = post.externalLink.flatMap(URL.init(string:)), !link.absoluteString.isEmpty { NSWorkspace.shared.open(link) }
                                 else { model.screen = .editor(site: siteID, post: post.id) }
-                            }.buttonStyle(.hover).font(Theme.heading(15))
+                            }.buttonStyle(.hover).font(Theme.heading(15)).lineLimit(1).fixedSize()
                         }
                     }
                 }

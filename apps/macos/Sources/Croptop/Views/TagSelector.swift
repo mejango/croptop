@@ -78,12 +78,13 @@ struct TagSelector: View {
 // Content-sized square chips wrap instead of disappearing off the right edge.
 struct ChipFlowLayout: Layout {
     var spacing: CGFloat = 8
+    var rowSpacing: CGFloat? = nil
     private func arrangement(width: CGFloat, subviews: Subviews) -> (CGSize, [CGRect]) {
         var x: CGFloat = 0, y: CGFloat = 0, rowHeight: CGFloat = 0
         var frames: [CGRect] = []
         for view in subviews {
             let size = view.sizeThatFits(ProposedViewSize(width: width, height: nil))
-            if x > 0 && x + size.width > width { x = 0; y += rowHeight + spacing; rowHeight = 0 }
+            if x > 0 && x + size.width > width { x = 0; y += rowHeight + (rowSpacing ?? spacing); rowHeight = 0 }
             frames.append(CGRect(x: x, y: y, width: min(size.width, width), height: size.height))
             x += min(size.width, width) + spacing
             rowHeight = max(rowHeight, size.height)
