@@ -39,17 +39,6 @@ struct SiteView: View {
                     Text(about).font(Theme.body()).foregroundColor(Theme.muted)
                         .fixedSize(horizontal: false, vertical: true)
                 }
-                if !navigation.isEmpty {
-                    // The site's navigation, as its header shows it: weight order, external links open in the browser.
-                    ChipFlowLayout(spacing: 12, rowSpacing: 2) {
-                        ForEach(navigation) { post in
-                            Button(post.title) {
-                                if let link = post.externalLink.flatMap(URL.init(string:)), !link.absoluteString.isEmpty { NSWorkspace.shared.open(link) }
-                                else { model.screen = .editor(site: siteID, post: post.id) }
-                            }.buttonStyle(.hover).font(Theme.heading(15)).lineLimit(1).fixedSize()
-                        }
-                    }
-                }
                 if site?.isCollaborative == true {
                     Button { showingContributors = true } label: {
                         HStack(spacing: 6) {
@@ -187,7 +176,19 @@ struct SiteView: View {
                     HStack(alignment: .top, spacing: 16) {
                         headerIdentity.frame(maxWidth: .infinity, alignment: .leading)
                         headerActions
-                    }.padding(.bottom, 22)
+                    }.padding(.bottom, navigation.isEmpty ? 22 : 8)
+                    if !navigation.isEmpty {
+                        // The site's navigation, as its header shows it: weight order, external links open in the browser.
+                        // It runs under the whole header, lined up with the name, so it stays on one line.
+                        ChipFlowLayout(spacing: 12, rowSpacing: 2) {
+                            ForEach(navigation) { post in
+                                Button(post.title) {
+                                    if let link = post.externalLink.flatMap(URL.init(string:)), !link.absoluteString.isEmpty { NSWorkspace.shared.open(link) }
+                                    else { model.screen = .editor(site: siteID, post: post.id) }
+                                }.buttonStyle(.hover).font(Theme.heading(15)).lineLimit(1).fixedSize()
+                            }
+                        }.padding(.leading, 80).padding(.bottom, 22)
+                    }
                     if model.status?.legacyApp == true {
                         LegacyNotice().padding(.bottom, 22)
                     }
