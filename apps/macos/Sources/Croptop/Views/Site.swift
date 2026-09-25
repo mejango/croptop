@@ -17,6 +17,38 @@ struct SiteView: View {
 
     var site: Site? { model.sites.first { $0.id == siteID } }
     var posts: [Post] { model.posts[siteID] ?? [] }
+    @State private var navOrder: [Post]?
+    @State private var draggingNav: String?
+    @State private var navFrames: [String: CGRect] = [:]
+
+    // Moves the dragged link to the slot under the pointer, live.
+    private func dragNav(_ id: String, to point: CGPoint) {
+        if draggingNav == nil { draggingNav = id; navOrder = navigation }
+        guard var order = navOrder, let from = order.firstIndex(where: { $0.id == id }),
+              let target = navFrames.first(where: { $0.key != id && $0.value.contains(point) })?.key,
+              let to = order.firstIndex(where: { $0.id == target }) else { return }
+        withAnimation(.easeOut(duration: 0.15)) {
+            order.move(fromOffsets: IndexSet(integer: from), toOffset: to > from ? to + 1 : to)
+            navOrder = order
+        }
+    }
+
+    // Saves weights 1…n for the links whose place changed, then reloads the posts.
+    private func dropNav() {
+        draggingNav = nil
+        guard let order = navOrder else { return }
+        Task {
+            do {
+                for (i, post) in order.enumerated() where post.navigationWeight != i + 1 {
+                    let f = Multipart(); f.field("navigationWeight", String(i + 1))
+                    _ = try await API.shared.savePost(site: siteID, id: post.id, form: f)
+                }
+                await model.loadPosts(siteID)
+            } catch { model.show(error) }
+            navOrder = nil
+        }
+    }
+
     private var navigation: [Post] {
         posts.filter { $0.isIncludedInNavigation == true }.enumerated()
             .sorted { ($0.element.navigationWeight ?? 1, $0.offset) < ($1.element.navigationWeight ?? 1, $1.offset) }.map(\.element)
@@ -180,14 +212,23 @@ struct SiteView: View {
                     if !navigation.isEmpty {
                         // The site's navigation, as its header shows it: weight order, external links open in the browser.
                         // It runs under the whole header, lined up with the name, so it stays on one line.
+                        // Click opens a link; press and drag reorders them, saved as navigation weights.
                         ChipFlowLayout(spacing: 12, rowSpacing: 2) {
-                            ForEach(navigation) { post in
+                            ForEach(navOrder ?? navigation) { post in
                                 Button(post.title) {
                                     if let link = post.externalLink.flatMap(URL.init(string:)), !link.absoluteString.isEmpty { NSWorkspace.shared.open(link) }
                                     else { model.screen = .editor(site: siteID, post: post.id) }
                                 }.buttonStyle(.hover).font(Theme.heading(15)).lineLimit(1).fixedSize()
+                                .opacity(draggingNav == post.id ? 0.35 : 1)
+                                .background(GeometryReader { g in Color.clear.preference(key: NavFrames.self, value: [post.id: g.frame(in: .named("nav"))]) })
+                                .highPriorityGesture(DragGesture(minimumDistance: 4, coordinateSpace: .named("nav"))
+                                    .onChanged { drag in dragNav(post.id, to: drag.location) }
+                                    .onEnded { _ in dropNav() })
                             }
-                        }.padding(.leading, 80).padding(.bottom, 22)
+                        }
+                        .coordinateSpace(name: "nav")
+                        .onPreferenceChange(NavFrames.self) { navFrames = $0 }
+                        .padding(.leading, 80).padding(.bottom, 22)
                     }
                     if model.status?.legacyApp == true {
                         LegacyNotice().padding(.bottom, 22)
@@ -476,4 +517,9 @@ struct LegacyNotice: View {
         .background(Theme.hotWash)
         .overlay(Rectangle().stroke(Theme.ink, lineWidth: Theme.border))
     }
+}
+
+private struct NavFrames: PreferenceKey {
+    static var defaultValue: [String: CGRect] = [:]
+    static func reduce(value: inout [String: CGRect], nextValue: () -> [String: CGRect]) { value.merge(nextValue()) { $1 } }
 }
