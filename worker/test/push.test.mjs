@@ -11,7 +11,7 @@ function blockCID(bytes) {
   if (bits > 0) s += A[(val << (5 - bits)) & 31];
   return s;
 }
-import worker from "../src/index.js";
+import worker, { republish } from "../src/index.js";
 
 function ipnsName(pub) {
   const proto = Uint8Array.from([0x08, 0x01, 0x12, 0x20, ...pub]);
@@ -160,4 +160,68 @@ test("only the key that first pushed a version can write its files", async () =>
   await env.SITES.put("sites/bafyold/index.html", "legacy page");
   assert.equal((await push(attacker, "bafyold", 1, { "index.html": "replaced" })).status, 409);
   assert.equal(await served("bafyold", "index.html"), "legacy page");
+});
+
+// protobuf of an IPNS record with only value (field 1) and sequence (field 5), enough for parseRecord
+const recordBytes = (value, seq) => Uint8Array.from([0x0a, value.length, ...new TextEncoder().encode(value), 0x28, seq]);
+
+test("names resolve and route through the node, not delegated-ipfs.dev", async () => {
+  const env = { DOMAIN: "crop.test", NODE: "https://node.test", UPSTREAMS: "https://up.test", SITES: r2(), REGISTRY: kv() };
+  const calls = [];
+  const realFetch = globalThis.fetch;
+  globalThis.fetch = async (u, init = {}) => {
+    u = String(u);
+    calls.push({ u, method: init.method || "GET" });
+    if (u.startsWith("https://node.test/routing/v1/ipns/")) return new Response(init.method === "PUT" ? null : recordBytes("/ipfs/bafyfromnode", 3), { headers: { "content-type": "application/vnd.ipfs.ipns-record" } });
+    if (u === "https://node.test/v0/host/peers") return new Response('{"id":"12D3KooWnode","addrs":["/dns4/x/tcp/1"]}', { headers: { "content-type": "application/json" } });
+    if (u.startsWith("https://up.test/ipfs/bafyfromnode/")) return new Response("from upstream");
+    return new Response("nope", { status: 404 });
+  };
+  const call = (path, init, host = "crop.test") => worker.fetch(new Request(`https://${host}${path}`, init), env, { waitUntil() {} });
+  const pushed = "k51qzi5uqu5dlgq33myrm8ik5j5m87add6c1vwaz2ubxhobjtibprs7nc9bnto";
+  const other = "k51qzi5uqu5dhxiwvl4xx3sco13y50yoo28rbhe3sneirnj2qatinx75qpsqtb";
+  try {
+    await env.REGISTRY.put("key:" + pushed, JSON.stringify({ ipns: pushed, cid: "bafyx", sequence: 1, record: btoa("signed") }));
+    const own = await call("/routing/v1/ipns/" + pushed);
+    assert.equal(new TextDecoder().decode(await own.arrayBuffer()), "signed");
+    assert.equal(calls.length, 0, "a pushed name is answered from the registry");
+    const r = await call("/routing/v1/ipns/" + other);
+    assert.equal(r.status, 200);
+    assert.equal(r.headers.get("content-type"), "application/vnd.ipfs.ipns-record");
+    assert.equal((await call("/routing/v1/ipns/" + other, { method: "PUT", body: new Uint8Array([1]) })).status, 200);
+    assert.equal(calls.at(-1).method, "PUT");
+    assert.equal((await call("/routing/v1/ipns/not-a-name")).status, 400);
+    assert.equal((await (await call("/v0/host/peers")).json()).id, "12D3KooWnode");
+    // a name crop.top does not host resolves through the node
+    const site = await call("/planet.json", undefined, `${other}.crop.test`);
+    assert.equal(await site.text(), "from upstream");
+    assert.ok(!calls.some((c) => c.u.includes("delegated-ipfs.dev")), "the node answered first");
+  } finally {
+    globalThis.fetch = realFetch;
+  }
+});
+
+test("the node being down gives 502, not a hung request", async () => {
+  const env = { DOMAIN: "crop.test", NODE: "https://node.test", SITES: r2(), REGISTRY: kv() };
+  const realFetch = globalThis.fetch;
+  globalThis.fetch = async () => { throw new Error("connection refused"); };
+  try {
+    const r = await worker.fetch(new Request("https://crop.test/routing/v1/ipns/k51qzi5uqu5dhxiwvl4xx3sco13y50yoo28rbhe3sneirnj2qatinx75qpsqtb"), env, { waitUntil() {} });
+    assert.equal(r.status, 502);
+  } finally {
+    globalThis.fetch = realFetch;
+  }
+});
+
+test("republishing sends a record to the node and to delegated routing", async () => {
+  const puts = [];
+  const realFetch = globalThis.fetch;
+  globalThis.fetch = async (u, init = {}) => { puts.push({ u: String(u), method: init.method }); return new Response(null); };
+  try {
+    await republish({ NODE: "https://node.test" }, "k51abc", btoa("signed"));
+    assert.deepEqual(puts.map((p) => p.u).sort(), ["https://delegated-ipfs.dev/routing/v1/ipns/k51abc", "https://node.test/routing/v1/ipns/k51abc"]);
+    assert.ok(puts.every((p) => p.method === "PUT"));
+  } finally {
+    globalThis.fetch = realFetch;
+  }
 });

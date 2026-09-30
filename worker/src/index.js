@@ -43,6 +43,7 @@ async function route(request, env, ctx) {
 
 async function serveBare(request, url, env, ctx) {
   const p = url.pathname;
+  if (p.startsWith("/routing/v1/ipns/")) return routing(request, env, p.slice("/routing/v1/ipns/".length).replace(/\/$/, ""));
   if (p.startsWith("/v0/host/")) return api(request, url, env, ctx);
   if (p.startsWith("/ipfs/")) {
     // a pushed version by CID, as croptop reads one to add a post to it
@@ -86,11 +87,12 @@ async function resolveKey(env, ipns) {
   const e = await entryByKey(env, ipns);
   if (e && e.cid) return e.cid;
   return cached(env, "ipns:" + ipns, async () => {
-    // the delegated endpoint is fast but only knows records published to it;
-    // the upstream gateways resolve the rest through their own nodes
-    for (const src of [`https://delegated-ipfs.dev/routing/v1/ipns/${ipns}`]) {
+    // the node answers from the DHT; delegated-ipfs.dev is a fallback while it
+    // lasts; the upstream gateways resolve the rest through their own nodes
+    const sources = [env.NODE && `${env.NODE}/routing/v1/ipns/${ipns}`, `https://delegated-ipfs.dev/routing/v1/ipns/${ipns}`].filter(Boolean);
+    for (const src of sources) {
       try {
-        const r = await fetch(src, { headers: { Accept: "application/vnd.ipfs.ipns-record" }, redirect: "follow" });
+        const r = await fetch(src, { headers: { Accept: "application/vnd.ipfs.ipns-record" }, redirect: "follow", signal: AbortSignal.timeout(20000) });
         if (!r.ok || !(r.headers.get("content-type") || "").includes("ipns-record")) continue;
         const rec = parseRecord(new Uint8Array(await r.arrayBuffer()));
         if (rec.value && rec.value.startsWith("/ipfs/")) return rec.value.slice(6).split("/")[0];
@@ -318,6 +320,34 @@ async function block(env, cid) {
   return text("not found", 404);
 }
 
+// routing is the IPNS part of the Delegated Routing V1 HTTP API, which
+// delegated-ipfs.dev served until 2026-09-30. Pushed sites answer from the
+// registry; everything else, and every PUT, goes to the node, which keeps
+// records in the DHT.
+async function routing(request, env, name) {
+  if (!/^k[a-z0-9]{40,80}$/.test(name)) return text("bad name", 400);
+  const raw = { "content-type": "application/vnd.ipfs.ipns-record", "cache-control": "public, max-age=60" };
+  const get = request.method === "GET" || request.method === "HEAD";
+  if (!get && request.method !== "PUT") return text("method not allowed", 405);
+  if (get) {
+    const e = await entryByKey(env, name);
+    if (e && e.record) return new Response(request.method === "HEAD" ? null : Uint8Array.from(atob(e.record), (c) => c.charCodeAt(0)), { headers: raw });
+  }
+  if (!env.NODE) return text("not found", 404);
+  const r = await fetch(`${env.NODE}/routing/v1/ipns/${name}`, { method: request.method, headers: { ...UA, "content-type": raw["content-type"] }, body: get ? undefined : await request.arrayBuffer(), signal: AbortSignal.timeout(35000) }).catch(() => null);
+  if (!r) return text("routing unavailable", 502);
+  return new Response(r.body, { status: r.status, headers: r.ok && get ? raw : { "content-type": r.headers.get("content-type") || "text/plain" } });
+}
+
+// peers lists the node's addresses, for new nodes to join the network through
+// now that the public bootstrap nodes are gone.
+async function peers(env) {
+  if (!env.NODE) return text("not found", 404);
+  const r = await fetch(`${env.NODE}/v0/host/peers`, { headers: UA, cf: { cacheTtl: 3600, cacheEverything: true }, signal: AbortSignal.timeout(10000) }).catch(() => null);
+  if (!r || !r.ok) return text("peers unavailable", 502);
+  return new Response(r.body, { headers: { "content-type": "application/json", "cache-control": "public, max-age=3600" } });
+}
+
 // ---------- registry
 
 async function entryByName(env, name) {
@@ -358,6 +388,7 @@ async function api(request, url, env, ctx) {
     return entryResponse(cur ? { ipns, ...e, cid: cur.cid, sequence: cur.sequence, acceptsParent: true } : e);
   }
   if (p.startsWith("blocks/") && request.method === "GET") return block(env, p.slice(7));
+  if (p === "peers" && request.method === "GET") return peers(env);
   if (p === "debug/resolve" && request.method === "GET") return debugResolve(env, url.searchParams.get("name") || "");
   if (p === "debug/nodeforward" && request.method === "GET" && env.NODE) {
     // forward a slice of a pushed site's real files to the node, to find what a firewall dislikes
@@ -465,7 +496,7 @@ async function push(request, url, env, ctx) {
     if (h("Record")) e.record = h("Record");
     await saveEntry(env, e);
     await env.REGISTRY.put("pushed:" + cid, "1");
-    if (e.record) ctx.waitUntil(republish(ipns, e.record));
+    if (e.record) ctx.waitUntil(republish(env, ipns, e.record));
   }
   await env.REGISTRY.put("lastpush:" + ipns, JSON.stringify(Object.fromEntries(["Ipns", "Cid", "Seq", "Time", "Sig", "Record"].map((k) => ["X-Croptop-" + k, request.headers.get("X-Croptop-" + k) || ""]))), { expirationTtl: 3600 });
   // the node mirrors the site so the IPFS network gets it from a reachable
@@ -543,9 +574,10 @@ async function notifyNode(env, request, cid, signedHost) {
 
 // ---------- IPNS records: keep them alive from here
 
-async function republish(ipns, recordB64) {
+async function republish(env, ipns, recordB64) {
   const body = Uint8Array.from(atob(recordB64), (c) => c.charCodeAt(0));
-  await fetch(`https://delegated-ipfs.dev/routing/v1/ipns/${ipns}`, { method: "PUT", headers: { "content-type": "application/vnd.ipfs.ipns-record" }, body }).catch(() => {});
+  const put = (u) => fetch(u, { method: "PUT", headers: { "content-type": "application/vnd.ipfs.ipns-record" }, body, signal: AbortSignal.timeout(20000) }).catch(() => {});
+  await Promise.all([env.NODE && put(`${env.NODE}/routing/v1/ipns/${ipns}`), put(`https://delegated-ipfs.dev/routing/v1/ipns/${ipns}`)]);
 }
 
 async function republishAll(env) {
@@ -554,7 +586,7 @@ async function republishAll(env) {
     const page = await env.REGISTRY.list({ prefix: "key:", cursor });
     for (const k of page.keys) {
       const e = await env.REGISTRY.get(k.name, { type: "json" });
-      if (e && e.record) await republish(e.ipns, e.record);
+      if (e && e.record) await republish(env, e.ipns, e.record);
     }
     cursor = page.list_complete ? undefined : page.cursor;
   } while (cursor);
@@ -625,4 +657,4 @@ function toBase64(buf) {
 const text = (s, status = 200) => new Response(s, { status, headers: { "content-type": "text/plain; charset=utf-8" } });
 const json = (v, status = 200) => new Response(JSON.stringify(v), { status, headers: { "content-type": "application/json" } });
 
-export { publicKeyOf, verify, parseRecord, base36Decode };
+export { publicKeyOf, verify, parseRecord, base36Decode, republish };
