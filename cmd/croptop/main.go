@@ -596,6 +596,7 @@ func (a *app) host(domain, listen, root, announce, trust string) error {
 	if announce != "" {
 		e.Announce = strings.Split(announce, ",")
 	}
+	e.RoutingPuts, e.PeersURL = nil, "" // a host is the routing endpoint and a bootstrap peer
 	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer cancel()
 	if err := a.startNode(ctx); err != nil {

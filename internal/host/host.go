@@ -62,6 +62,8 @@ type Host struct {
 	reg   registry
 	gw    http.Handler
 	cache map[string]cached
+
+	routingSlots chan struct{} // routing PUTs in flight; full means 429
 }
 
 type cached struct {
@@ -102,6 +104,11 @@ func (h *Host) Start() error {
 	}
 	h.gw = gateway.NewHandler(gateway.Config{DeserializedResponses: true, NoDNSLink: true}, backend)
 	h.cache = map[string]cached{}
+	// a host is the routing endpoint and a bootstrap peer: it must not send
+	// records to routing endpoints (the Worker proxies them back here) or
+	// fetch its own peers list
+	h.Engine.RoutingPuts, h.Engine.PeersURL = nil, ""
+	h.routingSlots = make(chan struct{}, 32)
 	return nil
 }
 
@@ -188,6 +195,8 @@ func (h *Host) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 func (h *Host) serveBare(w http.ResponseWriter, r *http.Request) {
 	p := r.URL.Path
 	switch {
+	case strings.HasPrefix(p, "/routing/v1/ipns/"):
+		h.serveRouting(w, r, strings.TrimSuffix(strings.TrimPrefix(p, "/routing/v1/ipns/"), "/"))
 	case strings.HasPrefix(p, "/v0/host/"):
 		h.serveAPI(w, r)
 	case strings.HasPrefix(p, "/ipfs/") || strings.HasPrefix(p, "/ipns/"):
@@ -404,6 +413,14 @@ func (h *Host) serveAPI(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		writeJSON(w, 200, info)
+	case p == "peers" && r.Method == "GET":
+		// what a new node dials to join the network through this host
+		info, err := h.Engine.Info(r.Context())
+		if err != nil {
+			http.Error(w, err.Error(), 500)
+			return
+		}
+		writeJSON(w, 200, map[string]any{"id": info.PeerID, "addrs": h.Engine.PeerAddrs()})
 	case p == "names" && r.Method == "POST":
 		h.claim(w, r)
 	case p == "push" && r.Method == "POST":
@@ -444,6 +461,62 @@ func (h *Host) serveAPI(w http.ResponseWriter, r *http.Request) {
 		w.Write(b)
 	default:
 		http.Error(w, "not found", 404)
+	}
+}
+
+// serveRouting is the IPNS part of the Delegated Routing V1 HTTP API, which
+// delegated-ipfs.dev served until 2026-09-30: GET the newest record for a name,
+// PUT a signed record into the DHT. Pushed sites answer from the registry.
+func (h *Host) serveRouting(w http.ResponseWriter, r *http.Request, name string) {
+	switch r.Method {
+	case http.MethodGet, http.MethodHead:
+		h.mu.Lock()
+		var rec []byte
+		if e := h.reg.Keys[name]; e != nil {
+			rec = e.Record
+		}
+		h.mu.Unlock()
+		if len(rec) == 0 {
+			ctx, cancel := context.WithTimeout(r.Context(), 30*time.Second)
+			defer cancel()
+			var err error
+			if rec, err = h.Engine.GetRecord(ctx, name); err != nil {
+				http.Error(w, "not found", 404)
+				return
+			}
+		}
+		w.Header().Set("Content-Type", "application/vnd.ipfs.ipns-record")
+		w.Header().Set("Cache-Control", "public, max-age=60")
+		w.Write(rec)
+	case http.MethodPut:
+		b, err := io.ReadAll(http.MaxBytesReader(w, r.Body, 10<<10))
+		if err != nil {
+			http.Error(w, "record too large", 413)
+			return
+		}
+		if err := ipfs.ValidateRecord(name, b); err != nil {
+			http.Error(w, "invalid record: "+err.Error(), 400)
+			return
+		}
+		slots := h.routingSlots // the release must go back to the channel the slot came from
+		select {
+		case slots <- struct{}{}:
+		default:
+			w.Header().Set("Retry-After", "10")
+			http.Error(w, "busy", 429)
+			return
+		}
+		go func() { // a DHT put takes seconds; the caller does not wait for it
+			defer func() { <-slots }()
+			ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+			defer cancel()
+			if err := h.Engine.PutRecord(ctx, name, b); err != nil {
+				h.log("routing put %s: %v", name, err)
+			}
+		}()
+		w.WriteHeader(http.StatusOK)
+	default:
+		http.Error(w, "method not allowed", 405)
 	}
 }
 

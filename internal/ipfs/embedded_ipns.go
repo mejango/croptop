@@ -273,13 +273,9 @@ func (e *Embedded) Record(key string) []byte {
 	return e.records[key]
 }
 
-// PutRecord re-announces a signed record made elsewhere (a pushed site's
-// record on a host). It is validated against the name's key first.
-func (e *Embedded) PutRecord(ctx context.Context, ipnsName string, rec []byte) error {
-	if e.dht == nil {
-		return fmt.Errorf("node not started")
-	}
-	name, err := ipns.NameFromString(strings.TrimPrefix(ipnsName, "/ipns/"))
+// ValidateRecord checks that rec is a valid record signed by the key inside name.
+func ValidateRecord(nameStr string, rec []byte) error {
+	name, err := ipns.NameFromString(strings.TrimPrefix(nameStr, "/ipns/"))
 	if err != nil {
 		return err
 	}
@@ -287,9 +283,19 @@ func (e *Embedded) PutRecord(ctx context.Context, ipnsName string, rec []byte) e
 	if err != nil {
 		return err
 	}
-	if err := ipns.ValidateWithName(r, name); err != nil {
+	return ipns.ValidateWithName(r, name)
+}
+
+// PutRecord re-announces a signed record made elsewhere (a pushed site's
+// record on a host). It is validated against the name's key first.
+func (e *Embedded) PutRecord(ctx context.Context, ipnsName string, rec []byte) error {
+	if e.dht == nil {
+		return fmt.Errorf("node not started")
+	}
+	if err := ValidateRecord(ipnsName, rec); err != nil {
 		return err
 	}
+	name, _ := ipns.NameFromString(strings.TrimPrefix(ipnsName, "/ipns/"))
 	return e.putRecord(ctx, name, rec)
 }
 

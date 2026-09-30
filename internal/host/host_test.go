@@ -434,3 +434,96 @@ func readAll(r *http.Response) (string, error) {
 	_, err := b.ReadFrom(r.Body)
 	return b.String(), err
 }
+
+// The node answers the IPNS part of the Delegated Routing API that
+// delegated-ipfs.dev used to: pushed sites from the registry, others from the
+// DHT; PUT validates and stores. It lists its peers, never forwards records,
+// and refuses PUTs when all its slots are busy.
+func TestRoutingEndpointAndPeers(t *testing.T) {
+	site := offline(t)
+	eng := offline(t)
+	eng.RoutingPuts = []string{"https://crop.top/routing/v1/ipns/"}
+	eng.PeersURL = "https://crop.top/v0/host/peers"
+	h := &Host{Domain: "crop.test", DataDir: t.TempDir(), Engine: eng}
+	if err := h.Start(); err != nil {
+		t.Fatal(err)
+	}
+	if len(eng.RoutingPuts) != 0 || eng.PeersURL != "" {
+		t.Fatal("a host must not forward records or bootstrap from itself")
+	}
+	srv := httptest.NewServer(h)
+	defer srv.Close()
+	name, _ := site.Keystore().Generate("s")
+	rec, _ := site.SignRecord("s", "bafybeigdfeslmj3qh7cwiehrd5l4cfq6qhgctcxxlk6ou3y3ywq5wfqil4", 7)
+	get := func(n string) (int, []byte) {
+		resp, err := http.Get(srv.URL + "/routing/v1/ipns/" + n)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer resp.Body.Close()
+		b, _ := io.ReadAll(resp.Body)
+		return resp.StatusCode, b
+	}
+	put := func(n string, b []byte) int {
+		req, _ := http.NewRequest(http.MethodPut, srv.URL+"/routing/v1/ipns/"+n, bytes.NewReader(b))
+		req.Header.Set("Content-Type", "application/vnd.ipfs.ipns-record")
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		resp.Body.Close()
+		return resp.StatusCode
+	}
+	if code, _ := get(name); code != 404 {
+		t.Fatalf("unknown name: %d", code)
+	}
+	if code := put(name, []byte("not a record")); code != 400 {
+		t.Fatalf("garbage: %d", code)
+	}
+	site.Keystore().Generate("o")
+	wrong, _ := site.SignRecord("o", "bafybeigdfeslmj3qh7cwiehrd5l4cfq6qhgctcxxlk6ou3y3ywq5wfqil4", 1)
+	if code := put(name, wrong); code != 400 {
+		t.Fatalf("another name's record: %d", code)
+	}
+	if code := put(name, rec); code != 200 {
+		t.Fatalf("valid record: %d", code)
+	}
+	deadline := time.Now().Add(10 * time.Second)
+	for {
+		code, b := get(name)
+		if code == 200 && bytes.Equal(b, rec) {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("GET after PUT: %d", code)
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
+	// a pushed site answers from the registry at once
+	pushed, _ := site.Keystore().Generate("p")
+	pushedRec, _ := site.SignRecord("p", "bafybeigdfeslmj3qh7cwiehrd5l4cfq6qhgctcxxlk6ou3y3ywq5wfqil4", 9)
+	h.mu.Lock()
+	h.reg.Keys[pushed] = &Entry{IPNS: pushed, Record: pushedRec}
+	h.mu.Unlock()
+	if code, b := get(pushed); code != 200 || !bytes.Equal(b, pushedRec) {
+		t.Fatalf("pushed site: %d", code)
+	}
+	// no free slot: 429, not an unbounded pile of DHT puts
+	h.routingSlots = make(chan struct{})
+	if code := put(name, rec); code != 429 {
+		t.Fatalf("all slots busy: %d", code)
+	}
+	resp, err := http.Get(srv.URL + "/v0/host/peers")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var peers struct {
+		ID    string   `json:"id"`
+		Addrs []string `json:"addrs"`
+	}
+	json.NewDecoder(resp.Body).Decode(&peers)
+	resp.Body.Close()
+	if peers.ID == "" {
+		t.Fatal("peers: no id")
+	}
+}
