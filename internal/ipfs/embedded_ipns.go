@@ -222,6 +222,7 @@ func (e *Embedded) putRouting(base string, name ipns.Name, rec []byte) {
 	defer cancel()
 	req, err := http.NewRequestWithContext(ctx, http.MethodPut, base+name.String(), bytes.NewReader(rec))
 	if err != nil {
+		e.Log("ipns routing put " + base + ": " + err.Error())
 		return
 	}
 	req.Header.Set("Content-Type", "application/vnd.ipfs.ipns-record")

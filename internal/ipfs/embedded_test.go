@@ -328,7 +328,10 @@ func TestPutRecordSendsToRoutingEndpointsInTheBackground(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		b, _ := io.ReadAll(r.Body)
 		if r.Method == http.MethodPut && r.Header.Get("Content-Type") == "application/vnd.ipfs.ipns-record" && strings.HasPrefix(r.URL.Path, "/routing/v1/ipns/k") {
-			got <- b
+			select {
+			case got <- b:
+			default:
+			}
 		}
 	}))
 	defer srv.Close()
@@ -340,8 +343,14 @@ func TestPutRecordSendsToRoutingEndpointsInTheBackground(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer e.Stop()
-	name, _ := e.Keystore().Generate("s")
-	rec, _ := e.SignRecord("s", "bafybeigdfeslmj3qh7cwiehrd5l4cfq6qhgctcxxlk6ou3y3ywq5wfqil4", 1)
+	name, err := e.Keystore().Generate("s")
+	if err != nil {
+		t.Fatal(err)
+	}
+	rec, err := e.SignRecord("s", "bafybeigdfeslmj3qh7cwiehrd5l4cfq6qhgctcxxlk6ou3y3ywq5wfqil4", 1)
+	if err != nil {
+		t.Fatal(err)
+	}
 	start := time.Now()
 	e.PutRecord(ctx, name, rec)
 	if d := time.Since(start); d > 5*time.Second {
@@ -354,5 +363,40 @@ func TestPutRecordSendsToRoutingEndpointsInTheBackground(t *testing.T) {
 		}
 	case <-time.After(10 * time.Second):
 		t.Fatal("the endpoint never got the record")
+	}
+}
+
+// A routing endpoint that takes the request and never answers must not hold up a put.
+func TestPutRecordDoesNotWaitOnAHungRoutingEndpoint(t *testing.T) {
+	release := make(chan struct{})
+	reached := make(chan struct{}, 1)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		select {
+		case reached <- struct{}{}:
+		default:
+		}
+		<-release
+	}))
+	defer srv.Close()
+	defer close(release) // LIFO: the handler is released before srv.Close waits for it
+	ctx := context.Background()
+	e := NewEmbedded(t.TempDir())
+	e.Offline = true
+	e.RoutingPuts = []string{srv.URL + "/routing/v1/ipns/"}
+	if err := e.Start(ctx); err != nil {
+		t.Fatal(err)
+	}
+	defer e.Stop()
+	name, _ := e.Keystore().Generate("s")
+	rec, _ := e.SignRecord("s", "bafybeigdfeslmj3qh7cwiehrd5l4cfq6qhgctcxxlk6ou3y3ywq5wfqil4", 1)
+	start := time.Now()
+	e.PutRecord(ctx, name, rec)
+	if d := time.Since(start); d > 2*time.Second {
+		t.Fatalf("a hung routing endpoint held up the put for %s", d)
+	}
+	select {
+	case <-reached:
+	case <-time.After(5 * time.Second):
+		t.Fatal("the endpoint never got the request")
 	}
 }
