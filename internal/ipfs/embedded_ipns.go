@@ -28,6 +28,9 @@ const (
 	delegatedIPNS = "https://delegated-ipfs.dev/routing/v1/ipns/"
 )
 
+// DefaultRoutingPuts: crop.top's node, and delegated-ipfs.dev while it lasts.
+var DefaultRoutingPuts = []string{"https://crop.top/routing/v1/ipns/", delegatedIPNS}
+
 // siteKey loads a site's ed25519 key from the shared keystore as a libp2p key.
 func (e *Embedded) siteKey(name string) (crypto.PrivKey, ipns.Name, error) {
 	priv, err := e.Keystore().private(name)
@@ -213,22 +216,22 @@ func parseDNSLink(txts []string) (string, bool) {
 	return "", false
 }
 
-// putDelegated sends the signed record to the delegated routing endpoint (IPIP-379). Best effort.
-func (e *Embedded) putDelegated(ctx context.Context, name ipns.Name, rec []byte) {
-	ctx, cancel := context.WithTimeout(ctx, 20*time.Second)
+// putRouting sends a signed record to one Delegated Routing endpoint. Best effort.
+func (e *Embedded) putRouting(base string, name ipns.Name, rec []byte) {
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 	defer cancel()
-	req, err := http.NewRequestWithContext(ctx, http.MethodPut, delegatedIPNS+name.String(), bytes.NewReader(rec))
+	req, err := http.NewRequestWithContext(ctx, http.MethodPut, base+name.String(), bytes.NewReader(rec))
 	if err != nil {
 		return
 	}
 	req.Header.Set("Content-Type", "application/vnd.ipfs.ipns-record")
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
-		e.Log("ipns delegated put: " + err.Error())
+		e.Log("ipns routing put " + base + ": " + err.Error())
 		return
 	}
 	resp.Body.Close()
-	e.Log(fmt.Sprintf("ipns delegated put: %s", resp.Status))
+	e.Log(fmt.Sprintf("ipns routing put %s: %s", base, resp.Status))
 }
 
 // putPubsub publishes the record on the IPNS pubsub topic kubo uses
@@ -289,21 +292,21 @@ func (e *Embedded) PutRecord(ctx context.Context, ipnsName string, rec []byte) e
 	return e.putRecord(ctx, name, rec)
 }
 
-// putRecord puts a marshalled record in the DHT, the delegated endpoint, and pubsub.
+// putRecord puts a marshalled record in the DHT and pubsub, and sends it to
+// the routing endpoints in the background.
 func (e *Embedded) putRecord(ctx context.Context, name ipns.Name, b []byte) error {
-	rkey := string(name.RoutingKey())
+	for _, base := range e.RoutingPuts {
+		go e.putRouting(base, name, b) // an endpoint that is slow or gone never holds up a publish
+	}
 	if !e.Offline {
 		e.waitForRoutingTable(ctx, 20, 60*time.Second)
 	}
 	start := time.Now()
-	closest, _ := e.dht.GetClosestPeers(ctx, rkey)
-	e.Log(fmt.Sprintf("ipns put: %d closest peers found in %s", len(closest), time.Since(start).Round(time.Millisecond)))
-	if err := e.dht.PutValue(ctx, rkey, b); err != nil {
+	if err := e.dht.PutValue(ctx, string(name.RoutingKey()), b); err != nil {
 		return fmt.Errorf("ipns put: %w", err)
 	}
 	e.Log(fmt.Sprintf("ipns put done in %s", time.Since(start).Round(time.Millisecond)))
 	if !e.Offline {
-		e.putDelegated(ctx, name, b)
 		go e.putPubsub(context.Background(), name, b)
 	}
 	return nil

@@ -4,6 +4,9 @@ import (
 	"bytes"
 	"context"
 	"crypto/rand"
+	"io"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
@@ -315,5 +318,41 @@ func TestGetRecordReturnsTheStoredRecord(t *testing.T) {
 	r, err := e.NetworkRecord(ctx, name)
 	if err != nil || r.Sequence != 3 || r.Value != "/ipfs/bafybeigdfeslmj3qh7cwiehrd5l4cfq6qhgctcxxlk6ou3y3ywq5wfqil4" {
 		t.Fatalf("NetworkRecord: %+v %v", r, err)
+	}
+}
+
+// A routing endpoint gets each record in the background; one that is gone
+// never holds up a publish.
+func TestPutRecordSendsToRoutingEndpointsInTheBackground(t *testing.T) {
+	got := make(chan []byte, 1)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		b, _ := io.ReadAll(r.Body)
+		if r.Method == http.MethodPut && r.Header.Get("Content-Type") == "application/vnd.ipfs.ipns-record" && strings.HasPrefix(r.URL.Path, "/routing/v1/ipns/k") {
+			got <- b
+		}
+	}))
+	defer srv.Close()
+	ctx := context.Background()
+	e := NewEmbedded(t.TempDir())
+	e.Offline = true
+	e.RoutingPuts = []string{"http://127.0.0.1:1/routing/v1/ipns/", srv.URL + "/routing/v1/ipns/"} // the first is gone
+	if err := e.Start(ctx); err != nil {
+		t.Fatal(err)
+	}
+	defer e.Stop()
+	name, _ := e.Keystore().Generate("s")
+	rec, _ := e.SignRecord("s", "bafybeigdfeslmj3qh7cwiehrd5l4cfq6qhgctcxxlk6ou3y3ywq5wfqil4", 1)
+	start := time.Now()
+	e.PutRecord(ctx, name, rec)
+	if d := time.Since(start); d > 5*time.Second {
+		t.Fatalf("a routing endpoint held up the put for %s", d)
+	}
+	select {
+	case b := <-got:
+		if !bytes.Equal(b, rec) {
+			t.Fatal("the endpoint got other bytes")
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatal("the endpoint never got the record")
 	}
 }

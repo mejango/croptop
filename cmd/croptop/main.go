@@ -456,6 +456,7 @@ func (a *app) open(engine string) error {
 	if a.cfg.EngineName() == "embedded" {
 		e := ipfs.NewEmbedded(a.dataDir)
 		e.Log = logf
+		e.RoutingPuts = ipfs.DefaultRoutingPuts
 		a.engine = e
 	} else {
 		bin := a.cfg.KuboBin

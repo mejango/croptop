@@ -54,6 +54,10 @@ type Embedded struct {
 	// /dns4/host.proxy.rlwy.net/tcp/12345. A node that announces is treated as
 	// publicly reachable and serves the DHT.
 	Announce []string
+	// RoutingPuts are Delegated Routing endpoints (…/routing/v1/ipns/) each
+	// published record is also sent to, in the background. Empty for a host:
+	// it is the endpoint.
+	RoutingPuts []string
 
 	mu      sync.Mutex
 	running bool
