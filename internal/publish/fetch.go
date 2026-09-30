@@ -170,6 +170,9 @@ func (p *Publisher) prewarm(ctx context.Context, site *store.Site, cid string) {
 	client := &http.Client{Timeout: 80 * time.Second}
 	var wg sync.WaitGroup
 	for _, u := range urls {
+		if strings.Contains(u, "dweb.link") {
+			continue // refuses programmatic fetches since 2026-09-21
+		}
 		u := u
 		wg.Add(1)
 		go func() {
@@ -198,6 +201,9 @@ func (p *Publisher) prewarmAll(site *store.Site, cid string) {
 	ctx, cancel := context.WithTimeout(context.Background(), 40*time.Minute)
 	defer cancel()
 	base := gateway.CIDURL(site, cid)
+	if strings.Contains(base, "dweb.link") {
+		return // a CIDv0 root: its only CID gateway refuses programmatic fetches
+	}
 	dir := p.Store.PublicDir(site.ID)
 	var paths []string
 	filepath.WalkDir(dir, func(path string, d fs.DirEntry, err error) error {

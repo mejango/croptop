@@ -225,14 +225,13 @@ func FetchURLs(ipns, cid string) []string {
 				out = append(out, nameBase(g, cid))
 			}
 		}
-		out = append(out, "https://dweb.link/ipfs/"+cid+"/")
 	}
 	for _, g := range Table {
 		if g.Names {
 			out = append(out, nameBase(g, ipns))
 		}
 	}
-	return append(out, "https://dweb.link/ipns/"+ipns+"/")
+	return out
 }
 
 // URLs lists the site's URL on every gateway, canonical first.

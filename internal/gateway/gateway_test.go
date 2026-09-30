@@ -118,7 +118,12 @@ func TestLimoHasNoNameResolution(t *testing.T) {
 		t.Fatalf("cidv0 url: %s", got)
 	}
 	urls := FetchURLs("k51abc", "bafyX")
-	if urls[0] != "https://bafyX.eth.sucks/" || urls[len(urls)-1] != "https://dweb.link/ipns/k51abc/" {
+	if urls[0] != "https://bafyX.eth.sucks/" || urls[len(urls)-1] != "https://k51abc.crop.top/" {
 		t.Fatalf("fetch urls: %v", urls)
+	}
+	for _, u := range urls {
+		if strings.Contains(u, "dweb.link") || strings.Contains(u, "ipfs.io") {
+			t.Fatalf("a sunset gateway is still listed: %s", u) // they refuse programmatic fetches since 2026-09-21
+		}
 	}
 }
