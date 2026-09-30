@@ -49,8 +49,9 @@ at `crop.top/routing/v1/ipns/…` so clients have one address.
 **Bootstrap.** The node answers `GET /v0/host/peers` with its announced multiaddrs
 and peer ID; the Worker proxies it (cached one hour). The app bootstraps from the
 default peers plus these, fetched at start (5 s timeout) with a copy built into the
-binary as fallback. The embedded engine keeps its peerstore across restarts, so a
-node that has joined once does not need a bootstrap peer to rejoin.
+binary as fallback. The embedded engine remembers up to 64 peers it was connected to
+(`node/peers.json`) and dials them at start, so a node that has joined
+once does not need a bootstrap peer to rejoin.
 
 **Gateways.** Drop dweb.link and ipfs.io from `gateway.FetchURLs` and from
 warm-ups. New nft.json files use `ipfs://<cid>` (see F).

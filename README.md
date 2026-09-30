@@ -194,8 +194,10 @@ hole punching. `kubo` downloads and runs kubo v0.43.0 as a child process
 instead. Switch with `croptop --engine kubo`; the choice is remembered.
 Keys are shared between engines, so switching back and forth is safe.
 
-A publish writes the IPNS record to the DHT, to the public delegated
-routing endpoint, and to the IPNS pubsub topic. ipfs.io reflects a new
+A publish writes the IPNS record to the DHT and the IPNS pubsub topic, and
+sends it to crop.top's routing endpoint (and delegated-ipfs.dev while it
+lasts). The node joins the network through the default bootstrap peers,
+crop.top's node, and the peers it was connected to last time. ipfs.io reflects a new
 version within a couple of minutes. eth.sucks, eth.shop and eth.limo keep
 their own resolution caches and can show the previous version for a long
 while after that, whichever engine published; the console's site page

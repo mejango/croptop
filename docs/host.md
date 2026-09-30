@@ -159,6 +159,14 @@ makes `yoursite.crop.top` or
   refuses a host without it, which would take the post for the whole site.
 - `GET /v0/host/blocks/<cid>`: one raw block, such as a pushed version's root.
   Clients check it against the CID.
+- `GET|PUT /routing/v1/ipns/<name>`: the IPNS part of the Delegated Routing V1
+  HTTP API, which delegated-ipfs.dev served until 2026-09-30. GET answers pushed
+  sites from the registry and others from the node's DHT; PUT takes a signed
+  record (checked against the name) and puts it in the DHT. The node runs up to
+  32 PUTs and 32 lookups at a time and answers `429` with `Retry-After` beyond
+  that; a lookup gives up after 10 s, and names over 128 characters are refused.
+- `GET /v0/host/peers`: `{"id", "addrs"}`, the node's peer ID and announced
+  addresses. croptop dials them at start to join the network.
 - `GET /ipfs/<cid>/<path>` on the bare domain: a file of a version the host
   holds. The Worker answers only for pushed versions.
 
