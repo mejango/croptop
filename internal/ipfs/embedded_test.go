@@ -18,6 +18,7 @@ import (
 	"github.com/ipfs/go-cid"
 	"github.com/libp2p/go-libp2p/core/crypto"
 	"github.com/libp2p/go-libp2p/core/peer"
+	ma "github.com/multiformats/go-multiaddr"
 )
 
 // kuboNode returns the downloaded kubo when present, for parity checks.
@@ -442,4 +443,47 @@ func TestPeeringIncludesCropTop(t *testing.T) {
 		}
 	}
 	t.Fatal("crop.top's node is not in the peering list")
+}
+
+// savePeers remembers a connected peer by its public addresses only, and an
+// empty list leaves the last good file alone.
+func TestSavePeersKeepsPublicAddressesAndTheLastGoodList(t *testing.T) {
+	ctx := context.Background()
+	start := func() *Embedded {
+		e := NewEmbedded(t.TempDir())
+		e.Offline = true
+		if err := e.Start(ctx); err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() { e.Stop() })
+		return e
+	}
+	a, b, c := start(), start(), start()
+	if err := a.host.Connect(ctx, peer.AddrInfo{ID: b.host.ID(), Addrs: b.host.Addrs()}); err != nil {
+		t.Fatal(err)
+	}
+	pub := ma.StringCast("/ip4/1.2.3.4/tcp/4001")
+	a.host.Peerstore().AddAddr(b.host.ID(), pub, time.Hour)
+	// an offline peer is also known by its loopback address, which must not be kept
+	if n := len(a.host.Peerstore().Addrs(b.host.ID())); n < 2 {
+		t.Fatalf("a knows %d addresses for b, want its loopback one and the public one", n)
+	}
+	a.savePeers()
+	got := a.loadPeers()
+	if len(got) != 1 || got[0].ID != b.host.ID() || len(got[0].Addrs) != 1 || !got[0].Addrs[0].Equal(pub) {
+		t.Fatalf("savePeers kept %v, want only %s of b", got, pub)
+	}
+
+	// c has no connections: a save must leave its last good file as it was
+	if n := len(c.host.Network().Peers()); n != 0 {
+		t.Fatalf("c is connected to %d peers", n)
+	}
+	sentinel := []byte(`[{"id":"12D3KooWDSjjQ4GuTGwEbxw6QnfRu3GLa45GzN5s7vAgKTo6wLqY","addrs":["/dns4/altaria.proxy.rlwy.net/tcp/35880"]}]`)
+	if err := os.WriteFile(c.peersFile(), sentinel, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	c.savePeers()
+	if back, err := os.ReadFile(c.peersFile()); err != nil || !bytes.Equal(back, sentinel) {
+		t.Fatalf("an empty list replaced the last good one: %q %v", back, err)
+	}
 }

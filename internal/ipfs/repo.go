@@ -17,7 +17,8 @@ const (
 	swarmPortLow, swarmPortHigh     = 4001, 4011
 )
 
-// Same content-provider peers Planet configures (docs.ipfs.tech peering list).
+// crop.top's node, plus the same content-provider peers Planet configures
+// (docs.ipfs.tech peering list).
 var peers = []map[string]any{
 	{"ID": "12D3KooWDSjjQ4GuTGwEbxw6QnfRu3GLa45GzN5s7vAgKTo6wLqY", "Addrs": []string{"/dns4/altaria.proxy.rlwy.net/tcp/35880"}}, // crop.top's node
 	{"ID": "12D3KooWBJY6ZVV8Tk8UDDFMEqWoxn89Xc8wnpm8uBFSR3ijDkui", "Addrs": []string{ // Pinnable

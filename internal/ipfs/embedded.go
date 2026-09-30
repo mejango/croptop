@@ -328,8 +328,8 @@ func (e *Embedded) relaySource(ctx context.Context, num int) <-chan peer.AddrInf
 	return out
 }
 
-// peer keeps connections to the content providers Planet peers with, and
-// to any IPFS node on this machine, retrying in the background.
+// peer keeps connections to crop.top's node and the content providers Planet
+// peers with, and to any IPFS node on this machine, retrying in the background.
 func (e *Embedded) peer(ctx context.Context) {
 	infos := peeringInfos()
 	for {

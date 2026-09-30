@@ -97,15 +97,20 @@ func (e *Embedded) savePeers() {
 	// a temp file of its own: Stop and the ten-minute save can overlap
 	f, err := os.CreateTemp(filepath.Dir(e.peersFile()), "peers-*.json")
 	if err != nil {
+		e.Log("save peers: " + err.Error())
 		return
 	}
 	_, err = f.Write(b)
-	f.Close()
-	if err != nil {
-		os.Remove(f.Name())
-		return
+	if cerr := f.Close(); err == nil {
+		err = cerr
 	}
-	os.Rename(f.Name(), e.peersFile())
+	if err == nil {
+		err = os.Rename(f.Name(), e.peersFile())
+	}
+	if err != nil { // the last good file stays, and no temp file is left behind
+		os.Remove(f.Name())
+		e.Log("save peers: " + err.Error())
+	}
 }
 
 // hostPeers asks PeersURL for the peers a host runs. It gives up after 5 s;
@@ -118,6 +123,7 @@ func (e *Embedded) hostPeers(ctx context.Context) []peer.AddrInfo {
 	defer cancel()
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, e.PeersURL, nil)
 	if err != nil {
+		e.Log("host peers: " + err.Error())
 		return nil
 	}
 	resp, err := http.DefaultClient.Do(req)
@@ -126,11 +132,20 @@ func (e *Embedded) hostPeers(ctx context.Context) []peer.AddrInfo {
 		return nil
 	}
 	defer resp.Body.Close()
-	var sp savedPeer
-	if resp.StatusCode != 200 || json.NewDecoder(io.LimitReader(resp.Body, 64<<10)).Decode(&sp) != nil {
+	if resp.StatusCode != http.StatusOK {
+		e.Log("host peers: " + resp.Status)
 		return nil
 	}
-	return addrInfos([]savedPeer{sp})
+	var sp savedPeer
+	if err := json.NewDecoder(io.LimitReader(resp.Body, 64<<10)).Decode(&sp); err != nil {
+		e.Log("host peers: " + err.Error())
+		return nil
+	}
+	infos := addrInfos([]savedPeer{sp})
+	if len(infos) == 0 { // valid JSON of another shape decodes to an empty peer
+		e.Log("host peers: no dialable peer in the response")
+	}
+	return infos
 }
 
 // PeerAddrs are the addresses other nodes should dial to reach this one: the
