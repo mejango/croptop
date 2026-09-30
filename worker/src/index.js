@@ -89,10 +89,10 @@ async function resolveKey(env, ipns) {
   return cached(env, "ipns:" + ipns, async () => {
     // the node answers from the DHT; delegated-ipfs.dev is a fallback while it
     // lasts; the upstream gateways resolve the rest through their own nodes
-    const sources = [env.NODE && `${env.NODE}/routing/v1/ipns/${ipns}`, `https://delegated-ipfs.dev/routing/v1/ipns/${ipns}`].filter(Boolean);
-    for (const src of sources) {
+    const sources = [env.NODE && [env.NODE + `/routing/v1/ipns/${ipns}`, 12000], [`https://delegated-ipfs.dev/routing/v1/ipns/${ipns}`, 3000]].filter(Boolean);
+    for (const [src, ms] of sources) {
       try {
-        const r = await fetch(src, { headers: { Accept: "application/vnd.ipfs.ipns-record" }, redirect: "follow", signal: AbortSignal.timeout(20000) });
+        const r = await fetch(src, { headers: { Accept: "application/vnd.ipfs.ipns-record" }, redirect: "follow", signal: AbortSignal.timeout(ms) });
         if (!r.ok || !(r.headers.get("content-type") || "").includes("ipns-record")) continue;
         const rec = parseRecord(new Uint8Array(await r.arrayBuffer()));
         if (rec.value && rec.value.startsWith("/ipfs/")) return rec.value.slice(6).split("/")[0];
@@ -331,19 +331,33 @@ async function routing(request, env, name) {
   if (!get && request.method !== "PUT") return text("method not allowed", 405);
   if (get) {
     const e = await entryByKey(env, name);
-    if (e && e.record) return new Response(request.method === "HEAD" ? null : Uint8Array.from(atob(e.record), (c) => c.charCodeAt(0)), { headers: raw });
+    if (e && e.record) {
+      const decoded = fromBase64(e.record);
+      if (decoded) return new Response(request.method === "HEAD" ? null : decoded, { headers: raw });
+    }
   }
   if (!env.NODE) return text("not found", 404);
-  const r = await fetch(`${env.NODE}/routing/v1/ipns/${name}`, { method: request.method, headers: { ...UA, "content-type": raw["content-type"] }, body: get ? undefined : await request.arrayBuffer(), signal: AbortSignal.timeout(35000) }).catch(() => null);
+  if (!get) {
+    const contentLength = Number(request.headers.get("content-length") || 0);
+    if (contentLength > 10240) return text("record too large", 413);
+  }
+  let body;
+  if (!get) {
+    body = await request.arrayBuffer();
+    if (body.byteLength > 10240) return text("record too large", 413);
+  }
+  const r = await fetch(`${env.NODE}/routing/v1/ipns/${name}`, { method: request.method, headers: { ...UA, "content-type": raw["content-type"] }, body, signal: AbortSignal.timeout(35000) }).catch(() => null);
   if (!r) return text("routing unavailable", 502);
-  return new Response(r.body, { status: r.status, headers: r.ok && get ? raw : { "content-type": r.headers.get("content-type") || "text/plain" } });
+  const resHeaders = r.ok && get ? raw : { "content-type": r.headers.get("content-type") || "text/plain" };
+  if (r.headers.get("retry-after")) resHeaders["retry-after"] = r.headers.get("retry-after");
+  return new Response(r.body, { status: r.status, headers: resHeaders });
 }
 
 // peers lists the node's addresses, for new nodes to join the network through
 // now that the public bootstrap nodes are gone.
 async function peers(env) {
   if (!env.NODE) return text("not found", 404);
-  const r = await fetch(`${env.NODE}/v0/host/peers`, { headers: UA, cf: { cacheTtl: 3600, cacheEverything: true }, signal: AbortSignal.timeout(10000) }).catch(() => null);
+  const r = await fetch(`${env.NODE}/v0/host/peers`, { headers: UA, cf: { cacheTtlByStatus: { "200-299": 3600, "400-599": 0 }, cacheEverything: true }, signal: AbortSignal.timeout(10000) }).catch(() => null);
   if (!r || !r.ok) return text("peers unavailable", 502);
   return new Response(r.body, { headers: { "content-type": "application/json", "cache-control": "public, max-age=3600" } });
 }
@@ -575,18 +589,25 @@ async function notifyNode(env, request, cid, signedHost) {
 // ---------- IPNS records: keep them alive from here
 
 async function republish(env, ipns, recordB64) {
-  const body = Uint8Array.from(atob(recordB64), (c) => c.charCodeAt(0));
-  const put = (u) => fetch(u, { method: "PUT", headers: { "content-type": "application/vnd.ipfs.ipns-record" }, body, signal: AbortSignal.timeout(20000) }).catch(() => {});
-  await Promise.all([env.NODE && put(`${env.NODE}/routing/v1/ipns/${ipns}`), put(`https://delegated-ipfs.dev/routing/v1/ipns/${ipns}`)]);
+  const body = fromBase64(recordB64);
+  if (!body) return;
+  const putNode = env.NODE && fetch(`${env.NODE}/routing/v1/ipns/${ipns}`, { method: "PUT", headers: { "content-type": "application/vnd.ipfs.ipns-record" }, body, signal: AbortSignal.timeout(20000) }).catch(() => null).then((r) => { if (r && !r.ok) console.log("republish", ipns, "node", r.status); });
+  const putDelegated = fetch(`https://delegated-ipfs.dev/routing/v1/ipns/${ipns}`, { method: "PUT", headers: { "content-type": "application/vnd.ipfs.ipns-record" }, body, signal: AbortSignal.timeout(3000) }).catch(() => {});
+  await Promise.all([putNode, putDelegated]);
 }
 
 async function republishAll(env) {
+  // the node re-puts its own sites; this cron is the backstop for ones others
+  // claimed. pause to avoid overloading the node's 32 concurrent slots (429).
   let cursor;
   do {
     const page = await env.REGISTRY.list({ prefix: "key:", cursor });
     for (const k of page.keys) {
       const e = await env.REGISTRY.get(k.name, { type: "json" });
-      if (e && e.record) await republish(env, e.ipns, e.record);
+      if (e && e.record) {
+        await republish(env, e.ipns, e.record);
+        await new Promise((r) => setTimeout(r, 1000));
+      }
     }
     cursor = page.list_complete ? undefined : page.cursor;
   } while (cursor);
@@ -650,6 +671,11 @@ function toBase64(buf) {
   let bin = "";
   for (let i = 0; i < bytes.length; i += 0x8000) bin += String.fromCharCode.apply(null, bytes.subarray(i, i + 0x8000));
   return btoa(bin);
+}
+
+// fromBase64 decodes base64, or gives null for anything that isn't.
+function fromBase64(s) {
+  try { return Uint8Array.from(atob(s), (c) => c.charCodeAt(0)); } catch { return null; }
 }
 
 // ---------- small helpers

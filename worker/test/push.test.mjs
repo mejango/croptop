@@ -225,3 +225,64 @@ test("republishing sends a record to the node and to delegated routing", async (
     globalThis.fetch = realFetch;
   }
 });
+
+test("routing PUT over 10240 bytes answers 413", async () => {
+  const env = { DOMAIN: "crop.test", NODE: "https://node.test", SITES: r2(), REGISTRY: kv() };
+  const calls = [];
+  const realFetch = globalThis.fetch;
+  globalThis.fetch = async (u, init = {}) => { calls.push({ u: String(u) }); return new Response(null); };
+  try {
+    const large = new Uint8Array(10241);
+    const r = await worker.fetch(new Request("https://crop.test/routing/v1/ipns/k51qzi5uqu5dhxiwvl4xx3sco13y50yoo28rbhe3sneirnj2qatinx75qpsqtb", { method: "PUT", body: large }), env, { waitUntil() {} });
+    assert.equal(r.status, 413);
+    assert.equal(calls.length, 0, "node is never called for oversized PUT");
+  } finally {
+    globalThis.fetch = realFetch;
+  }
+});
+
+test("bad registry record falls through to node", async () => {
+  const env = { DOMAIN: "crop.test", NODE: "https://node.test", SITES: r2(), REGISTRY: kv() };
+  const realFetch = globalThis.fetch;
+  globalThis.fetch = async (u, init = {}) => {
+    if (u.startsWith("https://node.test/routing/v1/ipns/")) return new Response(recordBytes("/ipfs/bafyfromnode", 3), { headers: { "content-type": "application/vnd.ipfs.ipns-record" } });
+    return new Response("nope", { status: 404 });
+  };
+  try {
+    const bad = "k51qzi5uqu5dhxiwvl4xx3sco13y50yoo28rbhe3sneirnj2qatinx75qpsqtb";
+    await env.REGISTRY.put("key:" + bad, JSON.stringify({ ipns: bad, cid: "bafyx", sequence: 1, record: "%%%" }));
+    const r = await worker.fetch(new Request("https://crop.test/routing/v1/ipns/" + bad), env, { waitUntil() {} });
+    assert.equal(r.status, 200);
+    assert.equal(r.headers.get("content-type"), "application/vnd.ipfs.ipns-record");
+  } finally {
+    globalThis.fetch = realFetch;
+  }
+});
+
+test("republish with bad record resolves without throwing", async () => {
+  const puts = [];
+  const realFetch = globalThis.fetch;
+  globalThis.fetch = async (u, init = {}) => { puts.push(String(u)); return new Response(null); };
+  try {
+    await republish({ NODE: "https://node.test" }, "k51qzi5uqu5dhxiwvl4xx3sco13y50yoo28rbhe3sneirnj2qatinx75qpsqtb", "%%%");
+    assert.equal(puts.length, 0, "no fetch when record is malformed");
+  } finally {
+    globalThis.fetch = realFetch;
+  }
+});
+
+test("routing passes through node 429 with retry-after", async () => {
+  const env = { DOMAIN: "crop.test", NODE: "https://node.test", SITES: r2(), REGISTRY: kv() };
+  const realFetch = globalThis.fetch;
+  globalThis.fetch = async (u, init = {}) => {
+    if (u.startsWith("https://node.test/routing/v1/ipns/")) return new Response("too many requests", { status: 429, headers: { "retry-after": "10" } });
+    return new Response("nope", { status: 404 });
+  };
+  try {
+    const r = await worker.fetch(new Request("https://crop.test/routing/v1/ipns/k51qzi5uqu5dhxiwvl4xx3sco13y50yoo28rbhe3sneirnj2qatinx75qpsqtb"), env, { waitUntil() {} });
+    assert.equal(r.status, 429);
+    assert.equal(r.headers.get("retry-after"), "10");
+  } finally {
+    globalThis.fetch = realFetch;
+  }
+});
