@@ -57,6 +57,13 @@ assets/                   copied from the template
 `discordLink`, `farcasterEnabled`, `podcastCategories`, `podcastLanguage`,
 `podcastExplicit`, `tags`. Absent optionals are omitted, not null.
 
+Croptop also writes the settings a page render depends on, so a machine
+holding only the key renders a new post the way the owner's machine does:
+`domain`, `croptopGateway`, `croptopName`, `croptopCustomDomain`, and
+`customCodeHead`, `customCodeBodyStart`, `customCodeBodyEnd` with their
+`…Enabled` flags. They are public anyway, in the site's URLs and HTML.
+Planet ignores them.
+
 `articles` holds every post with `articleType` 0 (blog), newest pinned
 first, then newest created first. Pages (`articleType` 1) are rendered but
 not listed.

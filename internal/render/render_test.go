@@ -297,3 +297,37 @@ func TestPostPageHasNoPythonBooleans(t *testing.T) {
 		t.Fatal("expected a lowercase boolean in the post page script")
 	}
 }
+
+// Tags come from other machines too, so a tag must not be able to write
+// outside the site, replace its home page, or break out of its tag page.
+func TestHostileTagsGetNoPage(t *testing.T) {
+	r, s := fixtureRenderer(t)
+	hostile := []string{"../outside", "a/b", "Index", "page1", "x'y", "x\"y", "<b>", "ok"}
+	tags := map[string]string{}
+	for _, k := range hostile {
+		tags[k] = k
+	}
+	empty := ""
+	if err := s.SavePost(fixtureID, &store.Post{ID: "TAGGED", Title: "tagged", Link: "/TAGGED/", Attachments: []string{}, Tags: tags, Summary: &empty}); err != nil {
+		t.Fatal(err)
+	}
+	if err := r.Render(context.Background(), fixtureID); err != nil {
+		t.Fatal(err)
+	}
+	pub := s.PublicDir(fixtureID)
+	if _, err := os.Stat(filepath.Join(pub, "..", "outside.html")); err == nil {
+		t.Error("a tag wrote outside the site's folder")
+	}
+	if b, _ := os.ReadFile(filepath.Join(pub, "index.html")); strings.Contains(string(b), "tag_key") || strings.Contains(string(b), "'Index' in article.tags") {
+		t.Error("a tag replaced the home page")
+	}
+	if _, err := os.Stat(filepath.Join(pub, "ok.html")); err != nil {
+		t.Error("an ordinary tag lost its page")
+	}
+	entries, _ := os.ReadDir(pub)
+	for _, e := range entries {
+		if strings.ContainsAny(e.Name(), `'"<`) {
+			t.Errorf("unsafe tag page %s", e.Name())
+		}
+	}
+}

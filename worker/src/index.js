@@ -44,6 +44,13 @@ async function route(request, env, ctx) {
 async function serveBare(request, url, env, ctx) {
   const p = url.pathname;
   if (p.startsWith("/v0/host/")) return api(request, url, env, ctx);
+  if (p.startsWith("/ipfs/")) {
+    // a pushed version by CID, as croptop reads one to add a post to it
+    const [cid, ...rest] = p.slice(6).split("/");
+    if (!/^(bafy|qm)[a-z0-9]+$/i.test(cid)) return text("bad cid", 400);
+    if (rest.length === 0) return Response.redirect(url.origin + p + "/", 301);
+    return serveFromR2(request, env, cid, "/" + rest.join("/"), "/ipfs/" + cid, false);
+  }
   if (p === "/install.sh") return new Response(installSh, { headers: { "content-type": "text/x-shellscript; charset=utf-8", "cache-control": "public, max-age=300" } });
   if (p === "/install.ps1") return new Response(installPs1, { headers: { "content-type": "text/plain; charset=utf-8", "cache-control": "public, max-age=300" } });
   if (p === "/install" || p === "/download") return Response.redirect("https://github.com/" + "mejango/croptop/releases/latest", 302);
@@ -172,18 +179,18 @@ async function serveUpstream(request, env, cid, path) {
   return text(`no upstream could serve ${cid}${path}` + (last ? ` (${last.status})` : ""), 502);
 }
 
-async function serveFromR2(request, env, cid, path, base) {
-  let key = `sites/${cid}${path}`;
-  if (path.endsWith("/")) key += "index.html";
-  let obj = await env.SITES.get(key);
+async function serveFromR2(request, env, cid, path, base, upstream = true) {
+  let rel = path.slice(1);
+  try { rel = decodeURIComponent(rel); } catch {} // stored under the names as pushed
+  const obj = await r2(env, cid, path.endsWith("/") ? rel + "index.html" : rel);
   if (!obj && !path.endsWith("/")) {
     // a directory asked for without its slash
-    const idx = await env.SITES.head(`sites/${cid}${path}/index.html`);
+    const idx = await r2(env, cid, rel + "/index.html", true);
     if (idx) return Response.redirect(new URL(base + path + "/", request.url).toString(), 301);
   }
-  if (!obj) return serveUpstream(request, env, cid, path);
+  if (!obj) return upstream ? serveUpstream(request, env, cid, path) : text("not here", 404);
   const h = new Headers();
-  h.set("content-type", contentType(key));
+  h.set("content-type", contentType(obj.key));
   h.set("etag", `"${obj.httpEtag.replace(/"/g, "")}"`);
   h.set("x-ipfs-roots", cid);
   h.set("cache-control", "public, max-age=60");
@@ -196,6 +203,119 @@ const TYPES = { html: "text/html; charset=utf-8", htm: "text/html; charset=utf-8
 function contentType(key) {
   const ext = key.slice(key.lastIndexOf(".") + 1).toLowerCase();
   return TYPES[ext] || "application/octet-stream";
+}
+
+// r2 finds a file of a pushed version: pushed with it, or carried from an
+// earlier version when the push held only what changed.
+async function r2(env, cid, rel, headOnly) {
+  const op = headOnly ? "head" : "get";
+  const o = await env.SITES[op](`sites/${cid}/${rel}`);
+  if (o) return o;
+  const from = (await carryOf(env, cid)).get(rel);
+  return from ? env.SITES[op](`sites/${from}/${rel}`) : null;
+}
+
+// A push on a parent holds only what changed. carry/<cid>.json maps each
+// other file of the version to the earlier version whose files hold it.
+// Versions never change, so the maps are cached; a missing one is not, as it
+// may be written when the version's last part arrives.
+const carries = new Map();
+async function carryOf(env, cid) {
+  if (carries.has(cid)) return carries.get(cid);
+  const o = await env.SITES.get(`carry/${cid}.json`);
+  if (!o) return new Map();
+  const carry = new Map(Object.entries(await o.json()));
+  if (carries.size >= 64) carries.delete(carries.keys().next().value);
+  carries.set(cid, carry);
+  return carry;
+}
+
+async function saveCarry(env, cid, parent) {
+  const carry = new Map(await carryOf(env, parent));
+  for (const rel of await filesOf(env, parent)) carry.set(rel, parent);
+  for (const rel of await filesOf(env, cid)) carry.delete(rel);
+  await env.SITES.put(`carry/${cid}.json`, JSON.stringify(Object.fromEntries(carry)));
+  carries.set(cid, carry);
+}
+
+// filesOf lists the files pushed with a version, not the ones it carries.
+async function filesOf(env, cid) {
+  const out = [];
+  let cursor;
+  do {
+    const page = await env.SITES.list({ prefix: `sites/${cid}/`, cursor, limit: 1000 });
+    for (const o of page.objects) out.push(o.key.slice(`sites/${cid}/`.length));
+    cursor = page.truncated ? page.cursor : undefined;
+  } while (cursor);
+  return out;
+}
+
+// heads/<ipns> in R2 is the version this host holds for a site. R2 reads are
+// consistent everywhere at once, unlike KV, and a conditional put makes a push
+// on a parent a compare-and-swap, so two posts never drop each other.
+async function headOf(env, ipns, entry) {
+  const o = await env.SITES.get(`heads/${ipns}`);
+  if (o) return { ...(await o.json()), etag: o.etag };
+  return entry && entry.cid ? { cid: entry.cid, sequence: entry.sequence } : null; // last pushed before heads existed
+}
+
+// claimVersion lets only the key that first pushed a version write its files.
+// A signature proves who holds a key, not that the files hash to the CID, so
+// without this any key could replace what crop.top serves for another site's
+// version. Versions stored before owners were recorded take no more writes.
+async function claimVersion(env, cid, ipns) {
+  const o = await env.SITES.get(`owners/${cid}`);
+  if (o) return (await o.text()) === ipns;
+  const stored = await env.SITES.list({ prefix: `sites/${cid}/`, limit: 1 });
+  if (stored.objects.length) return false;
+  await env.SITES.put(`owners/${cid}`, ipns);
+  return true;
+}
+
+function pushConflict(cur, seq, parent) {
+  if (cur && seq < cur.sequence) return `host already has sequence ${cur.sequence}`;
+  if (parent && (!cur || cur.cid !== parent)) return `host holds ${cur ? cur.cid : "nothing"}, not ${parent}`;
+  return "";
+}
+
+// putBlock keeps a folder block pushed with a version if it hashes to its CID
+// (CIDv1, dag-pb, sha2-256: what croptop's folders are), so nobody can store a
+// forged block under another version's CID.
+async function putBlock(env, cid, value) {
+  const want = cidDigest(cid);
+  if (!want || (await env.SITES.head(`blocks/${cid}`))) return;
+  const bytes = new Uint8Array(await value.arrayBuffer());
+  const got = new Uint8Array(await crypto.subtle.digest("SHA-256", bytes));
+  if (got.every((x, i) => x === want[i])) await env.SITES.put(`blocks/${cid}`, bytes);
+}
+
+// cidDigest returns the sha2-256 digest inside a CIDv1 dag-pb CID ("bafy…"), or null.
+function cidDigest(cid) {
+  const A = "abcdefghijklmnopqrstuvwxyz234567", out = [];
+  let bits = 0, val = 0;
+  for (const ch of cid.slice(1)) {
+    const i = A.indexOf(ch);
+    if (i < 0) return null;
+    val = ((val << 5) | i) & 0xfff;
+    bits += 5;
+    if (bits >= 8) { bits -= 8; out.push((val >> bits) & 0xff); }
+  }
+  const b = Uint8Array.from(out);
+  return cid[0] === "b" && b.length === 36 && b[0] === 1 && b[1] === 0x70 && b[2] === 0x12 && b[3] === 32 ? b.slice(4) : null;
+}
+
+// block serves one raw block: a folder of a pushed version, or anything the
+// node holds. Clients check it against its CID.
+async function block(env, cid) {
+  if (!/^(bafy|Qm)[a-zA-Z0-9]+$/.test(cid)) return text("bad cid", 400);
+  const raw = { "content-type": "application/vnd.ipld.raw" };
+  const o = await env.SITES.get(`blocks/${cid}`);
+  if (o) return new Response(o.body, { headers: raw });
+  if (env.NODE) {
+    const r = await fetch(`${env.NODE}/ipfs/${cid}?format=raw`, { headers: { ...UA, Accept: "application/vnd.ipld.raw" }, signal: AbortSignal.timeout(20000) }).catch(() => null);
+    if (r && r.ok) return new Response(r.body, { headers: raw });
+  }
+  return text("not found", 404);
 }
 
 // ---------- registry
@@ -232,7 +352,12 @@ async function api(request, url, env, ctx) {
   if (p === "names" && request.method === "POST") return claim(request, url, env);
   if (p === "push" && request.method === "POST") return push(request, url, env, ctx);
   if (p.startsWith("names/") && request.method === "GET") return entryResponse(await entryByName(env, p.slice(6)));
-  if (p.startsWith("keys/") && request.method === "GET") return entryResponse(await entryByKey(env, p.slice(5)));
+  if (p.startsWith("keys/") && request.method === "GET") {
+    const ipns = p.slice(5), e = await entryByKey(env, ipns), cur = await headOf(env, ipns, e);
+    // acceptsParent: pushes of only what changed are understood here
+    return entryResponse(cur ? { ipns, ...e, cid: cur.cid, sequence: cur.sequence, acceptsParent: true } : e);
+  }
+  if (p.startsWith("blocks/") && request.method === "GET") return block(env, p.slice(7));
   if (p === "debug/resolve" && request.method === "GET") return debugResolve(env, url.searchParams.get("name") || "");
   if (p === "debug/nodeforward" && request.method === "GET" && env.NODE) {
     // forward a slice of a pushed site's real files to the node, to find what a firewall dislikes
@@ -298,19 +423,25 @@ async function claim(request, url, env) {
 
 async function push(request, url, env, ctx) {
   const h = (k) => request.headers.get("X-Croptop-" + k) || "";
-  const ipns = h("Ipns"), cid = h("Cid"), seq = Number(h("Seq")), t = Number(h("Time"));
+  const ipns = h("Ipns"), cid = h("Cid"), seq = Number(h("Seq")), t = Number(h("Time")), parent = h("Parent");
   if (!/^(bafy|Qm)[a-zA-Z0-9]+$/.test(cid) || !Number.isFinite(seq)) return text("bad cid or sequence", 400);
   const ok = fresh(t) && (await verify(ipns, pushMessage(signingHost(request, url, env), ipns, cid, seq, t), h("Sig")));
   if (!ok) return text("bad signature", 403);
   const existing = await entryByKey(env, ipns);
-  if (existing && seq < existing.sequence) return text(`host already has sequence ${existing.sequence}`, 409);
+  const cur = await headOf(env, ipns, existing);
+  const conflict = pushConflict(cur, seq, parent);
+  if (conflict) return text(conflict, 409);
+  if (!(await claimVersion(env, cid, ipns))) return text("that version belongs to another site", 409);
   if (Number(request.headers.get("content-length") || 0) > MAX_PUSH) return text("push too large", 413);
   if (h("File")) return pushChunk(request, env, ctx, cid, h, signingHost(request, url, env));
   const form = await request.formData();
   let n = 0;
   for (const [field, value] of form.entries()) {
+    if (typeof value === "string") continue;
+    // the version's folder blocks, so the next reader can list it before any IPFS peer has it
+    if (field.startsWith("block:")) { await putBlock(env, field.slice(6), value); continue; }
     // the path rides in the field name ("file:<path>"): file names lose their directories in some parsers
-    if (!field.startsWith("file:") || typeof value === "string") continue;
+    if (!field.startsWith("file:")) continue;
     const rel = field.slice(5).replace(/^\/+/, "");
     if (!rel || rel.includes("..")) continue;
     const have = await env.SITES.head(`sites/${cid}/${rel}`);
@@ -323,6 +454,13 @@ async function push(request, url, env, ctx) {
   const final = !partCount || partNo >= partCount;
   const e = existing || { ipns };
   if (final) {
+    // a push on a parent holds only what changed; record where the rest is,
+    // then move the head, only if no other push moved it since this one began
+    // (or, for a site last pushed before heads existed, only if none was made)
+    if (parent) await saveCarry(env, cid, parent);
+    const onlyIf = !parent ? undefined : cur.etag ? { etagMatches: cur.etag } : { etagDoesNotMatch: "*" };
+    const moved = await env.SITES.put(`heads/${ipns}`, JSON.stringify({ cid, sequence: seq }), onlyIf ? { onlyIf } : {});
+    if (!moved) return text("the site changed during this push; post again", 409);
     e.cid = cid; e.sequence = seq; e.updated = new Date().toISOString();
     if (h("Record")) e.record = h("Record");
     await saveEntry(env, e);
@@ -392,13 +530,8 @@ async function pushChunk(request, env, ctx, cid, h, signedHost) {
 // from <cid>.<domain>, re-adds them, checks the cid, and provides the blocks.
 async function notifyNode(env, request, cid, signedHost) {
   try {
-    const keys = [];
-    let cursor;
-    do {
-      const page = await env.SITES.list({ prefix: `sites/${cid}/`, cursor, limit: 1000 });
-      for (const o of page.objects) keys.push(o.key.slice(`sites/${cid}/`.length));
-      cursor = page.truncated ? page.cursor : undefined;
-    } while (cursor);
+    const keys = await filesOf(env, cid);
+    for (const rel of (await carryOf(env, cid)).keys()) keys.push(rel); // the node rebuilds the whole version
     const headers = { ...UA, "Content-Type": "application/json", "X-Croptop-Signed-Host": signedHost };
     for (const k of ["Ipns", "Cid", "Seq", "Time", "Sig", "Record"]) { const v = request.headers.get("X-Croptop-" + k); if (v) headers["X-Croptop-" + k] = v; }
     const r = await fetch(`${env.NODE}/v0/host/pull`, { method: "POST", headers, body: JSON.stringify({ base: `https://${cid}.${env.DOMAIN}/`, files: keys }) });

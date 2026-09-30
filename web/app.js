@@ -301,7 +301,7 @@
     const url = siteURL(site);
     const strip = h("div", { class: "state " + cls }, h("span", { class: "dot" }));
     if (site.publishedElsewhere) {
-      strip.append(h("span", { class: "grow" }, "Another machine published this site more recently. Sync pulls its posts in and makes this machine the publisher again."),
+      strip.append(h("span", { class: "grow" }, "Another machine published this site, and taking its posts in here did not work. Sync tries again, then publishes from this machine."),
         h("button", { class: "btn", onclick: () => sync(site) }, "Sync"));
     } else if (site.lastPublishedCID) {
       strip.append(h("span", { class: "grow" }, "Live ", h("a", { href: url, target: "_blank", rel: "noopener" }, url.replace("https://", "")), (site.ipnsSequence ? `, sequence ${site.ipnsSequence}` : "") + `, published ${ago(when(site.lastPublished))}`));
@@ -673,7 +673,7 @@
         h("button", { class: "btn quiet", type: "button", onclick: async () => { if (!keyBox.value) return; await navigator.clipboard.writeText(keyBox.value); toast("Key copied"); } }, "Copy"),
         h("a", { class: "btn quiet", href: `/v0/croptop/sites/${id}/key`, download: `${site.name}.pem` }, "Download")),
       keyBox,
-      h("div", { class: "row" }, h("button", { class: "btn quiet", type: "button", onclick: () => sync(site) }, "Sync from network"), h("span", { class: "help" }, "Pull posts published from another machine, then publish from here.")));
+      h("div", { class: "row" }, h("button", { class: "btn quiet", type: "button", onclick: () => sync(site) }, "Sync from network"), h("span", { class: "help" }, "Posts published from another machine come in by themselves; this pulls them now, then publishes from here.")));
 
     const danger = h("fieldset", {}, h("legend", {}, "Danger"),
       h("div", { class: "row" }, h("button", { class: "btn quiet danger", type: "button", onclick: async () => {

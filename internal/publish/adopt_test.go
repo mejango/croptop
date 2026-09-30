@@ -88,8 +88,9 @@ func TestMergePosts(t *testing.T) {
 		{ID: "a", Title: "a-remote", Created: 10, Modified: at(30)},
 		{ID: "b", Title: "b-remote", Created: 10, Modified: at(40)},
 		{ID: "d", Title: "d-remote-only", Created: 10},
+		{ID: "e", Title: "e-deleted-here", Created: 10}, // deleted here at 100: stays deleted
 	}
-	merged, changed, added, updated := mergePosts(local, remote)
+	merged, changed, added, updated := mergePosts(local, remote, map[string]store.AppleTime{"e": 100})
 	if added != 1 || updated != 1 || len(merged) != 4 || len(changed) != 2 {
 		t.Fatalf("added %d updated %d merged %d changed %d", added, updated, len(merged), len(changed))
 	}

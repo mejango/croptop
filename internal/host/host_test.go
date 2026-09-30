@@ -350,6 +350,84 @@ func TestBadSignatureAndNames(t *testing.T) {
 	}
 }
 
+// A push with a parent carries only what changed; the host adds it on top of
+// the version it holds and refuses it once that version has been replaced.
+func TestPushOnParent(t *testing.T) {
+	ctx := context.Background()
+	site := offline(t)
+	ipnsName, _ := site.Keystore().Generate("s")
+	h := &Host{Domain: "crop.test", DataDir: t.TempDir(), Engine: offline(t)}
+	if err := h.Start(); err != nil {
+		t.Fatal(err)
+	}
+	srv := httptest.NewServer(h)
+	defer srv.Close()
+	push := func(dir, c string, seq uint64, parent string) (int, string) {
+		var buf bytes.Buffer
+		mw := multipart.NewWriter(&buf)
+		filepath.WalkDir(dir, func(path string, d os.DirEntry, err error) error {
+			if !d.IsDir() {
+				rel, _ := filepath.Rel(dir, path)
+				w, _ := mw.CreateFormFile("file:"+filepath.ToSlash(rel), d.Name())
+				b, _ := os.ReadFile(path)
+				w.Write(b)
+			}
+			return nil
+		})
+		mw.Close()
+		now := time.Now().Unix()
+		sig, _ := site.Keystore().Sign("s", PushMessage("crop.test", ipnsName, c, seq, now))
+		req, _ := http.NewRequest("POST", srv.URL+"/v0/host/push", &buf)
+		req.Host = "crop.test"
+		req.Header.Set("Content-Type", mw.FormDataContentType())
+		for k, v := range map[string]string{"Ipns": ipnsName, "Cid": c, "Seq": strconv.FormatUint(seq, 10), "Time": strconv.FormatInt(now, 10), "Sig": base64.StdEncoding.EncodeToString(sig), "Parent": parent} {
+			req.Header.Set("X-Croptop-"+k, v)
+		}
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		b, _ := readAll(resp)
+		return resp.StatusCode, b
+	}
+	full, over := t.TempDir(), t.TempDir()
+	os.MkdirAll(filepath.Join(full, "old"), 0o755)
+	os.WriteFile(filepath.Join(full, "old", "photo.png"), []byte("old photo"), 0o644)
+	os.WriteFile(filepath.Join(full, "planet.json"), []byte(`{"articles":["old"]}`), 0o644)
+	os.MkdirAll(filepath.Join(over, "new"), 0o755)
+	os.WriteFile(filepath.Join(over, "new", "index.html"), []byte("new post"), 0o644)
+	os.WriteFile(filepath.Join(over, "planet.json"), []byte(`{"articles":["new","old"]}`), 0o644)
+	v1, _ := site.AddDir(ctx, full)
+	v2, err := site.AddOver(ctx, v1, over)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if code, b := push(over, v2, 2, v1); code != 409 || !strings.Contains(b, "holds nothing") {
+		t.Fatalf("parent the host never had: %d %s", code, b)
+	}
+	if code, b := push(full, v1, 1, ""); code != 200 {
+		t.Fatalf("full push: %d %s", code, b)
+	}
+	if code, b := push(over, v2, 2, v1); code != 200 {
+		t.Fatalf("push on parent: %d %s", code, b)
+	}
+	for p, want := range map[string]string{"/old/photo.png": "old photo", "/new/": "new post", "/planet.json": `["new","old"]`} {
+		r, _ := http.NewRequest("GET", srv.URL+"/ipfs/"+v2+p, nil)
+		r.Host = "crop.test"
+		resp, err := http.DefaultClient.Do(r)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if b, _ := readAll(resp); resp.StatusCode != 200 || !strings.Contains(b, want) {
+			t.Fatalf("%s: %d %q", p, resp.StatusCode, b)
+		}
+	}
+	// a second post built on v1 would drop the first one
+	if code, b := push(over, v2, 3, v1); code != 409 || !strings.Contains(b, "holds "+v2) {
+		t.Fatalf("stale parent: %d %s", code, b)
+	}
+}
+
 func readAll(r *http.Response) (string, error) {
 	defer r.Body.Close()
 	var b bytes.Buffer

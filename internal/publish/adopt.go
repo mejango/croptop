@@ -1,7 +1,6 @@
 package publish
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -64,13 +63,7 @@ func (p *Publisher) Adopt(ctx context.Context, nameOrENS string, pemBytes []byte
 		return "", fmt.Errorf("a key for %s already exists on this machine (use --force to rebuild the site from the network)", head.ID)
 	}
 	if !ks.Has(head.ID) {
-		// Planet's .site export ships the key as kubo's raw keystore bytes; the
-		// console and croptop's own export use PEM
-		importKey := ks.ImportPEM
-		if !bytes.Contains(pemBytes, []byte("-----BEGIN")) {
-			importKey = ks.ImportRaw
-		}
-		if err := importKey(head.ID, pemBytes); err != nil {
+		if err := importKey(ks, head.ID, pemBytes); err != nil {
 			return "", err
 		}
 	}
@@ -237,27 +230,33 @@ func postFromPublic(a render.PublicPost) *store.Post {
 	return p
 }
 
-var navAnchor = regexp.MustCompile(`(?s)<a\s+href="([^"]*)"\s+class="nav-(?:item|current)"[^>]*>`)
+var navAnchor = regexp.MustCompile(`(?s)<a\s+href="([^"]*)"\s+class="nav-(?:item|current)"[^>]*>(.*?)</a>`)
+
+// navItems returns the href and inner HTML of each navigation link the
+// template rendered into pubDir's index.html, in order.
+func navItems(pubDir string) [][]string {
+	b, err := os.ReadFile(filepath.Join(pubDir, "index.html"))
+	if err != nil {
+		return nil
+	}
+	h := string(b)
+	i := strings.Index(h, `id="nav"`)
+	if i < 0 {
+		return nil
+	}
+	h = h[i:]
+	if j := strings.Index(h, "</div>"); j > 0 {
+		h = h[:j]
+	}
+	return navAnchor.FindAllStringSubmatch(h, -1)
+}
 
 // navigationFromIndex reads the navigation the template rendered into
 // index.html and maps each item back to a page: by external link, or by the
 // slug or id in its href. The value is the item's position.
 func navigationFromIndex(pubDir string, articles []render.PublicPost) map[string]int {
 	out := map[string]int{}
-	b, err := os.ReadFile(filepath.Join(pubDir, "index.html"))
-	if err != nil {
-		return out
-	}
-	h := string(b)
-	i := strings.Index(h, `id="nav"`)
-	if i < 0 {
-		return out
-	}
-	h = h[i:]
-	if j := strings.Index(h, "</div>"); j > 0 {
-		h = h[:j]
-	}
-	for n, m := range navAnchor.FindAllStringSubmatch(h, -1) {
+	for n, m := range navItems(pubDir) {
 		href := strings.TrimSpace(m[1])
 		path := strings.Trim(strings.TrimPrefix(strings.TrimPrefix(href, "./"), "../"), "/")
 		for _, a := range articles {

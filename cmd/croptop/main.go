@@ -54,6 +54,9 @@ const usage = `croptop — publish Croptop sites to IPFS
   croptop version
   croptop update           install the newest release over this binary
   croptop post <files>     open the console on a new post with these images, videos or audio attached
+  croptop post --key site.pem --title "…" [--content "…"] [--tags a,b] [--host url] [files]
+                           post without a copy of the site, on top of the version its host
+                           (crop.top unless --host) holds; for agents and machines that keep no state
   croptop service install  run the console at login, always on (uninstall, status)
 
 Flags for serve: --listen <addr>, --role node (headless: no browser, log only)
@@ -98,7 +101,11 @@ func run(args []string) error {
 	listen := fs.String("listen", "", "address to listen on (default from config, 127.0.0.1:8086)")
 	noOpen := fs.Bool("no-open", false, "do not open the browser")
 	force := fs.Bool("force", false, "override safety checks")
-	keyFile := fs.String("key", "", "PEM key file (adopt)")
+	keyFile := fs.String("key", "", "PEM key file (adopt, post)")
+	title := fs.String("title", "", "post title (post --key)")
+	content := fs.String("content", "", "post text, markdown (post --key)")
+	tags := fs.String("tags", "", "post tags, comma separated (post --key)")
+	postHost := fs.String("host", publish.DefaultHost, "the host the site pushes to (post --key)")
 	container := fs.String("container", "", "Planet container path (import-planet)")
 	engineFlag := fs.String("engine", "", "ipfs engine: kubo (downloaded sidecar) or embedded (built in); remembered in config")
 	role := fs.String("role", "console", "console (opens the browser) or node (headless)")
@@ -110,6 +117,7 @@ func run(args []string) error {
 		return nil
 	}
 	rest := fs.Args()
+	var postKey []byte
 
 	switch cmd {
 	case "update":
@@ -128,10 +136,24 @@ func run(args []string) error {
 		fmt.Println("run croptop again to use", rel.Version(), "at", exe)
 		return nil
 	case "post":
-		if err := a.open(*engineFlag); err != nil {
+		if *keyFile == "" {
+			if err := a.open(*engineFlag); err != nil {
+				return err
+			}
+			return a.post(rest)
+		}
+		var err error
+		if postKey, err = os.ReadFile(*keyFile); err != nil {
 			return err
 		}
-		return a.post(rest)
+		// posting with the key keeps nothing, so it runs in a throwaway data
+		// directory and never contends with a console for the node's files
+		tmp, err := os.MkdirTemp("", "croptop-post-")
+		if err != nil {
+			return err
+		}
+		defer os.RemoveAll(tmp)
+		a.dataDir = tmp
 	case "service":
 		if err := a.open(*engineFlag); err != nil {
 			return err
@@ -256,6 +278,13 @@ func run(args []string) error {
 	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer cancel()
 	switch cmd {
+	case "post":
+		res, err := a.pub.Post(ctx, strings.TrimSuffix(*postHost, "/"), postKey, publish.NewPost{Title: *title, Content: *content, Tags: *tags, Files: rest})
+		if err != nil {
+			return err
+		}
+		fmt.Printf("posted %s\n  cid      %s\n  sequence %d\n", res.URL, res.CID, res.Sequence)
+		return nil
 	case "publish":
 		a.pubWait = true
 		if len(rest) < 1 {

@@ -98,12 +98,13 @@ func TestPublicKeySet(t *testing.T) {
 	s := fixtureStore(t)
 	site, _ := s.Site(fixtureID)
 	pub := site.Public()
-	for _, k := range []string{"id", "name", "ipns", "twitterUsername", "tags", "plausibleEnabled"} {
+	// domain rides along so a machine holding only the key renders the site's URLs
+	for _, k := range []string{"id", "name", "ipns", "twitterUsername", "tags", "plausibleEnabled", "domain"} {
 		if _, ok := pub[k]; !ok {
 			t.Errorf("public planet.json missing %s", k)
 		}
 	}
-	for _, k := range []string{"filebaseAPIToken", "lastPublishedCID", "templateName", "domain"} {
+	for _, k := range []string{"filebaseAPIToken", "lastPublishedCID", "templateName"} {
 		if _, ok := pub[k]; ok {
 			t.Errorf("public planet.json must not include %s", k)
 		}

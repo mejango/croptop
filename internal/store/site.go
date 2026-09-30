@@ -136,6 +136,12 @@ var publicSiteKeys = []string{
 	"farcasterEnabled",
 	"podcastCategories", "podcastLanguage", "podcastExplicit",
 	"tags",
+	// Croptop additions a page render depends on. They are public anyway (in
+	// the URLs and the HTML), and with them a machine holding only the key
+	// renders a new post the way the owner's machine would.
+	"domain", "croptopGateway", "croptopName", "croptopCustomDomain",
+	"customCodeHeadEnabled", "customCodeHead", "customCodeBodyStartEnabled", "customCodeBodyStart",
+	"customCodeBodyEndEnabled", "customCodeBodyEnd",
 }
 
 // ContributorSites includes sources from Planet's composite-site format.

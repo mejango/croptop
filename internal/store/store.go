@@ -104,12 +104,29 @@ func (s *Store) SavePost(siteID string, p *Post) error {
 	return writeJSON(filepath.Join(s.ArticlesDir(siteID), p.ID+".json"), p)
 }
 
+// DeletePost removes a post and remembers when, so taking in another
+// machine's version of the site, which may still hold it, does not bring it back.
 func (s *Store) DeletePost(siteID, postID string) error {
 	if err := os.Remove(filepath.Join(s.ArticlesDir(siteID), postID+".json")); err != nil {
 		return err
 	}
 	os.RemoveAll(s.PostDir(siteID, postID))
-	return nil
+	m, err := s.Deleted(siteID)
+	if err != nil {
+		return err
+	}
+	m[postID] = Now()
+	return writeJSON(filepath.Join(s.SiteDir(siteID), "deleted.json"), m)
+}
+
+// Deleted maps each post deleted on this machine to when it was deleted.
+func (s *Store) Deleted(siteID string) (map[string]AppleTime, error) {
+	m := map[string]AppleTime{}
+	err := readJSON(filepath.Join(s.SiteDir(siteID), "deleted.json"), &m)
+	if errors.Is(err, ErrNotFound) {
+		return m, nil
+	}
+	return m, err
 }
 
 func (s *Store) TemplateSettings(siteID string) (map[string]any, error) {

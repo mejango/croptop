@@ -148,6 +148,28 @@ makes `yoursite.crop.top` or
   `X-Croptop-Time`, `X-Croptop-Sig` (over `croptop-push\n<domain>\n<ipns>\n<cid>\n<seq>\n<time>`),
   optional `X-Croptop-Record` (the signed IPNS record, base64); body is the block
   stream `croptop` produces. Refused when the host already has a newer sequence.
-- `GET /v0/host/names/<name>`, `GET /v0/host/keys/<ipns>`: what the host knows.
+  A `block:<cid>` part carries the new root block, which the host keeps.
+  With `X-Croptop-Parent: <cid>` the push holds only what changed since that
+  version (`croptop post --key`): the host adds the files on top of it, and
+  refuses the push (409) unless that version is still the one it holds, so
+  two posts never drop each other.
+- `GET /v0/host/names/<name>`, `GET /v0/host/keys/<ipns>`: what the host knows;
+  for a key, the version it holds (`cid`, `sequence`), and `acceptsParent`
+  from hosts that understand `X-Croptop-Parent`. `croptop post --key`
+  refuses a host without it, which would take the post for the whole site.
+- `GET /v0/host/blocks/<cid>`: one raw block, such as a pushed version's root.
+  Clients check it against the CID.
+- `GET /ipfs/<cid>/<path>` on the bare domain: a file of a version the host
+  holds. The Worker answers only for pushed versions.
+
+Only the key that first pushed a version may write its files again
+(`owners/<cid>` in R2): a signature proves who holds a key, not that the
+files hash to the CID, which the Worker cannot check.
+
+The Worker keeps what a push on a parent did not carry in `carry/<cid>.json`
+in R2: each file's path mapped to the earlier version whose files hold it,
+so it serves and mirrors the whole version. The version a key's pushes
+build on is `heads/<ipns>` in R2 rather than KV, whose reads can lag across
+locations; a conditional put on it makes the parent check a compare-and-swap.
 
 Everything is signed by the site's own key, so there are no accounts.

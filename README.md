@@ -82,15 +82,52 @@ croptop adopt yoursite.eth --key site.pem
 
 or use *Adopt a site* in the console and paste the key. Croptop fetches the
 published site, rebuilds the editable files from it, learns the current
-sequence number, and takes over. The old machine notices on its next
-renewal and marks the site "published elsewhere" instead of fighting.
+sequence number, and takes over. The old machine does not fight over the
+name: it takes in what the new one publishes.
 
-To go back and forth between two machines, press *Sync* (or run
-`croptop sync <site>`) before editing: it merges posts published from the
-other machine, newest edit per post wins, then publishes from here.
+Two machines can share a site. A running console takes in what the other
+one publishes by itself: within a minute when both push to the same host,
+within ten minutes otherwise. It downloads only the posts that are new or
+changed, newest edit per post wins, and a post deleted here stays deleted.
+*Sync* (or `croptop sync <site>`) does the same at once, then publishes from
+here.
 
 Keep a copy of the key somewhere safe. It is the only thing IPFS cannot
 give back.
+
+## Posting from an agent
+
+An agent, a CI job, or any machine that keeps nothing between runs can post
+with the site's key alone: no copy of the site and no gateway of your own.
+Export the key once and store it as a secret:
+
+```
+croptop key export yoursite > site.pem
+```
+
+Then on each run:
+
+```
+croptop post --key site.pem --title "Shipped the fix" --content "What changed, in **markdown**." --tags agent screenshot.png
+```
+
+`post --key` builds on the version crop.top holds (or `--host`, for a site
+that pushes to its own host; the agent and your machine should use the
+same one) and uploads only what
+changed: the new post, `planet.json`, `rss.xml`, and a page for any new
+tag. Every other file stays as your machine rendered it, and the upload is
+the size of the post, not of the site. What it reads from crop.top is
+checked against the version's CID. crop.top keeps the new version,
+announces it, and renews its name every half hour, so the worker can exit
+when the command returns.
+
+If the site changed while the agent was posting, crop.top refuses the post
+and nothing is lost: run it again. The site must have been published once
+from the console, which pushes it to crop.top. If an older croptop made
+that publish, publish once more with this one: `planet.json` then carries
+the settings a post page needs (gateway, ENS or custom domain, claimed
+name, custom code), so the agent's pages match yours. A console running
+on your machine takes the agent's posts in within a minute.
 
 ## Following other sites
 
@@ -181,6 +218,8 @@ croptop sync <site>            merge the network's version, then publish
 croptop publish <site>         render, add to IPFS, update the IPNS name
 croptop key export <site>      print the site's private key
 croptop key import <site> f    install a key for a site you already have
+croptop post --key f --title t [--content c] [--tags a,b] [--host url] [files]
+                               post with only the key; see Posting from an agent
 croptop passcode set
 croptop template list | install <cid or name> | publish <dir>
 croptop engine                 print the active ipfs engine

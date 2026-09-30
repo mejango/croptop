@@ -418,8 +418,30 @@ func (h *Host) serveAPI(w http.ResponseWriter, r *http.Request) {
 	case strings.HasPrefix(p, "keys/") && r.Method == "GET":
 		h.mu.Lock()
 		e := h.reg.Keys[strings.TrimPrefix(p, "keys/")]
+		var pub Entry
+		if e != nil {
+			pub = *e
+			pub.Record = nil
+		}
 		h.mu.Unlock()
-		h.entry(w, e)
+		if e == nil {
+			http.Error(w, "not found", 404)
+			return
+		}
+		// acceptsParent: pushes of only what changed are understood here
+		writeJSON(w, 200, struct {
+			Entry
+			AcceptsParent bool `json:"acceptsParent"`
+		}{pub, true})
+	case strings.HasPrefix(p, "blocks/") && r.Method == "GET":
+		// one raw block this host holds; clients check it against its CID
+		b, err := h.Engine.Block(r.Context(), strings.TrimPrefix(p, "blocks/"))
+		if err != nil {
+			http.Error(w, "not found", 404)
+			return
+		}
+		w.Header().Set("Content-Type", "application/vnd.ipld.raw")
+		w.Write(b)
 	default:
 		http.Error(w, "not found", 404)
 	}
@@ -510,18 +532,20 @@ func (h *Host) push(w http.ResponseWriter, r *http.Request) {
 	if b64 := r.Header.Get("X-Croptop-Record"); b64 != "" {
 		rec, _ = base64.StdEncoding.DecodeString(b64)
 	}
+	parent := r.Header.Get("X-Croptop-Parent")
 	h.mu.Lock()
-	if e := h.reg.Keys[ipnsName]; e != nil && seq < e.Sequence {
-		h.mu.Unlock()
-		http.Error(w, fmt.Sprintf("host already has sequence %d", e.Sequence), 409)
+	msg := conflict(h.reg.Keys[ipnsName], seq, parent)
+	h.mu.Unlock()
+	if msg != "" {
+		http.Error(w, msg, 409)
 		return
 	}
-	h.mu.Unlock()
 	// The files land in a staging dir for this cid; a big site arrives in
 	// "i/n" parts. On the last part they are added like any site and the root
 	// must hash to the cid the request was signed for. If a file was too big
 	// for the sender to carry, the missing blocks are fetched from the
-	// network, which verifies the tree by construction.
+	// network, which verifies the tree by construction. With a parent the
+	// files are only what changed, and they go on top of the parent.
 	stage := filepath.Join(h.DataDir, "host", "staging", c)
 	if err := os.MkdirAll(stage, 0o755); err != nil {
 		http.Error(w, err.Error(), 500)
@@ -548,7 +572,12 @@ func (h *Host) push(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	defer os.RemoveAll(stage)
-	got, err := h.Engine.AddDir(r.Context(), stage)
+	var got string
+	if parent != "" {
+		got, err = h.Engine.AddOver(r.Context(), parent, stage)
+	} else {
+		got, err = h.Engine.AddDir(r.Context(), stage)
+	}
 	if err != nil {
 		http.Error(w, "adding files: "+err.Error(), 500)
 		return
@@ -565,15 +594,15 @@ func (h *Host) push(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	h.mu.Lock()
+	if msg := conflict(h.reg.Keys[ipnsName], seq, parent); msg != "" {
+		h.mu.Unlock()
+		http.Error(w, msg, 409)
+		return
+	}
 	e := h.reg.Keys[ipnsName]
 	if e == nil {
 		e = &Entry{IPNS: ipnsName}
 		h.reg.Keys[ipnsName] = e
-	}
-	if seq < e.Sequence {
-		h.mu.Unlock()
-		http.Error(w, fmt.Sprintf("host already has sequence %d", e.Sequence), 409)
-		return
 	}
 	e.CID, e.Sequence, e.Updated = c, seq, time.Now()
 	if len(rec) > 0 {
@@ -597,6 +626,23 @@ func (h *Host) push(w http.ResponseWriter, r *http.Request) {
 		}
 	}()
 	writeJSON(w, 200, map[string]any{"cid": c, "sequence": seq, "blocks": n, "name": e.Name})
+}
+
+// conflict says why a push at seq cannot replace e, or "". A push with a
+// parent was built on that version, so it must still be the one held here:
+// otherwise the push would drop whatever replaced it.
+func conflict(e *Entry, seq uint64, parent string) string {
+	switch {
+	case e != nil && seq < e.Sequence:
+		return fmt.Sprintf("host already has sequence %d", e.Sequence)
+	case parent != "" && (e == nil || e.CID != parent):
+		have := "nothing"
+		if e != nil && e.CID != "" {
+			have = e.CID
+		}
+		return fmt.Sprintf("host holds %s, not %s", have, parent)
+	}
+	return ""
 }
 
 func writeJSON(w http.ResponseWriter, code int, v any) {

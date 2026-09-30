@@ -50,28 +50,12 @@ func (e *Embedded) NamePublish(ctx context.Context, key, c string, seq uint64) e
 	if e.dht == nil {
 		return fmt.Errorf("node not started")
 	}
-	sk, name, err := e.siteKey(key)
+	b, err := e.SignRecord(key, c, seq)
 	if err != nil {
 		return err
 	}
-	id, err := cid.Decode(c)
-	if err != nil {
-		return err
-	}
-	rec, err := ipns.NewRecord(sk, path.FromCid(id), seq, time.Now().Add(ipnsLifetime), ipnsTTL)
-	if err != nil {
-		return err
-	}
-	b, err := ipns.MarshalRecord(rec)
-	if err != nil {
-		return err
-	}
-	e.mu.Lock()
-	if e.records == nil {
-		e.records = map[string][]byte{}
-	}
-	e.records[key] = b
-	e.mu.Unlock()
+	_, name, _ := e.siteKey(key)
+	id, _ := cid.Decode(c)
 	if err := e.putRecord(ctx, name, b); err != nil {
 		return err
 	}
@@ -91,6 +75,35 @@ func (e *Embedded) NamePublish(ctx context.Context, key, c string, seq uint64) e
 		}
 	}()
 	return nil
+}
+
+// SignRecord signs an IPNS record for c at seq without announcing it; Record
+// returns it afterwards. A post pushes the record to its host before anything
+// on the network points at the new version.
+func (e *Embedded) SignRecord(key, c string, seq uint64) ([]byte, error) {
+	sk, _, err := e.siteKey(key)
+	if err != nil {
+		return nil, err
+	}
+	id, err := cid.Decode(c)
+	if err != nil {
+		return nil, err
+	}
+	rec, err := ipns.NewRecord(sk, path.FromCid(id), seq, time.Now().Add(ipnsLifetime), ipnsTTL)
+	if err != nil {
+		return nil, err
+	}
+	b, err := ipns.MarshalRecord(rec)
+	if err != nil {
+		return nil, err
+	}
+	e.mu.Lock()
+	if e.records == nil {
+		e.records = map[string][]byte{}
+	}
+	e.records[key] = b
+	e.mu.Unlock()
+	return b, nil
 }
 
 // NetworkRecord searches the DHT for the record with the highest sequence.

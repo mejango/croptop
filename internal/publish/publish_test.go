@@ -60,6 +60,9 @@ func fakePublisher(t *testing.T) (*Publisher, *store.Store, string) {
 		t.Fatal(err)
 	}
 	s := &store.Store{Root: root}
+	site, _ := s.Site(fixtureID)
+	SetHost(site, "http://127.0.0.1:1") // nothing listens: tests never ask crop.top for the site
+	s.SaveSite(site)
 	log := filepath.Join(root, "calls.log")
 	t.Setenv("FAKE_LOG", log)
 	script, _ := filepath.Abs("testdata/fake-ipfs")

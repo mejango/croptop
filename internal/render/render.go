@@ -19,6 +19,7 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 
 	_ "golang.org/x/image/webp"
@@ -38,6 +39,13 @@ type Renderer struct {
 	CIDs        CIDer
 	FFmpeg      string // path to ffmpeg, "" when unavailable
 	Log         func(string)
+	// Only renders the pages of this one post; the others go into planet.json
+	// and the feed as they are. A post added without the rest of the site's
+	// files uses it.
+	Only string
+	// mu serializes renders: the console's and a background take-in of posts
+	// published elsewhere write the same files.
+	mu sync.Mutex
 }
 
 func (r *Renderer) templateFor(site *store.Site) (fs.FS, error) {
@@ -55,6 +63,8 @@ func (r *Renderer) log(format string, a ...any) {
 
 // Render writes the whole site into Store.PublicDir(siteID).
 func (r *Renderer) Render(ctx context.Context, siteID string) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
 	site, err := r.Store.Site(siteID)
 	if err != nil {
 		return err
@@ -102,9 +112,13 @@ func (r *Renderer) Render(ctx context.Context, siteID string) error {
 	articles := make([]map[string]any, 0, len(posts))
 	pubPosts := make([]PublicPost, 0, len(posts))
 	for _, p := range posts {
-		pp, err := r.renderPost(ctx, eng, site, p, meta, base)
-		if err != nil {
-			return fmt.Errorf("post %s: %w", p.ID, err)
+		var pp PublicPost
+		if r.Only == "" || r.Only == p.ID {
+			if pp, err = r.renderPost(ctx, eng, site, p, meta, base); err != nil {
+				return fmt.Errorf("post %s: %w", p.ID, err)
+			}
+		} else {
+			pp = NewPublicPost(site, p)
 		}
 		if p.ArticleType == 1 {
 			continue // pages are rendered and linked from the navigation, but Planet keeps them out of the feed
@@ -155,6 +169,10 @@ func (r *Renderer) Render(ctx context.Context, siteID string) error {
 			}
 		}
 		for key, list := range byTag {
+			name := TagPage(key)
+			if name == "" {
+				continue
+			}
 			value := key
 			if site.Tags != nil && site.Tags[key] != "" {
 				value = site.Tags[key]
@@ -167,8 +185,8 @@ func (r *Renderer) Render(ctx context.Context, siteID string) error {
 			if err != nil {
 				return err
 			}
-			if err := os.WriteFile(filepath.Join(pub, key+".html"), []byte(html), 0o644); err != nil {
-				return err
+			if err := os.WriteFile(filepath.Join(pub, name), []byte(html), 0o644); err != nil {
+				r.log("tag page %s: %v", name, err) // one tag's page is not worth the whole site
 			}
 		}
 		if eng.has("tags.html") {
@@ -184,6 +202,22 @@ func (r *Renderer) Render(ctx context.Context, siteID string) error {
 		robots = "User-agent: *\nDisallow: /"
 	}
 	return os.WriteFile(filepath.Join(pub, "robots.txt"), []byte(robots), 0o644)
+}
+
+// TagPage is the file a tag's page is written to, or "" when the tag cannot
+// have one: its name would reach outside the site's folder, replace one of
+// the site's own pages (case-insensitive file systems included), or break out
+// of the page's markup, where the template writes the tag unescaped. Tags
+// arrive from other machines too, through sync and contributors.
+func TagPage(key string) string {
+	if key == "" || strings.ContainsAny(key, "/\\'\"<>`") || strings.IndexFunc(key, func(r rune) bool { return r < 0x20 }) >= 0 {
+		return ""
+	}
+	switch strings.ToLower(key) {
+	case "index", "page1", "tags":
+		return ""
+	}
+	return key + ".html"
 }
 
 // RenderPost re-renders one post (and planet.json) without touching the others.

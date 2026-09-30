@@ -86,23 +86,36 @@ const (
 // the request size hosts accept; each batch carries the same signature and
 // the last one is marked final. The host checks that the files hash to cid.
 func (p *Publisher) Push(ctx context.Context, site *store.Site, cid string, seq uint64) error {
+	return p.pushDir(ctx, site, site.ID, p.Store.PublicDir(site.ID), cid, seq, "")
+}
+
+// pushDir pushes the files under dir, signed with the keystore key named key.
+// With a parent they are only what changed since that version, which the host
+// must hold: it adds them on top. The version's folder blocks ride along, so
+// the next reader can list it from the host before any IPFS peer has it.
+func (p *Publisher) pushDir(ctx context.Context, site *store.Site, key, dir, cid string, seq uint64, parent string) error {
 	base := HostOf(site)
 	domain, err := hostDomain(base)
 	if err != nil {
 		return err
 	}
 	now := time.Now().Unix()
-	sig, err := p.Node.Keystore().Sign(site.ID, host.PushMessage(domain, site.IPNS, cid, seq, now))
+	sig, err := p.Node.Keystore().Sign(key, host.PushMessage(domain, site.IPNS, cid, seq, now))
 	if err != nil {
 		return err
 	}
 	var record string
 	if rs, ok := p.Node.(interface{ Record(string) []byte }); ok {
-		if rec := rs.Record(site.ID); len(rec) > 0 {
+		if rec := rs.Record(key); len(rec) > 0 {
 			record = base64.StdEncoding.EncodeToString(rec)
 		}
 	}
-	dir := p.Store.PublicDir(site.ID)
+	var blocks map[string][]byte
+	if bs, ok := p.Node.(interface {
+		DirBlocks(context.Context, string) (map[string][]byte, error)
+	}); ok {
+		blocks, _ = bs.DirBlocks(ctx, cid)
+	}
 	type file struct {
 		rel  string
 		size int64
@@ -131,6 +144,9 @@ func (p *Publisher) Push(ctx context.Context, site *store.Site, cid string, seq 
 		req.Header.Set("X-Croptop-Sig", base64.StdEncoding.EncodeToString(sig))
 		if record != "" {
 			req.Header.Set("X-Croptop-Record", record)
+		}
+		if parent != "" {
+			req.Header.Set("X-Croptop-Parent", parent)
 		}
 	}
 	client := &http.Client{Timeout: 10 * time.Minute}
@@ -221,6 +237,17 @@ func (p *Publisher) Push(ctx context.Context, site *store.Site, cid string, seq 
 				if e != nil {
 					err = e
 					break
+				}
+			}
+			if err == nil && i == len(batches)-1 {
+				for c, data := range blocks {
+					var part io.Writer
+					if part, err = mw.CreateFormFile("block:"+c, c); err == nil {
+						_, err = part.Write(data)
+					}
+					if err != nil {
+						break
+					}
 				}
 			}
 			if err == nil {

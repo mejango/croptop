@@ -17,6 +17,7 @@ import (
 
 const (
 	networkTimeout = 25 * time.Second
+	hostTimeout    = 15 * time.Second
 	publishTimeout = 3 * time.Minute
 )
 
@@ -70,9 +71,7 @@ func (p *Publisher) Publish(ctx context.Context, siteID string, force bool) (Res
 		return Result{}, err
 	}
 	site, _ = p.Store.Site(siteID) // render may have changed post files, not the site, but reload anyway
-	nctx, cancel := context.WithTimeout(ctx, networkTimeout)
-	rec, netErr := p.Node.NetworkRecord(nctx, site.IPNS)
-	cancel()
+	rec, netErr := p.latestRecord(ctx, site)
 	if netErr == nil {
 		p.log("network has sequence %d -> %s", rec.Sequence, rec.Value)
 	} else {
@@ -81,8 +80,7 @@ func (p *Publisher) Publish(ctx context.Context, siteID string, force bool) (Res
 	seq, err := nextSequence(site.IPNSSequence, deref(site.LastPublishedCID), rec, netErr, force)
 	if err != nil {
 		if err == ErrPublishedElsewhere {
-			site.PublishedElsewhere = true
-			p.Store.SaveSite(site)
+			p.saveSite(site.ID, func(s *store.Site) { s.PublishedElsewhere = true })
 		}
 		return Result{}, err
 	}
@@ -93,11 +91,9 @@ func (p *Publisher) Publish(ctx context.Context, siteID string, force bool) (Res
 		return Result{}, err
 	}
 	now := store.Now()
-	site.IPNSSequence = seq
-	site.LastPublishedCID = &cid
-	site.LastPublished = &now
-	site.PublishedElsewhere = false
-	if err := p.Store.SaveSite(site); err != nil {
+	if err := p.saveSite(site.ID, func(s *store.Site) {
+		s.IPNSSequence, s.LastPublishedCID, s.LastPublished, s.PublishedElsewhere = seq, &cid, &now, false
+	}); err != nil {
 		return Result{}, err
 	}
 	if !p.SkipPrewarm {
@@ -122,8 +118,8 @@ func (p *Publisher) Publish(ctx context.Context, siteID string, force bool) (Res
 	return Result{CID: cid, Sequence: seq}, nil
 }
 
-// Keepalive republishes the current CID so the record does not expire, but
-// only while this machine still owns the name.
+// Keepalive republishes the current CID so the record does not expire. When
+// another machine has published since, it takes that version in instead.
 func (p *Publisher) Keepalive(ctx context.Context, siteID string) error {
 	p.mu.Lock()
 	defer p.mu.Unlock()
@@ -134,9 +130,7 @@ func (p *Publisher) Keepalive(ctx context.Context, siteID string) error {
 	if site.LastPublishedCID == nil || !p.Node.Keystore().Has(site.ID) {
 		return nil
 	}
-	nctx, cancel := context.WithTimeout(ctx, networkTimeout)
-	rec, err := p.Node.NetworkRecord(nctx, site.IPNS)
-	cancel()
+	rec, err := p.latestRecord(ctx, site)
 	if err != nil {
 		return err // offline: try again next time
 	}
@@ -144,46 +138,122 @@ func (p *Publisher) Keepalive(ctx context.Context, siteID string) error {
 		if site.IPNSSequence == 0 {
 			// never published from here: the network's record is the baseline
 			cid := strings.TrimPrefix(rec.Value, "/ipfs/")
-			site.LastPublishedCID = &cid
-			site.IPNSSequence = rec.Sequence
-			site.PublishedElsewhere = false
-			return p.Store.SaveSite(site)
+			return p.saveSite(site.ID, func(s *store.Site) {
+				s.LastPublishedCID, s.IPNSSequence, s.PublishedElsewhere = &cid, rec.Sequence, false
+			})
 		}
 		if rec.Sequence >= site.IPNSSequence {
-			p.log("%s is now published from another machine (sequence %d)", site.Name, rec.Sequence)
-			site.PublishedElsewhere = true
-			return p.Store.SaveSite(site)
+			return p.takeIn(ctx, site, rec)
 		}
 		return nil // network is behind us; the DHT will catch up
 	}
-	site.PublishedElsewhere = false // the network serves our CID; nobody else is publishing
 	seq := max(rec.Sequence, site.IPNSSequence) + 1
 	pctx, cancel := context.WithTimeout(ctx, publishTimeout)
 	defer cancel()
 	if err := p.Node.NamePublish(pctx, site.ID, *site.LastPublishedCID, seq); err != nil {
 		return err
 	}
-	site.IPNSSequence = seq
-	return p.Store.SaveSite(site)
+	// the network serves our CID; nobody else is publishing
+	return p.saveSite(site.ID, func(s *store.Site) { s.IPNSSequence, s.PublishedElsewhere = seq, false })
 }
 
-// RunKeepalive loops over all sites every interval until ctx ends.
+// CatchUp takes in what another machine published, if the site's host has
+// it. It costs one small request, so it runs every minute, and a post made
+// elsewhere, by an agent say, shows up here within a minute.
+func (p *Publisher) CatchUp(ctx context.Context, siteID string) error {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	site, err := p.Store.Site(siteID)
+	if err != nil {
+		return err
+	}
+	if site.LastPublishedCID == nil || site.PublishedElsewhere || !p.Node.Keystore().Has(site.ID) {
+		return nil // a failed take-in waits for the next Keepalive, or Sync
+	}
+	hctx, cancel := context.WithTimeout(ctx, hostTimeout)
+	e, err := hostEntry(hctx, HostOf(site), site.IPNS)
+	cancel()
+	if err != nil || e.CID == *site.LastPublishedCID || e.Sequence < site.IPNSSequence {
+		return nil // nothing newer there, or our own push is still on its way
+	}
+	return p.takeIn(ctx, site, &ipfs.Record{Value: "/ipfs/" + e.CID, Sequence: e.Sequence})
+}
+
+// takeIn pulls a version another machine published and renders the result,
+// so this copy stays current without anyone pressing Sync. If that fails, the
+// site is marked published elsewhere and Sync is left to the owner.
+func (p *Publisher) takeIn(ctx context.Context, site *store.Site, rec *ipfs.Record) error {
+	added, updated, err := p.pull(ctx, site, rec)
+	if err != nil {
+		p.log("%s was published from another machine (sequence %d); taking it in failed: %v", site.Name, rec.Sequence, err)
+		return p.saveSite(site.ID, func(s *store.Site) { s.PublishedElsewhere = true })
+	}
+	p.log("%s: took in %d new and %d updated posts published from another machine", site.Name, added, updated)
+	if added+updated > 0 {
+		if err := p.Render.Render(ctx, site.ID); err != nil {
+			p.log("render %s: %v", site.Name, err)
+		}
+	}
+	return nil
+}
+
+// RunKeepalive renews every site each interval and, every minute in between,
+// has each site catch up with its host, until ctx ends.
 func (p *Publisher) RunKeepalive(ctx context.Context, every time.Duration) {
-	t := time.NewTicker(every)
+	t := time.NewTicker(time.Minute)
 	defer t.Stop()
+	due := time.Now().Add(every)
 	for {
 		select {
 		case <-ctx.Done():
 			return
 		case <-t.C:
-			sites, _ := p.Store.Sites()
-			for _, s := range sites {
-				if err := p.Keepalive(ctx, s.ID); err != nil {
-					p.log("keepalive %s: %v", s.Name, err)
-				}
+		}
+		renew := !time.Now().Before(due)
+		if renew {
+			due = time.Now().Add(every)
+		}
+		sites, _ := p.Store.Sites()
+		for _, s := range sites {
+			var err error
+			if renew {
+				err = p.Keepalive(ctx, s.ID)
+			} else {
+				err = p.CatchUp(ctx, s.ID)
+			}
+			if err != nil {
+				p.log("keepalive %s: %v", s.Name, err)
 			}
 		}
 	}
+}
+
+// latestRecord is the newest version the network or the site's host knows.
+// The host learns of a version the moment it is pushed, before the DHT does,
+// which is how a post made elsewhere with `post --key` is seen here at once.
+func (p *Publisher) latestRecord(ctx context.Context, site *store.Site) (*ipfs.Record, error) {
+	hctx, cancel := context.WithTimeout(ctx, hostTimeout)
+	e, herr := hostEntry(hctx, HostOf(site), site.IPNS)
+	cancel()
+	nctx, cancel := context.WithTimeout(ctx, networkTimeout)
+	rec, err := p.Node.NetworkRecord(nctx, site.IPNS)
+	cancel()
+	if herr == nil && (err != nil || e.Sequence >= rec.Sequence) {
+		return &ipfs.Record{Value: "/ipfs/" + e.CID, Sequence: e.Sequence}, nil
+	}
+	return rec, err
+}
+
+// saveSite applies change to the site as stored now rather than to a copy
+// read before a network round trip, so a settings edit made meanwhile in the
+// console is kept.
+func (p *Publisher) saveSite(siteID string, change func(*store.Site)) error {
+	site, err := p.Store.Site(siteID)
+	if err != nil {
+		return err
+	}
+	change(site)
+	return p.Store.SaveSite(site)
 }
 
 func deref(s *string) string {

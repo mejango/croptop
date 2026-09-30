@@ -107,6 +107,103 @@ func itoa(n int) string {
 	return string(s)
 }
 
+// AddOver must give the root an add of the whole merged tree gives, or a host
+// rebuilding a pushed post from the version it holds would not match it.
+func TestAddOverMatchesAddDirOfMergedTree(t *testing.T) {
+	e := NewEmbedded(t.TempDir())
+	e.Offline = true
+	ctx := context.Background()
+	if err := e.Start(ctx); err != nil {
+		t.Fatal(err)
+	}
+	defer e.Stop()
+	for _, width := range []int{3, 5000} { // 5000 entries shard the root (HAMT)
+		base, over, merged := t.TempDir(), t.TempDir(), t.TempDir()
+		for _, d := range []string{base, merged} {
+			os.MkdirAll(filepath.Join(d, "old-post"), 0o755)
+			os.WriteFile(filepath.Join(d, "old-post", "photo.png"), []byte("old photo"), 0o644)
+			os.WriteFile(filepath.Join(d, "index.html"), []byte("<html>"), 0o644)
+			for i := 0; i < width; i++ {
+				os.WriteFile(filepath.Join(d, "tag-"+strings.Repeat("x", 40)+"-"+itoa(i)+".html"), []byte{byte(i)}, 0o644)
+			}
+		}
+		os.WriteFile(filepath.Join(base, "planet.json"), []byte(`{"articles":[1]}`), 0o644)
+		for _, d := range []string{over, merged} {
+			os.WriteFile(filepath.Join(d, "planet.json"), []byte(`{"articles":[2,1]}`), 0o644)
+			os.MkdirAll(filepath.Join(d, "new-post"), 0o755)
+			os.WriteFile(filepath.Join(d, "new-post", "article.json"), []byte(`{"id":2}`), 0o644)
+		}
+		baseCID, err := e.AddDir(ctx, base)
+		if err != nil {
+			t.Fatal(err)
+		}
+		got, err := e.AddOver(ctx, baseCID, over)
+		if err != nil {
+			t.Fatal(err)
+		}
+		want, err := e.AddDir(ctx, merged)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got != want {
+			t.Fatalf("width %d: AddOver %s, AddDir of merged tree %s", width, got, want)
+		}
+		names, err := e.Links(ctx, baseCID)
+		if err != nil || len(names) != width+3 || names["index.html"] == "" {
+			t.Fatalf("width %d: Links = %d names, %v", width, len(names), err)
+		}
+	}
+}
+
+// A version's folder blocks are enough for another node to list it, without
+// its file data and without the network.
+func TestDirBlocksListAVersionElsewhere(t *testing.T) {
+	ctx := context.Background()
+	start := func() *Embedded {
+		e := NewEmbedded(t.TempDir())
+		e.Offline = true
+		if err := e.Start(ctx); err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() { e.Stop() })
+		return e
+	}
+	a, b := start(), start()
+	dir := t.TempDir()
+	os.MkdirAll(filepath.Join(dir, "post", "nested"), 0o755)
+	os.WriteFile(filepath.Join(dir, "planet.json"), []byte("{}"), 0o644)
+	big := make([]byte, 3*chunkSize) // a chunked file: its root is dag-pb but not a folder
+	rand.Read(big)
+	os.WriteFile(filepath.Join(dir, "post", "photo.png"), big, 0o644)
+	os.WriteFile(filepath.Join(dir, "post", "nested", "a.txt"), []byte("a"), 0o644)
+	root, err := a.AddDir(ctx, dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	blocks, err := a.DirBlocks(ctx, root)
+	if err != nil || len(blocks) != 3 {
+		t.Fatalf("want the root, post and nested folders, got %d: %v", len(blocks), err)
+	}
+	for c, data := range blocks {
+		if err := b.PutBlock(ctx, c, data); err != nil {
+			t.Fatal(err)
+		}
+	}
+	lctx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+	top, err := b.Links(lctx, root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	post, err := b.Links(lctx, top["post"])
+	if err != nil || post["photo.png"] == "" || post["nested"] == "" {
+		t.Fatalf("post folder: %v %v", post, err)
+	}
+	if err := b.PutBlock(ctx, root, []byte("not the block")); err == nil {
+		t.Error("PutBlock took a block that does not hash to its CID")
+	}
+}
+
 func TestEmbeddedOfflineAddGetRoundTrip(t *testing.T) {
 	e := NewEmbedded(t.TempDir())
 	e.Offline = true
