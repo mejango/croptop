@@ -58,6 +58,8 @@ type Embedded struct {
 	// published record is also sent to, in the background. Empty for a host:
 	// it is the endpoint.
 	RoutingPuts []string
+	// PeersURL lists a host's peers to dial at start (crop.top's node); empty to skip.
+	PeersURL string
 
 	mu      sync.Mutex
 	running bool
@@ -192,7 +194,11 @@ func (e *Embedded) Start(ctx context.Context) error {
 	if e.Offline {
 		dopts = append(dopts, dht.BootstrapPeers(), dht.Mode(dht.ModeServer))
 	} else {
-		dopts = append(dopts, dht.BootstrapPeers(dht.GetDefaultBootstrapPeerAddrInfos()...))
+		// the public bootstrap nodes may be gone: crop.top's node and the peers
+		// this node was connected to last time also bootstrap the table
+		boot := append(dht.GetDefaultBootstrapPeerAddrInfos(), peeringInfos()...)
+		boot = append(boot, e.loadPeers()...)
+		dopts = append(dopts, dht.BootstrapPeers(boot...))
 		if len(e.Announce) > 0 {
 			dopts = append(dopts, dht.Mode(dht.ModeServer))
 		}
@@ -224,13 +230,31 @@ func (e *Embedded) Start(ctx context.Context) error {
 	e.dag = merkledag.NewDAGService(e.bserv)
 
 	if !e.Offline {
-		for _, ai := range dht.GetDefaultBootstrapPeerAddrInfos() {
-			go func(ai peer.AddrInfo) {
-				c, cancel := context.WithTimeout(runCtx, 30*time.Second)
-				defer cancel()
-				h.Connect(c, ai)
-			}(ai)
+		dial := func(ai peer.AddrInfo) {
+			c, cancel := context.WithTimeout(runCtx, 30*time.Second)
+			defer cancel()
+			h.Connect(c, ai)
 		}
+		for _, ai := range append(dht.GetDefaultBootstrapPeerAddrInfos(), e.loadPeers()...) {
+			go dial(ai)
+		}
+		go func() {
+			for _, ai := range e.hostPeers(runCtx) {
+				go dial(ai)
+			}
+		}()
+		go func() { // remember peers, so a crash does not lose them
+			t := time.NewTicker(10 * time.Minute)
+			defer t.Stop()
+			for {
+				select {
+				case <-runCtx.Done():
+					return
+				case <-t.C:
+					e.savePeers()
+				}
+			}
+		}()
 		if err := d.Bootstrap(runCtx); err != nil {
 			e.Log("dht bootstrap: " + err.Error())
 		}
@@ -307,20 +331,7 @@ func (e *Embedded) relaySource(ctx context.Context, num int) <-chan peer.AddrInf
 // peer keeps connections to the content providers Planet peers with, and
 // to any IPFS node on this machine, retrying in the background.
 func (e *Embedded) peer(ctx context.Context) {
-	var infos []peer.AddrInfo
-	for _, p := range peers {
-		id, err := peer.Decode(p["ID"].(string))
-		if err != nil {
-			continue
-		}
-		info := peer.AddrInfo{ID: id}
-		for _, a := range p["Addrs"].([]string) {
-			if m, err := multiaddr.NewMultiaddr(a); err == nil {
-				info.Addrs = append(info.Addrs, m)
-			}
-		}
-		infos = append(infos, info)
-	}
+	infos := peeringInfos()
 	for {
 		for _, info := range infos {
 			if e.host.Network().Connectedness(info.ID) == 1 {
@@ -392,6 +403,7 @@ func (e *Embedded) Stop() error {
 		return nil
 	}
 	e.running = false
+	e.savePeers()
 	if e.cancel != nil {
 		e.cancel()
 	}

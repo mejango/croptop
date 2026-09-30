@@ -457,6 +457,7 @@ func (a *app) open(engine string) error {
 		e := ipfs.NewEmbedded(a.dataDir)
 		e.Log = logf
 		e.RoutingPuts = ipfs.DefaultRoutingPuts
+		e.PeersURL = ipfs.DefaultPeersURL
 		a.engine = e
 	} else {
 		bin := a.cfg.KuboBin

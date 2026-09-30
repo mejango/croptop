@@ -400,3 +400,46 @@ func TestPutRecordDoesNotWaitOnAHungRoutingEndpoint(t *testing.T) {
 		t.Fatal("the endpoint never got the request")
 	}
 }
+
+// Remembered peers survive a damaged file as "no peers", never a failed start.
+func TestSavedPeersReadBackAndDamagedFilesAreIgnored(t *testing.T) {
+	e := NewEmbedded(t.TempDir())
+	os.MkdirAll(e.nodeDir(), 0o755)
+	os.WriteFile(e.peersFile(), []byte(`[{"id":"12D3KooWDSjjQ4GuTGwEbxw6QnfRu3GLa45GzN5s7vAgKTo6wLqY","addrs":["/dns4/altaria.proxy.rlwy.net/tcp/35880","not an address"]},{"id":"not a peer","addrs":["/ip4/1.2.3.4/tcp/1"]}]`), 0o644)
+	got := e.loadPeers()
+	if len(got) != 1 || got[0].ID.String() != "12D3KooWDSjjQ4GuTGwEbxw6QnfRu3GLa45GzN5s7vAgKTo6wLqY" || len(got[0].Addrs) != 1 {
+		t.Fatalf("loadPeers: %v", got)
+	}
+	os.WriteFile(e.peersFile(), []byte("{damaged"), 0o644)
+	if got := e.loadPeers(); got != nil {
+		t.Fatalf("a damaged file must read as no peers: %v", got)
+	}
+}
+
+// The peers list comes from crop.top; an unreachable crop.top costs at most
+// the timeout, and Start calls this in a goroutine.
+func TestHostPeersReadsTheListAndGivesUpQuickly(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Write([]byte(`{"id":"12D3KooWDSjjQ4GuTGwEbxw6QnfRu3GLa45GzN5s7vAgKTo6wLqY","addrs":["/dns4/altaria.proxy.rlwy.net/tcp/35880"]}`))
+	}))
+	defer srv.Close()
+	e := NewEmbedded(t.TempDir())
+	e.PeersURL = srv.URL
+	if got := e.hostPeers(context.Background()); len(got) != 1 || len(got[0].Addrs) != 1 {
+		t.Fatalf("hostPeers: %v", got)
+	}
+	e.PeersURL = "http://127.0.0.1:1/"
+	start := time.Now()
+	if got := e.hostPeers(context.Background()); got != nil || time.Since(start) > 6*time.Second {
+		t.Fatalf("an unreachable host: %v after %s", got, time.Since(start))
+	}
+}
+
+func TestPeeringIncludesCropTop(t *testing.T) {
+	for _, ai := range peeringInfos() {
+		if ai.ID.String() == "12D3KooWDSjjQ4GuTGwEbxw6QnfRu3GLa45GzN5s7vAgKTo6wLqY" {
+			return
+		}
+	}
+	t.Fatal("crop.top's node is not in the peering list")
+}
