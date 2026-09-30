@@ -121,6 +121,22 @@ storage is not collected yet; with B, history grows by changes only. Carry maps 
 file-level and grow with site size per version (about 240 KB for a 2,000-file site);
 the Worker's in-memory cache of them is capped at 16 MB instead of 64 entries.
 
+**Carried over from G's review.** The routing endpoint needs what pushes get:
+per-IP limits on `GET|PUT /routing/v1/ipns/` in the Worker (the node's 32 PUT and
+32 lookup slots are global, and Railway's TCP proxy hides client IPs from the
+node); a capped body reader for requests without Content-Length (routing PUT,
+claim); request deadlines on the node, which sets only ReadHeaderTimeout; and the
+node's gateway paths (`/ipfs/`, `/ipns/`, name labels) bounded like the routing
+endpoint (name length cap, lookup slots), since the node is reachable directly and
+the Worker reaches them through UPSTREAMS. Smaller follow-ups: skip a relay's
+network put when the node already holds the same record; answer routing GETs with
+the higher sequence of the registry and DHT copies; a timeout on the Worker's
+`rootsOf`; drop delegated-ipfs.dev from `resolveKey`, `republish` and
+`DefaultRoutingPuts` once it stops answering; on hosts with an announced address, a
+larger connection manager and a resource-manager allowlist for 100.64.0.0/10
+(Railway's proxy); tests that `Start` never waits on `hostPeers` and that the
+Worker gives up on a node that never answers.
+
 ## B. Changes-only publishing
 
 **Stable renders.** Two renders of the same content produce the same bytes, on any
@@ -191,6 +207,12 @@ or as `{name, base64}`. README gains setup snippets for Claude Code and others.
 agents to pass stable keys. The SDK is a new dependency, chosen over a hand-rolled
 protocol that would drift from the spec. No remote MCP, which would put keys on a
 server.
+
+**Carried over from G.** G sends every embedded engine's records to crop.top's
+routing endpoint and peers every node with crop.top's node, whatever host a site
+uses. D sends records to the site's own host's routing endpoint instead, and gives
+self-hosters a config key to replace or drop crop.top as their routing endpoint
+and bootstrap peer.
 
 ## E. Agents as contributors
 
