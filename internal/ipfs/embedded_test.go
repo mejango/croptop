@@ -1,6 +1,7 @@
 package ipfs
 
 import (
+	"bytes"
 	"context"
 	"crypto/rand"
 	"os"
@@ -286,5 +287,33 @@ func TestParseDNSLink(t *testing.T) {
 	}
 	if _, ok := parseDNSLink([]string{"dnslink=garbage"}); ok {
 		t.Fatal("should reject")
+	}
+}
+
+// GetRecord hands back the exact signed bytes, which the routing endpoint serves.
+func TestGetRecordReturnsTheStoredRecord(t *testing.T) {
+	ctx := context.Background()
+	e := NewEmbedded(t.TempDir())
+	e.Offline = true
+	if err := e.Start(ctx); err != nil {
+		t.Fatal(err)
+	}
+	defer e.Stop()
+	name, _ := e.Keystore().Generate("s")
+	if _, err := e.GetRecord(ctx, name); err == nil {
+		t.Fatal("found a record before any put")
+	}
+	rec, err := e.SignRecord("s", "bafybeigdfeslmj3qh7cwiehrd5l4cfq6qhgctcxxlk6ou3y3ywq5wfqil4", 3)
+	if err != nil {
+		t.Fatal(err)
+	}
+	e.PutRecord(ctx, name, rec) // stored locally first; offline there is no peer to send it to
+	got, err := e.GetRecord(ctx, name)
+	if err != nil || !bytes.Equal(got, rec) {
+		t.Fatalf("GetRecord: %v", err)
+	}
+	r, err := e.NetworkRecord(ctx, name)
+	if err != nil || r.Sequence != 3 || r.Value != "/ipfs/bafybeigdfeslmj3qh7cwiehrd5l4cfq6qhgctcxxlk6ou3y3ywq5wfqil4" {
+		t.Fatalf("NetworkRecord: %+v %v", r, err)
 	}
 }

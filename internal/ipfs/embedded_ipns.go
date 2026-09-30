@@ -106,8 +106,9 @@ func (e *Embedded) SignRecord(key, c string, seq uint64) ([]byte, error) {
 	return b, nil
 }
 
-// NetworkRecord searches the DHT for the record with the highest sequence.
-func (e *Embedded) NetworkRecord(ctx context.Context, nameStr string) (*Record, error) {
+// GetRecord returns the newest valid signed IPNS record for name the DHT has,
+// this node's own copy included, as raw bytes.
+func (e *Embedded) GetRecord(ctx context.Context, nameStr string) ([]byte, error) {
 	if e.dht == nil {
 		return nil, fmt.Errorf("node not started")
 	}
@@ -127,30 +128,45 @@ func (e *Embedded) NetworkRecord(ctx context.Context, nameStr string) (*Record, 
 		}
 		return nil, err
 	}
-	var best *Record
+	var best []byte
+	var bestSeq uint64
 	for b := range ch {
 		rec, err := ipns.UnmarshalRecord(b)
-		if err != nil {
+		if err != nil || ipns.ValidateWithName(rec, name) != nil {
 			continue
 		}
 		seq, err := rec.Sequence()
 		if err != nil {
 			continue
 		}
-		if best == nil || seq > best.Sequence {
-			value, err := rec.Value()
-			if err != nil {
-				continue
-			}
-			r := &Record{Value: value.String(), Sequence: seq}
-			r.Validity, _ = rec.Validity()
-			best = r
+		if best == nil || seq > bestSeq {
+			best, bestSeq = b, seq
 		}
 	}
 	if best == nil {
 		return nil, ErrNoRecord
 	}
 	return best, nil
+}
+
+// NetworkRecord is the newest record for name, parsed.
+func (e *Embedded) NetworkRecord(ctx context.Context, nameStr string) (*Record, error) {
+	b, err := e.GetRecord(ctx, nameStr)
+	if err != nil {
+		return nil, err
+	}
+	rec, err := ipns.UnmarshalRecord(b)
+	if err != nil {
+		return nil, err
+	}
+	seq, _ := rec.Sequence()
+	value, err := rec.Value()
+	if err != nil {
+		return nil, err
+	}
+	r := &Record{Value: value.String(), Sequence: seq}
+	r.Validity, _ = rec.Validity()
+	return r, nil
 }
 
 // Resolve resolves one step: an ENS name through DNSLink over DoH, or an
