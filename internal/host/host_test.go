@@ -438,7 +438,8 @@ func readAll(r *http.Response) (string, error) {
 // The node answers the IPNS part of the Delegated Routing API that
 // delegated-ipfs.dev used to: pushed sites from the registry, others from the
 // DHT; PUT validates and stores. It lists its peers, never forwards records,
-// and refuses PUTs when all its slots are busy.
+// refuses absurdly long names, and answers 429 when all its slots for DHT puts
+// or lookups are busy.
 func TestRoutingEndpointAndPeers(t *testing.T) {
 	site := offline(t)
 	eng := offline(t)
@@ -485,6 +486,17 @@ func TestRoutingEndpointAndPeers(t *testing.T) {
 	if code := put(name, wrong); code != 400 {
 		t.Fatalf("another name's record: %d", code)
 	}
+	if err := eng.RelayRecord(context.Background(), name, wrong); err == nil {
+		t.Fatal("RelayRecord took another name's record")
+	}
+	// a name is a short key; one of attacker length never reaches the parsers
+	long := strings.Repeat("k", 200)
+	if code, _ := get(long); code != 400 {
+		t.Fatalf("200-character name, GET: %d", code)
+	}
+	if code := put(long, rec); code != 400 {
+		t.Fatalf("200-character name, PUT: %d", code)
+	}
 	if code := put(name, rec); code != 200 {
 		t.Fatalf("valid record: %d", code)
 	}
@@ -508,6 +520,20 @@ func TestRoutingEndpointAndPeers(t *testing.T) {
 	if code, b := get(pushed); code != 200 || !bytes.Equal(b, pushedRec) {
 		t.Fatalf("pushed site: %d", code)
 	}
+	// no free lookup slot: 429, not another DHT search; the registry needs no slot
+	h.lookupSlots = make(chan struct{})
+	if code, b := get(pushed); code != 200 || !bytes.Equal(b, pushedRec) {
+		t.Fatalf("pushed site with every lookup slot busy: %d", code)
+	}
+	unknown, _ := site.Keystore().Generate("u") // in neither the registry nor the DHT
+	lresp, err := http.Get(srv.URL + "/routing/v1/ipns/" + unknown)
+	if err != nil {
+		t.Fatal(err)
+	}
+	lresp.Body.Close()
+	if lresp.StatusCode != 429 || lresp.Header.Get("Retry-After") == "" {
+		t.Fatalf("all lookup slots busy: %d, Retry-After %q", lresp.StatusCode, lresp.Header.Get("Retry-After"))
+	}
 	// no free slot: 429, not an unbounded pile of DHT puts
 	h.routingSlots = make(chan struct{})
 	if code := put(name, rec); code != 429 {
@@ -517,13 +543,18 @@ func TestRoutingEndpointAndPeers(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	body, _ := io.ReadAll(resp.Body)
+	resp.Body.Close()
 	var peers struct {
 		ID    string   `json:"id"`
 		Addrs []string `json:"addrs"`
 	}
-	json.NewDecoder(resp.Body).Decode(&peers)
-	resp.Body.Close()
+	json.Unmarshal(body, &peers)
 	if peers.ID == "" {
 		t.Fatal("peers: no id")
+	}
+	// an offline node has only loopback addresses: an empty list, not null
+	if !bytes.Contains(body, []byte(`"addrs":[`)) {
+		t.Fatalf("peers: addrs is not a list: %s", body)
 	}
 }

@@ -273,17 +273,27 @@ func (e *Embedded) Record(key string) []byte {
 	return e.records[key]
 }
 
-// ValidateRecord checks that rec is a valid record signed by the key inside name.
-func ValidateRecord(nameStr string, rec []byte) error {
+// validRecord parses nameStr and checks that rec is a valid record signed by
+// the key inside it.
+func validRecord(nameStr string, rec []byte) (ipns.Name, error) {
 	name, err := ipns.NameFromString(strings.TrimPrefix(nameStr, "/ipns/"))
 	if err != nil {
-		return err
+		return ipns.Name{}, err
 	}
 	r, err := ipns.UnmarshalRecord(rec)
 	if err != nil {
-		return err
+		return ipns.Name{}, err
 	}
-	return ipns.ValidateWithName(r, name)
+	if err := ipns.ValidateWithName(r, name); err != nil {
+		return ipns.Name{}, err
+	}
+	return name, nil
+}
+
+// ValidateRecord checks that rec is a valid record signed by the key inside name.
+func ValidateRecord(nameStr string, rec []byte) error {
+	_, err := validRecord(nameStr, rec)
+	return err
 }
 
 // PutRecord re-announces a signed record made elsewhere (a pushed site's
@@ -292,11 +302,28 @@ func (e *Embedded) PutRecord(ctx context.Context, ipnsName string, rec []byte) e
 	if e.dht == nil {
 		return fmt.Errorf("node not started")
 	}
-	if err := ValidateRecord(ipnsName, rec); err != nil {
+	name, err := validRecord(ipnsName, rec)
+	if err != nil {
 		return err
 	}
-	name, _ := ipns.NameFromString(strings.TrimPrefix(ipnsName, "/ipns/"))
 	return e.putRecord(ctx, name, rec)
+}
+
+// RelayRecord puts a record for any name in the DHT, and nothing else: a
+// routing endpoint takes records from anyone, and a pubsub topic per name
+// would pile up.
+func (e *Embedded) RelayRecord(ctx context.Context, ipnsName string, rec []byte) error {
+	if e.dht == nil {
+		return fmt.Errorf("node not started")
+	}
+	name, err := validRecord(ipnsName, rec)
+	if err != nil {
+		return err
+	}
+	if err := e.dht.PutValue(ctx, string(name.RoutingKey()), rec); err != nil {
+		return fmt.Errorf("ipns put: %w", err)
+	}
+	return nil
 }
 
 // putRecord puts a marshalled record in the DHT and pubsub, and sends it to

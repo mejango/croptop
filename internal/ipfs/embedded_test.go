@@ -402,6 +402,55 @@ func TestPutRecordDoesNotWaitOnAHungRoutingEndpoint(t *testing.T) {
 	}
 }
 
+// A relay puts a record for any name in the DHT and sends it nowhere else: a
+// routing endpoint takes records from anyone, so nothing it takes may pile up
+// as background sends or topics. Another name's record is refused.
+func TestRelayRecordPutsInTheDHTAndSendsNowhereElse(t *testing.T) {
+	paths := make(chan string, 8)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		select {
+		case paths <- r.URL.Path:
+		default:
+		}
+	}))
+	defer srv.Close()
+	ctx := context.Background()
+	e := NewEmbedded(t.TempDir())
+	e.Offline = true
+	e.RoutingPuts = []string{srv.URL + "/routing/v1/ipns/"}
+	if err := e.Start(ctx); err != nil {
+		t.Fatal(err)
+	}
+	defer e.Stop()
+	const c = "bafybeigdfeslmj3qh7cwiehrd5l4cfq6qhgctcxxlk6ou3y3ywq5wfqil4"
+	relayed, _ := e.Keystore().Generate("r")
+	relayedRec, _ := e.SignRecord("r", c, 1)
+	own, _ := e.Keystore().Generate("o")
+	ownRec, _ := e.SignRecord("o", c, 1)
+	if err := e.RelayRecord(ctx, relayed, ownRec); err == nil {
+		t.Fatal("relayed another name's record")
+	}
+	e.RelayRecord(ctx, relayed, relayedRec) // stored locally first; offline there is no peer to send it to
+	if got, err := e.GetRecord(ctx, relayed); err != nil || !bytes.Equal(got, relayedRec) {
+		t.Fatalf("the DHT does not hold the relayed record: %v", err)
+	}
+	// a put of the node's own does reach the endpoint, and a relay's would have by now
+	e.PutRecord(ctx, own, ownRec)
+	for {
+		select {
+		case p := <-paths:
+			if p == "/routing/v1/ipns/"+relayed {
+				t.Fatal("a relayed record went on to the routing endpoint")
+			}
+			if p == "/routing/v1/ipns/"+own {
+				return
+			}
+		case <-time.After(10 * time.Second):
+			t.Fatal("the endpoint never got the node's own put")
+		}
+	}
+}
+
 // Remembered peers survive a damaged file as "no peers", never a failed start.
 func TestSavedPeersReadBackAndDamagedFilesAreIgnored(t *testing.T) {
 	e := NewEmbedded(t.TempDir())

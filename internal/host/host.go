@@ -64,6 +64,7 @@ type Host struct {
 	cache map[string]cached
 
 	routingSlots chan struct{} // routing PUTs in flight; full means 429
+	lookupSlots  chan struct{} // routing GETs searching the DHT; full means 429
 }
 
 type cached struct {
@@ -109,6 +110,7 @@ func (h *Host) Start() error {
 	// fetch its own peers list
 	h.Engine.RoutingPuts, h.Engine.PeersURL = nil, ""
 	h.routingSlots = make(chan struct{}, 32)
+	h.lookupSlots = make(chan struct{}, 32)
 	return nil
 }
 
@@ -420,7 +422,11 @@ func (h *Host) serveAPI(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, err.Error(), 500)
 			return
 		}
-		writeJSON(w, 200, map[string]any{"id": info.PeerID, "addrs": h.Engine.PeerAddrs()})
+		addrs := h.Engine.PeerAddrs()
+		if addrs == nil { // a node with no public address lists none, not null
+			addrs = []string{}
+		}
+		writeJSON(w, 200, map[string]any{"id": info.PeerID, "addrs": addrs})
 	case p == "names" && r.Method == "POST":
 		h.claim(w, r)
 	case p == "push" && r.Method == "POST":
@@ -467,7 +473,12 @@ func (h *Host) serveAPI(w http.ResponseWriter, r *http.Request) {
 // serveRouting is the IPNS part of the Delegated Routing V1 HTTP API, which
 // delegated-ipfs.dev served until 2026-09-30: GET the newest record for a name,
 // PUT a signed record into the DHT. Pushed sites answer from the registry.
+// Anyone can call it, so DHT searches and puts each run in a bounded number of slots.
 func (h *Host) serveRouting(w http.ResponseWriter, r *http.Request, name string) {
+	if len(name) > 128 { // a name is a key of a few dozen characters, and decoding a long one is slow
+		http.Error(w, "bad name", 400)
+		return
+	}
 	switch r.Method {
 	case http.MethodGet, http.MethodHead:
 		h.mu.Lock()
@@ -477,10 +488,24 @@ func (h *Host) serveRouting(w http.ResponseWriter, r *http.Request, name string)
 		}
 		h.mu.Unlock()
 		if len(rec) == 0 {
-			ctx, cancel := context.WithTimeout(r.Context(), 30*time.Second)
-			defer cancel()
+			slots := h.lookupSlots // the release must go back to the channel the slot came from
+			select {
+			case slots <- struct{}{}:
+			default:
+				w.Header().Set("Retry-After", "10")
+				http.Error(w, "busy", 429)
+				return
+			}
 			var err error
-			if rec, err = h.Engine.GetRecord(ctx, name); err != nil {
+			rec, err = func() ([]byte, error) { // the slot is free again as soon as the search ends
+				defer func() { <-slots }()
+				// a record sent to this node is held locally and comes back first,
+				// so 10 s suffices for those; the Worker waits 12 s for this node
+				ctx, cancel := context.WithTimeout(r.Context(), 10*time.Second)
+				defer cancel()
+				return h.Engine.GetRecord(ctx, name)
+			}()
+			if err != nil {
 				http.Error(w, "not found", 404)
 				return
 			}
@@ -510,7 +535,7 @@ func (h *Host) serveRouting(w http.ResponseWriter, r *http.Request, name string)
 			defer func() { <-slots }()
 			ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
 			defer cancel()
-			if err := h.Engine.PutRecord(ctx, name, b); err != nil {
+			if err := h.Engine.RelayRecord(ctx, name, b); err != nil {
 				h.log("routing put %s: %v", name, err)
 			}
 		}()
