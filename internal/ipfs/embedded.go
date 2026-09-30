@@ -235,7 +235,11 @@ func (e *Embedded) Start(ctx context.Context) error {
 			defer cancel()
 			h.Connect(c, ai)
 		}
-		for _, ai := range append(dht.GetDefaultBootstrapPeerAddrInfos(), e.loadPeers()...) {
+		// the defaults, then crop.top's node and the content providers, then last
+		// time's peers: with the public bootstrap nodes gone, a fresh install
+		// would otherwise reach the fixed peers only through the sequential peer loop
+		dials := append(dht.GetDefaultBootstrapPeerAddrInfos(), peeringInfos()...)
+		for _, ai := range append(dials, e.loadPeers()...) {
 			go dial(ai)
 		}
 		go func() {
@@ -243,15 +247,15 @@ func (e *Embedded) Start(ctx context.Context) error {
 				go dial(ai)
 			}
 		}()
-		go func() { // remember peers, so a crash does not lose them
-			t := time.NewTicker(10 * time.Minute)
-			defer t.Stop()
+		go func() { // remember peers soon after joining, then every ten minutes, so a crash or a hard kill does not lose them
+			wait := time.Minute
 			for {
 				select {
 				case <-runCtx.Done():
 					return
-				case <-t.C:
+				case <-time.After(wait):
 					e.savePeers()
+					wait = 10 * time.Minute
 				}
 			}
 		}()

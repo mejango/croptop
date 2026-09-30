@@ -8,7 +8,7 @@ import installPs1 from "../../scripts/install.ps1";
 const SKEW = 10 * 60;
 const RESOLVE_TTL = 60;
 const NAME_RE = /^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$/;
-const RESERVED = new Set(["www", "api", "v0", "ipfs", "ipns", "push", "host", "admin", "mail", "static", "assets", "docs", "app", "directory", "install", "install.sh", "install.ps1", "download"]);
+const RESERVED = new Set(["www", "api", "v0", "ipfs", "ipns", "push", "host", "admin", "mail", "static", "assets", "docs", "app", "directory", "install", "install.sh", "install.ps1", "download", "routing"]);
 const MAX_PUSH = 100 << 20;
 const UA = { "User-Agent": "croptop-host/1 (+https://crop.top)" };
 // gateways that resolve names with a real IPFS node and answer Workers; used for anything not pushed here.

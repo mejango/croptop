@@ -558,3 +558,64 @@ func TestRoutingEndpointAndPeers(t *testing.T) {
 		t.Fatalf("peers: addrs is not a list: %s", body)
 	}
 }
+
+// Every slot a routing PUT or a DHT lookup takes goes back when the work ends.
+// A leaked slot would make the endpoint answer 429 for good after 32 calls.
+func TestRoutingSlotsAreReleased(t *testing.T) {
+	site := offline(t)
+	h := &Host{Domain: "crop.test", DataDir: t.TempDir(), Engine: offline(t)}
+	if err := h.Start(); err != nil {
+		t.Fatal(err)
+	}
+	srv := httptest.NewServer(h)
+	defer srv.Close()
+	name, err := site.Keystore().Generate("s")
+	if err != nil {
+		t.Fatal(err)
+	}
+	// more PUTs than there are slots, one after another: a 429 is fine while
+	// earlier puts still run, anything else is not
+	for seq := uint64(1); seq <= 40; seq++ {
+		rec, err := site.SignRecord("s", "bafybeigdfeslmj3qh7cwiehrd5l4cfq6qhgctcxxlk6ou3y3ywq5wfqil4", seq)
+		if err != nil {
+			t.Fatal(err)
+		}
+		req, _ := http.NewRequest(http.MethodPut, srv.URL+"/routing/v1/ipns/"+name, bytes.NewReader(rec))
+		req.Header.Set("Content-Type", "application/vnd.ipfs.ipns-record")
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		resp.Body.Close()
+		if resp.StatusCode != 200 && resp.StatusCode != 429 {
+			t.Fatalf("PUT of sequence %d: %d", seq, resp.StatusCode)
+		}
+	}
+	// the puts run on after their answers; each one ends and frees its slot
+	deadline := time.Now().Add(5 * time.Second)
+	for len(h.routingSlots) != 0 {
+		if time.Now().After(deadline) {
+			t.Fatalf("%d routing slots still held 5 s after the last PUT", len(h.routingSlots))
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	// each lookup of a name nobody put searches the DHT, and answers 404 only
+	// once its slot is free again: 40 in a row never meet a busy endpoint
+	for i := 0; i < 40; i++ {
+		unknown, err := site.Keystore().Generate(fmt.Sprintf("u%d", i))
+		if err != nil {
+			t.Fatal(err)
+		}
+		resp, err := http.Get(srv.URL + "/routing/v1/ipns/" + unknown)
+		if err != nil {
+			t.Fatal(err)
+		}
+		resp.Body.Close()
+		if resp.StatusCode != 404 {
+			t.Fatalf("lookup %d of a name nobody put: %d", i+1, resp.StatusCode)
+		}
+	}
+	if n := len(h.lookupSlots); n != 0 {
+		t.Fatalf("%d lookup slots still held after the lookups ended", n)
+	}
+}

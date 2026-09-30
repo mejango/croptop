@@ -75,7 +75,7 @@ type cached struct {
 var nameRe = regexp.MustCompile(`^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$`)
 
 // Reserved names the directory and API need, plus the usual suspects.
-var reserved = map[string]bool{"www": true, "api": true, "v0": true, "ipfs": true, "ipns": true, "push": true, "host": true, "admin": true, "mail": true, "static": true, "assets": true, "docs": true, "app": true}
+var reserved = map[string]bool{"www": true, "api": true, "v0": true, "ipfs": true, "ipns": true, "push": true, "host": true, "admin": true, "mail": true, "static": true, "assets": true, "docs": true, "app": true, "routing": true}
 
 func (h *Host) log(f string, a ...any) {
 	if h.Log != nil {
