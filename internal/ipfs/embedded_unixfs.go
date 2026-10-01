@@ -317,9 +317,12 @@ func (e *Embedded) Rebuild(ctx context.Context, parent, dir string, carry []stri
 // CheckManifest says whether a manifest push of upload and carry on parent
 // makes exactly the version root. The uploaded entries are linked from root's
 // own folders, so no file data is read, and carried ones need only parent's
-// folders. A client checks this before pushing, as the host will after.
+// folders. A client checks this before pushing, as the host will after. Like
+// Files it reads this node's blocks alone: a folder that is not here is an
+// error at once, not a wait on the network, and the client sends the version
+// whole instead.
 func (e *Embedded) CheckManifest(ctx context.Context, root, parent string, upload, carry []string) error {
-	if e.dag == nil {
+	if e.bstore == nil {
 		return fmt.Errorf("node not started")
 	}
 	rid, err := cid.Decode(root)
@@ -330,7 +333,7 @@ func (e *Embedded) CheckManifest(ctx context.Context, root, parent string, uploa
 	if err != nil {
 		return err
 	}
-	f := &folders{dag: e.dag, cache: map[cid.Cid]map[string]*ipld.Link{}}
+	f := &folders{dag: e.localDAG(), cache: map[cid.Cid]map[string]*ipld.Link{}}
 	t, err := f.carried(ctx, pid, carry)
 	if err != nil {
 		return err

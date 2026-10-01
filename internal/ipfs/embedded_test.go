@@ -966,6 +966,100 @@ func TestFilesAndOpenFileDoNotWaitForBlocksThisNodeLacks(t *testing.T) {
 	})
 }
 
+// CheckManifest reads the blocks this node holds and nothing else, as Files and
+// OpenFile do. A parent whose folders are not all here is an error at once:
+// through the node's own DAG they are waited for on the network until the
+// context ends, even offline, and a sharded folder read as far as it came looks
+// whole. The client then sends the version whole instead, as it does for any
+// other manifest that does not check out.
+func TestCheckManifestDoesNotWaitForBlocksThisNodeLacks(t *testing.T) {
+	ctx := context.Background()
+	start := func() *Embedded {
+		e := NewEmbedded(t.TempDir())
+		e.Offline = true
+		if err := e.Start(ctx); err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() { e.Stop() })
+		return e
+	}
+	// every call gets a deadline of its own, as in the test of Files and OpenFile
+	quick := func(what string, e *Embedded, root, parent string, upload, carry []string) {
+		t.Helper()
+		cctx, cancel := context.WithTimeout(ctx, 5*time.Second)
+		defer cancel()
+		begin := time.Now()
+		err := e.CheckManifest(cctx, root, parent, upload, carry)
+		if took := time.Since(begin); err == nil || took > time.Second {
+			t.Errorf("%s: %v after %s, want an error at once", what, err, took)
+		}
+	}
+	// each manifest is right: it checks out on a node that holds the whole parent
+	a := start()
+
+	// the parent's folders are not here at all
+	oldDir := writeTree(t, map[string]string{"index.html": "home", "assets/site.css": "css", "p1/index.html": "one"})
+	newDir := writeTree(t, map[string]string{"index.html": "home 2", "assets/site.css": "css", "p1/index.html": "one"})
+	parent, err := a.AddDir(ctx, oldDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	root, err := a.AddDir(ctx, newDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	upload, carry := []string{"index.html"}, []string{"assets", "p1"}
+	if err := a.CheckManifest(ctx, root, parent, upload, carry); err != nil {
+		t.Fatalf("the manifest does not check out where the parent is: %v", err)
+	}
+	b := start()
+	if got, err := b.AddDir(ctx, newDir); err != nil || got != root {
+		t.Fatalf("b adds %s, %v", got, err)
+	}
+	quick("a parent that is not here", b, root, parent, upload, carry)
+
+	// a folder sharded over several blocks, with only its first block here
+	name := func(i int) string { return fmt.Sprintf("post-%04d-%s.html", i, strings.Repeat("a", 200)) }
+	oldMany, newMany := map[string]string{}, map[string]string{}
+	var same []string // what the new version keeps of the old
+	for i := 0; i < 1500; i++ {
+		oldMany[name(i)], newMany[name(i)] = fmt.Sprint(i), fmt.Sprint(i)
+		if i != 7 {
+			same = append(same, name(i))
+		}
+	}
+	newMany[name(7)] = "changed"
+	shards, err := a.AddDir(ctx, writeTree(t, oldMany))
+	if err != nil {
+		t.Fatal(err)
+	}
+	first, err := a.Block(ctx, shards)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if nd, err := merkledag.DecodeProtobuf(first); err != nil {
+		t.Fatal(err)
+	} else if fsn, err := ft.FSNodeFromBytes(nd.Data()); err != nil || fsn.Type() != ft.THAMTShard {
+		t.Fatal("the folder is not sharded; raise the count or the name length")
+	}
+	newManyDir := writeTree(t, newMany)
+	shardsRoot, err := a.AddDir(ctx, newManyDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := a.CheckManifest(ctx, shardsRoot, shards, []string{name(7)}, same); err != nil {
+		t.Fatalf("the manifest does not check out where the sharded parent is: %v", err)
+	}
+	c := start()
+	if got, err := c.AddDir(ctx, newManyDir); err != nil || got != shardsRoot {
+		t.Fatalf("c adds %s, %v", got, err)
+	}
+	if err := c.PutBlock(ctx, shards, first); err != nil {
+		t.Fatal(err)
+	}
+	quick("a sharded parent with only its first block", c, shardsRoot, shards, []string{name(7)}, same)
+}
+
 // A record signed first and announced later is what the network then holds.
 func TestAnnounceASignedRecord(t *testing.T) {
 	ctx := context.Background()

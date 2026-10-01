@@ -221,7 +221,9 @@ type blockLister interface {
 
 // links lists the directory c. Its block comes from the host first, which
 // has a version the moment it is pushed, and is checked against c; the IPFS
-// network is the fallback.
+// network is the fallback. A listing cut short is an error, never a part of
+// one: the engine answers a sharded folder whose other blocks never came with
+// what it had read when the time ran out, and no error.
 func (p *Publisher) links(ctx context.Context, eng blockLister, hostURL, c string) (map[string]string, error) {
 	if b, status, err := httpGet(ctx, hostURL+"/v0/host/blocks/"+c); err == nil && status == 200 {
 		if err := eng.PutBlock(ctx, c, b); err != nil {
@@ -230,7 +232,11 @@ func (p *Publisher) links(ctx context.Context, eng blockLister, hostURL, c strin
 	}
 	lctx, cancel := context.WithTimeout(ctx, ipfsFetchTimeout)
 	defer cancel()
-	return eng.Links(lctx, c)
+	links, err := eng.Links(lctx, c)
+	if err == nil && lctx.Err() != nil {
+		return nil, fmt.Errorf("%s: %w", c, lctx.Err())
+	}
+	return links, err
 }
 
 // readFile puts the file at rel in version root into dest. want is its CID
