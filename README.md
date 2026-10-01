@@ -99,6 +99,7 @@ give back.
 
 An agent, a CI job, or any machine that keeps nothing between runs can post
 with the site's key alone: no copy of the site and no gateway of your own.
+[docs/agents.md](docs/agents.md) is the short version to hand to a bot.
 Export the key once and store it as a secret:
 
 ```
