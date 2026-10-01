@@ -328,10 +328,24 @@ func (p *Publisher) CatchUp(ctx context.Context, siteID string) error {
 	hctx, cancel := context.WithTimeout(ctx, hostTimeout)
 	e, err := hostEntry(hctx, HostOf(site), site.IPNS)
 	cancel()
-	if err != nil || e.CID == *site.LastPublishedCID || e.Sequence < site.IPNSSequence {
+	if err != nil || !hostAhead(site, e, *site.LastPublishedCID) {
 		return nil // nothing newer there, or our own push is still on its way
 	}
 	return p.takeIn(ctx, site, e.record())
+}
+
+// hostAhead says whether the host holds a version of site that this machine
+// has not taken in: none of known (its last publish, a version it is
+// publishing), at a sequence no lower than its own. Such a version was
+// published elsewhere, by an agent say, and must be taken in before this
+// machine uploads, or the upload would replace it.
+func hostAhead(site *store.Site, e *hostKey, known ...string) bool {
+	for _, c := range known {
+		if e.CID == c {
+			return false
+		}
+	}
+	return e.Sequence >= site.IPNSSequence
 }
 
 // takeIn pulls a version another machine published and renders the result,
