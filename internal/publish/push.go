@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"io/fs"
@@ -85,6 +86,19 @@ var pushBatch, pushChunk int64 = 16 << 20, 64 << 20
 // replyWithin bounds the wait for the host's answer once all of it is sent.
 // A push has no deadline otherwise, so a slow link still finishes.
 var stallAfter, replyWithin = 2 * time.Minute, 5 * time.Minute
+
+// pushClock is the time each push request is signed with. Hosts refuse a
+// signature over 10 minutes old, so every request of a long push is signed
+// when it goes, not when the push began. A variable so tests can move it.
+var pushClock = time.Now
+
+var (
+	errStalled  = errors.New("upload stalled")
+	errNoAnswer = errors.New("host gave no answer")
+	// errNoCommitFile: the part that commits a version must carry a file
+	// small enough for a part, and this push has none.
+	errNoCommitFile = errors.New("nothing small enough to carry the commit; send the whole site")
+)
 
 // pushSpec says what a push sends. With no Dir the files come from the
 // version's own blocks, so an upload sends exactly that version even if the
@@ -181,32 +195,39 @@ func heldFiles(ctx context.Context, base, cid string) map[string]int64 {
 	return out
 }
 
-// skipHeld drops the files the host already holds at the same size. It keeps
-// the smallest one, so the final part, which commits the version, still
-// carries a file.
+// skipHeld drops the files the host already holds at the same size. The final
+// part, which commits the version, must carry a file small enough for a part,
+// so when none of those is left it sends the smallest such file again.
 func skipHeld(files []pushFile, have map[string]int64) []pushFile {
 	var out []pushFile
-	smallest := -1
+	small := -1 // the smallest file that fits in a part
 	for i, f := range files {
 		if size, ok := have[f.rel]; !ok || size != f.size {
 			out = append(out, f)
 		}
-		if smallest < 0 || f.size < files[smallest].size {
-			smallest = i
+		if f.size <= pushBatch && (small < 0 || f.size < files[small].size) {
+			small = i
 		}
 	}
-	if len(out) == 0 && smallest >= 0 {
-		out = []pushFile{files[smallest]}
+	for _, f := range out {
+		if f.size <= pushBatch {
+			return out
+		}
+	}
+	if small >= 0 {
+		out = append(out, files[small])
 	}
 	return out
 }
 
 // sendWatched sends req and returns its response. It cancels the request if
-// the body stops moving for stallAfter, or if the host has not answered
-// replyWithin after the body was sent. There is no deadline beyond that. A
-// canceled request returns at once, even if its body is stuck in Read.
+// the body stops moving for stallAfter (errStalled), or if the host has not
+// answered, reading the answer included, replyWithin after the body was sent
+// (errNoAnswer). There is no deadline beyond that. A canceled request returns
+// at once, even if its body is stuck in Read. Closing the answer ends the
+// watch.
 func sendWatched(req *http.Request) (*http.Response, error) {
-	ctx, cancel := context.WithCancel(req.Context())
+	ctx, cancel := context.WithCancelCause(req.Context())
 	// the limits are read once, here: tests change them, and the watchdog
 	// runs on a goroutine of its own
 	w := &watched{last: time.Now(), stall: stallAfter, reply: replyWithin}
@@ -218,6 +239,7 @@ func sendWatched(req *http.Request) (*http.Response, error) {
 	}
 	req = req.WithContext(ctx)
 	stop := make(chan struct{})
+	end := sync.OnceFunc(func() { close(stop); cancel(nil) })
 	go func() {
 		t := time.NewTicker(w.stall / 10)
 		defer t.Stop()
@@ -226,8 +248,8 @@ func sendWatched(req *http.Request) (*http.Response, error) {
 			case <-stop:
 				return
 			case <-t.C:
-				if w.overdue() {
-					cancel()
+				if why := w.overdue(); why != nil {
+					cancel(why)
 					return
 				}
 			}
@@ -250,19 +272,24 @@ func sendWatched(req *http.Request) (*http.Response, error) {
 	select {
 	case s = <-done:
 	case <-ctx.Done():
-		s.err = fmt.Errorf("%s %s: %w", req.Method, req.URL, ctx.Err())
 		go func() { // an answer that comes after this is not wanted
 			if late := <-done; late.resp != nil {
 				late.resp.Body.Close()
 			}
 		}()
 	}
-	close(stop)
+	if ctx.Err() != nil { // the watchdog gave up, or the caller did
+		if s.resp != nil {
+			s.resp.Body.Close()
+		}
+		end()
+		return nil, fmt.Errorf("%s %s: %w", req.Method, req.URL, context.Cause(ctx))
+	}
 	if s.err != nil {
-		cancel()
+		end()
 		return nil, s.err
 	}
-	s.resp.Body = &cancelBody{s.resp.Body, cancel}
+	s.resp.Body = &cancelBody{s.resp.Body, ctx, end}
 	return s.resp, nil
 }
 
@@ -290,25 +317,39 @@ func (w *watched) Read(b []byte) (int, error) {
 
 func (w *watched) Close() error { return w.r.Close() }
 
-func (w *watched) overdue() bool {
+// overdue says why the request should be given up, or nil while it may go on.
+func (w *watched) overdue() error {
 	w.mu.Lock()
 	defer w.mu.Unlock()
-	limit := w.stall
-	if w.done {
-		limit = w.reply
+	switch {
+	case w.done && time.Since(w.last) > w.reply:
+		return fmt.Errorf("%w in %s", errNoAnswer, w.reply)
+	case !w.done && time.Since(w.last) > w.stall:
+		return fmt.Errorf("%w for %s", errStalled, w.stall)
 	}
-	return time.Since(w.last) > limit
+	return nil
 }
 
-// cancelBody ends a watched request's context once its answer is read.
+// cancelBody is a watched request's answer. Reading it stays under the reply
+// limit, and a read the watchdog cut short says why; closing it ends the
+// watch and the request's context.
 type cancelBody struct {
 	io.ReadCloser
-	cancel context.CancelFunc
+	ctx context.Context
+	end func()
+}
+
+func (b *cancelBody) Read(p []byte) (int, error) {
+	n, err := b.ReadCloser.Read(p)
+	if err != nil && err != io.EOF && b.ctx.Err() != nil {
+		err = context.Cause(b.ctx)
+	}
+	return n, err
 }
 
 func (b *cancelBody) Close() error {
 	err := b.ReadCloser.Close()
-	b.cancel()
+	b.end()
 	return err
 }
 
@@ -335,11 +376,6 @@ func (p *Publisher) pushDir(ctx context.Context, site *store.Site, key, cid stri
 	if err != nil {
 		return err
 	}
-	now := time.Now().Unix()
-	sig, err := p.Node.Keystore().Sign(key, host.PushMessage(domain, site.IPNS, cid, seq, now))
-	if err != nil {
-		return err
-	}
 	var record string
 	if rs, ok := p.Node.(interface{ Record(string) []byte }); ok {
 		if rec := rs.Record(key); len(rec) > 0 {
@@ -359,11 +395,18 @@ func (p *Publisher) pushDir(ctx context.Context, site *store.Site, key, cid stri
 	if have := heldFiles(ctx, base, cid); len(have) > 0 {
 		files = skipHeld(files, have)
 	}
-	signed := func(req *http.Request) {
+	// each request is signed as it goes: hosts refuse a signature over 10
+	// minutes old, and a push on a slow link takes longer than that
+	sign := func(req *http.Request) error {
+		t := pushClock().Unix()
+		sig, err := p.Node.Keystore().Sign(key, host.PushMessage(domain, site.IPNS, cid, seq, t))
+		if err != nil {
+			return err
+		}
 		req.Header.Set("X-Croptop-Ipns", site.IPNS)
 		req.Header.Set("X-Croptop-Cid", cid)
 		req.Header.Set("X-Croptop-Seq", strconv.FormatUint(seq, 10))
-		req.Header.Set("X-Croptop-Time", strconv.FormatInt(now, 10))
+		req.Header.Set("X-Croptop-Time", strconv.FormatInt(t, 10))
 		req.Header.Set("X-Croptop-Sig", base64.StdEncoding.EncodeToString(sig))
 		if record != "" {
 			req.Header.Set("X-Croptop-Record", record)
@@ -371,10 +414,14 @@ func (p *Publisher) pushDir(ctx context.Context, site *store.Site, key, cid stri
 		if spec.Parent != "" {
 			req.Header.Set("X-Croptop-Parent", spec.Parent)
 		}
+		return nil
 	}
 	answer := func(resp *http.Response, what string) (string, error) {
-		body, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
+		body, err := io.ReadAll(io.LimitReader(resp.Body, 4096))
 		resp.Body.Close()
+		if err != nil {
+			return "", fmt.Errorf("%s: reading the answer: %w", what, err)
+		}
 		switch resp.StatusCode {
 		case 200:
 			return string(body), nil
@@ -383,13 +430,19 @@ func (p *Publisher) pushDir(ctx context.Context, site *store.Site, key, cid stri
 		}
 		return "", fmt.Errorf("%s: %s: %s", what, resp.Status, strings.TrimSpace(string(body)))
 	}
-	// big files first, in chunks; the host reassembles them
-	var small []pushFile
+	var small, big []pushFile
 	for _, f := range files {
 		if f.size <= pushBatch {
 			small = append(small, f)
-			continue
+		} else {
+			big = append(big, f)
 		}
+	}
+	if len(small) == 0 {
+		return errNoCommitFile // checked before any chunk goes up
+	}
+	// big files first, in chunks; the host reassembles them
+	for _, f := range big {
 		chunks := int((f.size + pushChunk - 1) / pushChunk)
 		rc, err := open(f.rel)
 		if err != nil {
@@ -408,7 +461,10 @@ func (p *Publisher) pushDir(ctx context.Context, site *store.Site, key, cid stri
 			}
 			req.ContentLength = size
 			req.Header.Set("Content-Type", "application/octet-stream")
-			signed(req)
+			if err := sign(req); err != nil {
+				rc.Close()
+				return err
+			}
 			req.Header.Set("X-Croptop-File", f.rel)
 			req.Header.Set("X-Croptop-Chunk", fmt.Sprintf("%d/%d", i+1, chunks))
 			if upload != "" {
@@ -496,7 +552,10 @@ func (p *Publisher) pushDir(ctx context.Context, site *store.Site, key, cid stri
 			return err
 		}
 		req.Header.Set("Content-Type", mw.FormDataContentType())
-		signed(req)
+		if err := sign(req); err != nil {
+			pr.CloseWithError(err)
+			return err
+		}
 		req.Header.Set("X-Croptop-Part", fmt.Sprintf("%d/%d", i+1, len(batches)))
 		resp, err := sendWatched(req)
 		if err != nil {
