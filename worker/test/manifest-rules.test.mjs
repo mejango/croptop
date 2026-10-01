@@ -96,6 +96,62 @@ test("chain carry, exact-file carry, and the / boundary", async () => {
   } finally { h.done(); }
 });
 
+const DEEP = { "index.html": "h", "assets/a.css": "css", "assets/img/logo.png": "L", "assets/img/deep/x.bin": "X", "other/o.txt": "o" };
+
+test("deep folders: a carried folder brings every depth; nested refusal works at depth", async () => {
+  const h = harness();
+  try {
+    assert.equal((await h.push("bafyone", 1, DEEP)).status, 200);
+    let r = await h.push("bafytwo", 2, { "index.html": "h2" }, "bafyone", { carry: ["assets"] });
+    assert.equal(r.status, 200, await r.text());
+    await Promise.all(h.waits);
+    assert.deepEqual(h.pulls.at(-1).files.sort(), ["assets/a.css", "assets/img/deep/x.bin", "assets/img/logo.png", "index.html"]);
+    r = await h.push("bafythree", 3, { "index.html": "h3" }, "bafytwo", { carry: ["assets/img"] });
+    assert.equal(r.status, 200, await r.text());
+    await Promise.all(h.waits);
+    assert.deepEqual(h.pulls.at(-1).files.sort(), ["assets/img/deep/x.bin", "assets/img/logo.png", "index.html"]);
+    r = await h.push("bafyfour", 4, { "index.html": "h4" }, "bafythree", { carry: ["assets/img", "assets/img/deep/x.bin"] });
+    assert.equal(r.status, 400, await r.text());
+  } finally { h.done(); }
+});
+
+test("leading and trailing slashes on a carried path are trimmed", async () => {
+  const h = harness();
+  try {
+    assert.equal((await h.push("bafyone", 1, V1)).status, 200);
+    const r = await h.push("bafytwo", 2, { "index.html": "h2" }, "bafyone", { carry: ["/p1/", "foo/"] });
+    assert.equal(r.status, 200, await r.text());
+    await Promise.all(h.waits);
+    assert.deepEqual(h.pulls.at(-1).files.sort(), ["foo/a.txt", "index.html", "p1/index.html", "p1/photo.jpg"]);
+  } finally { h.done(); }
+});
+
+test("the carry map is written to R2, not only cached in the isolate", async () => {
+  const h = harness();
+  try {
+    assert.equal((await h.push("bafyone", 1, V1)).status, 200);
+    const r = await h.push("bafytwo", 2, { "index.html": "h2" }, "bafyone", { carry: ["foo", "p1/photo.jpg"] });
+    assert.equal(r.status, 200, await r.text());
+    const stored = JSON.parse(new TextDecoder().decode(h.SITES.m.get("carry/bafytwo.json").bytes));
+    assert.deepEqual(stored, { "foo/a.txt": "bafyone", "p1/photo.jpg": "bafyone" });
+  } finally { h.done(); }
+});
+
+test("a manifest rides the final part of a multi-part push", async () => {
+  const h = harness();
+  try {
+    assert.equal((await h.push("bafyone", 1, V1)).status, 200);
+    assert.equal((await h.push("bafytwo", 2, { "index.html": "h2" }, "bafyone", null, "1/2")).status, 200);
+    assert.equal(h.SITES.m.has("carry/bafytwo.json"), false, "an unfinished push writes no carry map");
+    const fin = await h.push("bafytwo", 2, { "p9/new.html": "n" }, "bafyone", { carry: ["foo"] }, "2/2");
+    assert.equal(fin.status, 200, await fin.text());
+    await Promise.all(h.waits);
+    assert.deepEqual(h.pulls.at(-1).files.sort(), ["foo/a.txt", "index.html", "p9/new.html"]);
+    assert.equal((await h.get("https://bafytwo.crop.test/foobar/b.txt"))[0], 404);
+    assert.deepEqual(await h.get("https://bafytwo.crop.test/foo/a.txt"), [200, "fa"]);
+  } finally { h.done(); }
+});
+
 test("foo, foobar and foo.txt carried together are not nested", async () => {
   const h = harness();
   try {
@@ -107,6 +163,15 @@ test("foo, foobar and foo.txt carried together are not nested", async () => {
     // an upload named like a carried folder's prefix is not an overlap
     const r2_ = await h.push("bafythree", 3, { "foo2/x.txt": "x" }, "bafytwo", { carry: ["foo"] });
     assert.equal(r2_.status, 200, await r2_.text());
+  } finally { h.done(); }
+});
+
+test("an uploaded file foo does not overlap a carried folder foobar", async () => {
+  const h = harness();
+  try {
+    assert.equal((await h.push("bafyone", 1, V1)).status, 200);
+    const r = await h.push("bafytwo", 2, { "foo": "a file named foo" }, "bafyone", { carry: ["foobar"] });
+    assert.equal(r.status, 200, await r.text());
   } finally { h.done(); }
 });
 
@@ -147,7 +212,6 @@ test("refusals leave no head move, no carry map, no registry change", async () =
     assert.deepEqual([...h.SITES.m.keys()].filter((k) => k.startsWith("carry/")).sort(), carriesBefore, "no carry map written");
     const traces = [...h.SITES.m.keys()].filter((k) => /bafyx/.test(k) && !k.startsWith("sites/") && !k.startsWith("owners/"));
     assert.deepEqual(traces, []);
-    console.log("owners left by refusals:", [...h.SITES.m.keys()].filter((k) => k.startsWith("owners/bafyx")).length, "; files left:", [...h.SITES.m.keys()].filter((k) => k.startsWith("sites/bafyx")).length);
     // a refused push can be retried at the same sequence with a good manifest
     const ok = await h.push("bafyxa", 3, { "index.html": "x" }, "bafytwo", { carry: ["p1"] });
     assert.equal(ok.status, 200, await ok.text());
@@ -228,10 +292,20 @@ test("held lists every page and bounds to the version's prefix", async () => {
   } finally { h.done(); }
 });
 
+test("versions/: a cid with trailing junk is refused", async () => {
+  const h = harness();
+  try {
+    for (const bad of ["bafyabc.x", "bafyabc%2Fx", "bafyabc%00", "bafyabc-x"]) {
+      const r = await h.call(`https://crop.test/v0/host/versions/${bad}/files`);
+      assert.equal(r.status, 400, bad + " -> " + r.status);
+    }
+  } finally { h.done(); }
+});
+
 test("agents route, reserved names and claim", async () => {
   const h = harness();
   try {
-    for (const name of ["agents", "agents.md", "Agents", "install"]) {
+    for (const name of ["agents", "agents.md", "Agents", "install", "routing"]) {
       const r = await h.call("https://crop.test/v0/host/names", { method: "POST", body: JSON.stringify({ name, ipns: h.ipns, time: Math.floor(Date.now() / 1000), sig: "x" }) });
       assert.equal(r.status, 400, `claim ${name} reserved`);
     }
@@ -256,6 +330,8 @@ test("a miss on a plain pushed version: carry-map reads per 404", async () => {
     await Promise.all(h.waits);
     h.SITES.reads.length = 0;
     const r = await h.call("https://bafyone.crop.test/missing.png"); // upstream (mock fetch) answers 202
-    console.log("miss status:", r.status, "; carry reads:", h.SITES.reads.filter((x) => x.includes("carry/")).length, "; all reads:", JSON.stringify(h.SITES.reads));
+    assert.equal(r.status, 202);
+    const carryReads = h.SITES.reads.filter((x) => x.includes("carry/")).length;
+    assert.ok(carryReads <= 2, `${carryReads} carry-map reads: ${JSON.stringify(h.SITES.reads)}`);
   } finally { h.done(); }
 });

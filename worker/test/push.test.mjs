@@ -382,25 +382,3 @@ test("exact-file and folder carry work correctly", async () => {
     globalThis.fetch = realFetch;
   }
 });
-
-test("an uploaded file equal to a carried exact file is refused", async () => {
-  const { publicKey, privateKey } = generateKeyPairSync("ed25519");
-  const ipns = ipnsName(new Uint8Array(publicKey.export({ format: "der", type: "spki" }).slice(-32)));
-  const env = { DOMAIN: "crop.test", SITES: r2(), REGISTRY: kv() };
-  const ctx = { waitUntil: () => {} };
-  const call = (url, init) => worker.fetch(new Request(url, init), env, ctx);
-  const push = (cid, seq, files, parent, manifest) => {
-    const t = Math.floor(Date.now() / 1000);
-    const sig = sign(null, Buffer.from(`croptop-push\ncrop.test\n${ipns}\n${cid}\n${seq}\n${t}`), privateKey).toString("base64");
-    const fd = new FormData();
-    for (const [rel, body] of Object.entries(files)) fd.append("file:" + rel, new Blob([body]), rel.split("/").pop());
-    if (manifest) fd.append("manifest", JSON.stringify(manifest));
-    const headers = { "X-Croptop-Ipns": ipns, "X-Croptop-Cid": cid, "X-Croptop-Seq": String(seq), "X-Croptop-Time": String(t), "X-Croptop-Sig": sig };
-    if (parent) headers["X-Croptop-Parent"] = parent;
-    return call("https://crop.test/v0/host/push", { method: "POST", headers, body: fd });
-  };
-  const V1 = { "index.html": "h1", "foo.txt": "ft" };
-  assert.equal((await push("bafyone", 1, V1)).status, 200);
-  const r = await push("bafytwo", 2, { "foo.txt": "new" }, "bafyone", { carry: ["foo.txt"] });
-  assert.equal(r.status, 400, await r.text());
-});

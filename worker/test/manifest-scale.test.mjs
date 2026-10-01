@@ -62,10 +62,13 @@ test("10,000 carried folders of a seeded parent validate fast", async () => {
   const fd = new FormData();
   fd.append("file:index.html", new Blob(["new"]), "index.html");
   fd.append("manifest", JSON.stringify({ carry }));
-  const start = performance.now();
+  // CPU time, not wall time: a busy machine stretches the wall clock, not the
+  // work. Linear validation uses well under a second; quadratic needs over 10 s.
+  const cpu = process.cpuUsage();
   const r = await worker.fetch(new Request("https://crop.test/v0/host/push", { method: "POST", headers: { "X-Croptop-Ipns": ipns, "X-Croptop-Cid": "bafytwo", "X-Croptop-Seq": "2", "X-Croptop-Time": String(t), "X-Croptop-Sig": sig, "X-Croptop-Parent": "bafyone" }, body: fd }), env, ctx);
-  const ms = Math.round(performance.now() - start);
-  console.log("manifest push of 10,000 folders:", r.status, ms + " ms");
+  const used = process.cpuUsage(cpu);
+  const ms = (used.user + used.system) / 1000;
+  console.log("manifest push of 10,000 folders:", r.status, Math.round(ms) + " ms of CPU");
   assert.equal(r.status, 200, await r.text());
-  assert.ok(ms < 2000, `took ${ms} ms`);
+  assert.ok(ms < 3000, `validation used ${ms} ms of CPU`);
 });
