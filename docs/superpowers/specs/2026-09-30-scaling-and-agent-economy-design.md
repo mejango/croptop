@@ -12,6 +12,12 @@ below. Paid hosting is out of scope (it needs its own strategy).
 - Selling a post is two steps with the agent's own wallet: croptop prepares the
   transaction, the agent's wallet sends it, croptop checks it landed and then
   publishes. croptop never holds funds or wallet keys.
+- crop.top helps but is never required (2026-10-01). A site publishes, resolves
+  and serves over IPFS with every host unreachable. Hosts add availability:
+  renewal while laptops are closed, and fast reads. Any `croptop host` can replace
+  crop.top. A test enforces this (see Testing). A4 removes the crop.top defaults
+  that every install still carries, and D lets `post --key` work while its host is
+  down.
 
 ## Constraints found in research (2026-09-30)
 - Shipyard stops running delegated-ipfs.dev and the IPFS bootstrap nodes on
@@ -92,6 +98,24 @@ slice of sites from a cursor kept in KV, sized so every site is renewed every 6 
 The node is the main renewer (A1); the cron is the backup. Each registry entry keeps
 its signed record in KV list metadata (records are ~500 bytes base64, the limit is
 1,024), so one `list` call returns up to 1,000 records with no per-site `get`.
+
+**A4. Any host, not only crop.top** (moved here from D's "Carried over from G",
+2026-10-01). Today every embedded engine treats crop.top as special, whatever host
+its sites use:
+- it sends records to crop.top's routing endpoint;
+- it peers with crop.top's node;
+- it dials the peers that crop.top's `/v0/host/peers` lists.
+
+Instead:
+- each site's records go to that site's own host;
+- the engine dials the peers of the hosts its sites use;
+- one config key replaces or drops crop.top as routing endpoint and bootstrap peer.
+  The default stays crop.top, so existing installs see no change.
+
+`croptop host` documents running without crop.top.
+
+*Trade-off:* a self-hoster who drops crop.top loses one way into the network. The
+remembered peers (`peers.json`) and the default bootstrap list remain.
 
 ## C. Limits on crop.top
 
@@ -208,11 +232,25 @@ agents to pass stable keys. The SDK is a new dependency, chosen over a hand-roll
 protocol that would drift from the spec. No remote MCP, which would put keys on a
 server.
 
-**Carried over from G.** G sends every embedded engine's records to crop.top's
-routing endpoint and peers every node with crop.top's node, whatever host a site
-uses. D sends records to the site's own host's routing endpoint instead, and gives
-self-hosters a config key to replace or drop crop.top as their routing endpoint
-and bootstrap peer.
+**Carried over from G.** Moved to A4 (2026-10-01).
+
+**When the host is down** (2026-10-01). Today `post --key` fails if its host cannot
+be reached, because the host is its only way onto the network. Instead, when the
+host cannot be reached, it falls back to P2P:
+- it starts its node with P2P on, announces the signed record and provides the
+  version;
+- it stays up until another peer holds the version (a provider other than itself),
+  for at most `--linger`, 10 minutes by default;
+- it prints that the post is on the network but not yet on the host. The owner's
+  console takes the version in from the network, and its next push brings the host
+  up to date;
+- if no peer fetched the version in time, it exits non-zero and says so. The record
+  then points at blocks only the bot had. A retry with the same `--id` announces the
+  version again.
+
+*Trade-off:* while its host is down, a post takes minutes with an open node
+instead of seconds over HTTP. A sandbox that no peer can reach may never be
+fetched; the non-zero exit makes that visible instead of silent.
 
 ## E. Agents as contributors
 
@@ -301,6 +339,14 @@ something (C's secret).
 - F: calldata golden tests from `cast`, and a full prepare, send, finish run on an
   `anvil` fork of Base with a funded account.
 - E: sanitizer tests with script, event-handler, iframe and SVG payloads.
+- The P2P gate, added in B and kept green by every later sub-project
+  (`TestPublishingNeedsNoHost`):
+  - two loopback nodes; the publisher's host is hung (it takes the connection and
+    never answers);
+  - the publish still returns within the host and network timeouts;
+  - the other node resolves the name to the new version and fetches its root block
+    from the publisher.
+  - D adds the same for `post --key` with its host down.
 
 ## Deferred
 Paid hosting; collecting old versions' storage; exact global quotas; remote MCP.

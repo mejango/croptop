@@ -2839,7 +2839,198 @@ Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
 
 ---
 
-### Task 10: Ship B
+### Task 10: The P2P gate: publishing never waits on the host
+
+Added 2026-10-01, with the user's approval. See the spec's "crop.top helps but is
+never required" and Testing. Task 7 already falls back to announcing first when
+the host cannot be reached. This task pins that with a test and bounds how long a
+hung host can hold a publish up. Run it after Tasks 7–8 land, since it guards both.
+
+**Files:**
+- Modify: `internal/publish/publish.go`. `hostTimeout` and `networkTimeout` become
+  vars, so the test can shorten them.
+- Modify: `internal/ipfs/peers.go`. Add `Addrs` and `Dial` below. A4 later uses
+  `Dial` for configured peers.
+- Create: `internal/publish/resilience_test.go`
+
+**Interfaces:**
+- Produces:
+  - `func (e *Embedded) Addrs() []string`: every listen address, loopback
+    included, each ending `/p2p/<id>`;
+  - `func (e *Embedded) Dial(ctx context.Context, addrs []string) error`: connects
+    to each peer, trying all its addresses, and returns the first peer it could
+    not reach;
+  - `var hostTimeout, networkTimeout` (`time.Duration`; unchanged values 15 s and
+    25 s).
+
+- [ ] **Step 1: Write the failing test** (`internal/publish/resilience_test.go`)
+
+```go
+package publish
+
+import (
+	"context"
+	"net/http"
+	"net/http/httptest"
+	"os"
+	"strings"
+	"testing"
+	"time"
+
+	"github.com/mejango/croptop/internal/render"
+	"github.com/mejango/croptop/internal/store"
+	"github.com/mejango/croptop/templates"
+)
+
+// Publishing never waits on the site's host. With the host hung (it takes the
+// connection and never answers), a publish still returns within the host and
+// network timeouts, and another peer resolves the name to the new version and
+// fetches it from the publisher. Every later sub-project keeps this green.
+func TestPublishingNeedsNoHost(t *testing.T) {
+	ctx := context.Background()
+	ht, nt := hostTimeout, networkTimeout
+	hostTimeout, networkTimeout = 300*time.Millisecond, 2*time.Second
+	t.Cleanup(func() { hostTimeout, networkTimeout = ht, nt })
+
+	reached := make(chan struct{}, 16)
+	release := make(chan struct{})
+	hung := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		select {
+		case reached <- struct{}{}:
+		default:
+		}
+		<-release
+	}))
+	defer hung.Close()
+	defer close(release) // runs before Close, which waits for the handlers
+
+	laptop, peer := offlineNode(t), offlineNode(t)
+	if err := peer.Dial(ctx, laptop.Addrs()); err != nil {
+		t.Fatal(err)
+	}
+	s := &store.Store{Root: t.TempDir()}
+	if err := os.CopyFS(s.SiteDir(fixtureID), os.DirFS("../store/testdata/site")); err != nil {
+		t.Fatal(err)
+	}
+	name, _ := laptop.Keystore().Generate(fixtureID)
+	site, _ := s.Site(fixtureID)
+	site.IPNS = name
+	SetHost(site, hung.URL)
+	s.SaveSite(site)
+	p := &Publisher{Store: s, Node: laptop, Render: &render.Renderer{Store: s, Templates: templates.FS, CIDs: laptop}, SkipPrewarm: true}
+
+	start := time.Now()
+	res, err := p.Publish(ctx, fixtureID, false)
+	if err != nil {
+		t.Fatalf("publish with the host hung: %v", err)
+	}
+	// two host lookups (the newest record, then what changed) and one network lookup
+	if took, limit := time.Since(start), 2*hostTimeout+networkTimeout+5*time.Second; took > limit {
+		t.Fatalf("publish waited %s on a hung host, limit %s", took, limit)
+	}
+	select {
+	case <-reached:
+	default:
+		t.Fatal("the publish never asked the host, so this test proves nothing")
+	}
+	rctx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	defer cancel()
+	got, err := peer.Resolve(rctx, name)
+	if err != nil || strings.TrimPrefix(got, "/ipfs/") != res.CID {
+		t.Fatalf("the peer resolves %s to %q, %v; want %s", name, got, err, res.CID)
+	}
+	if _, err := peer.Block(rctx, res.CID); err != nil {
+		t.Fatalf("the peer cannot fetch the version from the publisher: %v", err)
+	}
+}
+```
+
+- [ ] **Step 2: Run it to verify it fails**
+
+Run: `go test -p 1 ./internal/publish/ -run TestPublishingNeedsNoHost -count=1`
+Expected: FAIL to compile (`Dial` and `Addrs` are undefined, and `hostTimeout` is a
+constant).
+
+- [ ] **Step 3: Implement**
+
+In `publish.go`, turn the three timeouts into vars. Keep their values:
+
+```go
+// Vars so tests can shorten them.
+var (
+	networkTimeout = 25 * time.Second
+	hostTimeout    = 15 * time.Second
+	publishTimeout = 3 * time.Minute
+)
+```
+
+In `internal/ipfs/peers.go`:
+
+```go
+// Addrs is every address this node listens on, loopback included, each ending
+// in its peer ID: what another node on this machine dials.
+func (e *Embedded) Addrs() []string {
+	if e.host == nil {
+		return nil
+	}
+	var out []string
+	for _, a := range e.host.Addrs() {
+		out = append(out, a.String()+"/p2p/"+e.host.ID().String())
+	}
+	return out
+}
+
+// Dial connects to the peers at addrs (each ending /p2p/<id>), trying all of a
+// peer's addresses, and returns the first peer it could not reach.
+func (e *Embedded) Dial(ctx context.Context, addrs []string) error {
+	if e.host == nil {
+		return fmt.Errorf("node not started")
+	}
+	var ms []ma.Multiaddr
+	for _, a := range addrs {
+		m, err := ma.NewMultiaddr(a)
+		if err != nil {
+			return err
+		}
+		ms = append(ms, m)
+	}
+	infos, err := peer.AddrInfosFromP2pAddrs(ms...)
+	if err != nil {
+		return err
+	}
+	for _, ai := range infos {
+		if err := e.host.Connect(ctx, ai); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+```
+
+Add the multiaddr import (`ma "github.com/multiformats/go-multiaddr"`) if peers.go
+lacks it.
+
+- [ ] **Step 4: Run the tests**
+
+Run: `gofmt -l internal && go vet ./internal/... && go test -p 1 ./internal/publish/ ./internal/ipfs/ -count=1 -timeout 10m`
+Expected: all pass. Mutation check: make `latestRecord` return the host's error
+instead of falling back. The gate must fail.
+
+- [ ] **Step 5: Commit**
+
+```bash
+git add internal/publish/publish.go internal/publish/resilience_test.go internal/ipfs/peers.go
+git commit -m "Gate: publishing never waits on the host
+
+A hung host costs a publish at most its timeouts; another peer resolves
+the name and fetches the version from the publisher.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
+```
+
+---
+
+### Task 11: Ship B
 
 Run by the main session. Before any deploy, tag or release, confirm with the user.
 
