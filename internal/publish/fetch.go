@@ -21,10 +21,11 @@ import (
 	"github.com/mejango/croptop/internal/store"
 )
 
-const (
-	ipfsFetchTimeout = 4 * time.Minute
-	httpFetchTimeout = 5 * time.Minute
-)
+const httpFetchTimeout = 5 * time.Minute
+
+// ipfsFetchTimeout bounds one read over IPFS. A variable so that tests can
+// lower it.
+var ipfsFetchTimeout = 4 * time.Minute
 
 // fetchSite downloads a published site into dest. It tries IPFS first (the
 // exact CID), then reads the files rebuildSource needs over HTTP from the
