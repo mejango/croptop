@@ -2939,8 +2939,10 @@ func TestPublishingNeedsNoHost(t *testing.T) {
 	if err != nil || strings.TrimPrefix(got, "/ipfs/") != res.CID {
 		t.Fatalf("the peer resolves %s to %q, %v; want %s", name, got, err, res.CID)
 	}
-	if _, err := peer.Block(rctx, res.CID); err != nil {
-		t.Fatalf("the peer cannot fetch the version from the publisher: %v", err)
+	// Links reads over bitswap (Block reads only local blocks): the root comes
+	// from the publisher, the host has none
+	if links, err := peer.Links(rctx, res.CID); err != nil || len(links) == 0 {
+		t.Fatalf("the peer cannot fetch the version from the publisher: %d links, %v", len(links), err)
 	}
 }
 ```

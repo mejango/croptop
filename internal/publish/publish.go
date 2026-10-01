@@ -16,7 +16,8 @@ import (
 	"github.com/mejango/croptop/internal/store"
 )
 
-const (
+// Variables so that tests can shorten them.
+var (
 	networkTimeout = 25 * time.Second
 	hostTimeout    = 15 * time.Second
 	publishTimeout = 3 * time.Minute

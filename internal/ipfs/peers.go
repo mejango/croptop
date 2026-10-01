@@ -3,6 +3,7 @@ package ipfs
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
 	"os"
@@ -161,4 +162,43 @@ func (e *Embedded) PeerAddrs() []string {
 		}
 	}
 	return out
+}
+
+// Addrs is every address this node listens on, loopback included, each ending
+// in its peer ID: what another node on this machine dials.
+func (e *Embedded) Addrs() []string {
+	if e.host == nil {
+		return nil
+	}
+	var out []string
+	for _, a := range e.host.Addrs() {
+		out = append(out, a.String()+"/p2p/"+e.host.ID().String())
+	}
+	return out
+}
+
+// Dial connects to the peers at addrs (each ending /p2p/<id>), trying all of a
+// peer's addresses, and returns the first peer it could not reach.
+func (e *Embedded) Dial(ctx context.Context, addrs []string) error {
+	if e.host == nil {
+		return errors.New("node not started")
+	}
+	var ms []ma.Multiaddr
+	for _, a := range addrs {
+		m, err := ma.NewMultiaddr(a)
+		if err != nil {
+			return err
+		}
+		ms = append(ms, m)
+	}
+	infos, err := peer.AddrInfosFromP2pAddrs(ms...)
+	if err != nil {
+		return err
+	}
+	for _, ai := range infos {
+		if err := e.host.Connect(ctx, ai); err != nil {
+			return err
+		}
+	}
+	return nil
 }
