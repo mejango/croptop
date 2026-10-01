@@ -5,6 +5,8 @@ import (
 	"errors"
 	"io"
 	"net/http"
+	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
@@ -289,4 +291,135 @@ func (r *changesRig) job(c string, seq uint64) *pushJob {
 		r.t.Fatal(err)
 	}
 	return &pushJob{site: site, cid: c, seq: seq}
+}
+
+// After an agent's version below this machine's renewed sequence is taken in,
+// the network still serves this machine's own older version. The next renewal
+// renews above it instead of taking it back in, so the minute's catch-up never
+// uploads the older version over the agent's post.
+func TestARenewalAfterATakeInKeepsTheAgentPost(t *testing.T) {
+	ctx := context.Background()
+	r := newChangesRig(t)
+	post := r.agent()
+	for i := 0; i < 2; i++ {
+		if err := r.p.Keepalive(ctx, fixtureID); err != nil {
+			t.Fatal(err)
+		}
+	}
+	post("Agent post below the renewed sequence")
+	if err := r.p.CatchUp(ctx, fixtureID); err != nil {
+		t.Fatal(err)
+	}
+	if err := r.p.Keepalive(ctx, fixtureID); err != nil { // ten minutes later
+		t.Fatal(err)
+	}
+	if err := r.p.CatchUp(ctx, fixtureID); err != nil { // a minute after that
+		t.Fatal(err)
+	}
+	time.Sleep(2 * time.Second) // what a requeued upload would need
+	r.hostHas("Agent post below the renewed sequence")
+}
+
+// A version queued before an agent's version was taken in never goes up over it.
+func TestAQueuedUploadNeverGoesOverAVersionTakenInAfterIt(t *testing.T) {
+	ctx := context.Background()
+	r := newChangesRig(t)
+	post := r.agent()
+	for i := 0; i < 2; i++ {
+		if err := r.p.Keepalive(ctx, fixtureID); err != nil {
+			t.Fatal(err)
+		}
+	}
+	mine, seq := r.announceWithoutUpload("\n\nbig change")
+	post("Agent post during the upload")
+	if err := r.p.CatchUp(ctx, fixtureID); err != nil {
+		t.Fatal(err)
+	}
+	r.p.pushVersion(ctx, r.job(mine, seq)) // the queued upload, after the take-in
+	r.hostHas("Agent post during the upload")
+}
+
+// A forced publish replaces a version on the host that this machine cannot take
+// in (not a Croptop site): directly, and through the background queue.
+func TestAForcedPublishReachesTheHost(t *testing.T) {
+	for _, queued := range []bool{false, true} {
+		ctx := context.Background()
+		r := newChangesRig(t)
+		r.foreignOnHost()
+		if err := r.p.CatchUp(ctx, fixtureID); err != nil {
+			t.Fatal(err)
+		}
+		r.edit("\n\nFORCED")
+		res, err := r.p.Publish(ctx, fixtureID, true)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if queued {
+			site, err := r.store.Site(fixtureID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			r.p.queuePush(site, res.CID, res.Sequence, nil)
+			waitFor(t, "the forced version on the host", func() bool {
+				e, err := r.entry()
+				return err == nil && e.CID == res.CID
+			})
+			continue
+		}
+		if err := r.p.pushVersion(ctx, r.job(res.CID, res.Sequence)); err != nil {
+			t.Fatalf("the forced upload: %v", err)
+		}
+		if e, err := r.entry(); err != nil || e.CID != res.CID {
+			t.Fatalf("forced %+v; the host holds %+v, %v", res, e, err)
+		}
+	}
+}
+
+// hostHas fails the test unless the version the host holds lists a post titled title.
+func (r *changesRig) hostHas(title string) {
+	r.t.Helper()
+	e, err := r.entry()
+	if err != nil {
+		r.t.Fatal(err)
+	}
+	b, _, err := httpGet(context.Background(), r.srv.URL+"/ipfs/"+e.CID+"/planet.json")
+	if err != nil || !strings.Contains(string(b), title) {
+		r.t.Fatalf("the host holds %s@%d, without the post %q: %v", e.CID, e.Sequence, title, err)
+	}
+}
+
+// foreignOnHost has another machine with the site's key push a version that is
+// not a Croptop site, which this machine cannot take in.
+func (r *changesRig) foreignOnHost() {
+	r.t.Helper()
+	ctx := context.Background()
+	pem, err := r.laptop.Keystore().ExportPEM(fixtureID)
+	if err != nil {
+		r.t.Fatal(err)
+	}
+	node := offlineNode(r.t)
+	if err := importKey(node.Keystore(), "foreign", pem); err != nil {
+		r.t.Fatal(err)
+	}
+	dir := r.t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "index.html"), []byte("not a croptop site"), 0o644); err != nil {
+		r.t.Fatal(err)
+	}
+	c, err := node.AddDir(ctx, dir)
+	if err != nil {
+		r.t.Fatal(err)
+	}
+	held, err := r.entry()
+	if err != nil {
+		r.t.Fatal(err)
+	}
+	if _, err := node.SignRecord("foreign", c, held.Sequence+1); err != nil {
+		r.t.Fatal(err)
+	}
+	other := &Publisher{Store: &store.Store{Root: r.t.TempDir()}, Node: node}
+	fsite := &store.Site{ID: "foreign", IPNS: r.ipns}
+	SetHost(fsite, r.srv.URL)
+	if err := other.pushDir(ctx, fsite, "foreign", c, held.Sequence+1, pushSpec{Dir: dir}); err != nil {
+		r.t.Fatal(err)
+	}
 }

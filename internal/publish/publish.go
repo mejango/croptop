@@ -182,6 +182,18 @@ func (p *Publisher) publishOnce(ctx context.Context, siteID string, force bool, 
 	if err := ctx.Err(); err != nil { // the caller gave up: announce nothing
 		return Result{}, nil, err
 	}
+	if force {
+		// a forced publish replaces whatever the host holds: that version is one
+		// this machine has seen and overrides, not news for its upload to stop at
+		hctx, cancel := context.WithTimeout(ctx, hostTimeout)
+		e, err := hostEntry(hctx, HostOf(site), site.IPNS)
+		cancel()
+		if err == nil {
+			if err := p.saveSite(site.ID, func(s *store.Site) { rememberVersion(s, e.CID) }); err != nil {
+				return Result{}, nil, err
+			}
+		}
+	}
 	p.log("publishing %s at sequence %d", cid, seq)
 	pctx, cancel := context.WithTimeout(ctx, publishTimeout)
 	defer cancel()
@@ -266,6 +278,7 @@ func (p *Publisher) queuePush(site *store.Site, cid string, seq uint64, rec []by
 	if p.pending == nil {
 		p.pending, p.pushing, p.wake = map[string]*pushJob{}, map[string]bool{}, map[string]chan struct{}{}
 	}
+	old := p.pending[site.ID]
 	p.pending[site.ID] = &pushJob{site: site, cid: cid, seq: seq, rec: rec}
 	if !p.pushing[site.ID] {
 		p.pushing[site.ID] = true
@@ -273,7 +286,10 @@ func (p *Publisher) queuePush(site *store.Site, cid string, seq uint64, rec []by
 		go p.runPushes(site.ID, p.wake[site.ID])
 		return
 	}
-	select { // cut a retry's wait short
+	if old != nil && old.cid == cid {
+		return // the same version again (the minute's catch-up): the retry keeps its wait
+	}
+	select { // a newer version cuts a retry's wait short
 	case p.wake[site.ID] <- struct{}{}:
 	default:
 	}
@@ -384,7 +400,9 @@ func (p *Publisher) pushVersion(ctx context.Context, j *pushJob) error {
 			return false, nil
 		case e.CID == j.cid:
 			return true, nil
-		case !ownVersion(site, e.CID):
+		case !ownVersion(site, e.CID), rememberedAfter(site, e.CID, j.cid):
+			// published elsewhere, or taken in after this version was made: going
+			// over it would drop what it added
 			return true, fmt.Errorf("%s holds %s at sequence %d: %w", hostURL, e.CID, e.Sequence, errSuperseded)
 		case e.Sequence >= j.seq:
 			return true, nil // this machine's own newer version is there
@@ -429,7 +447,7 @@ func (p *Publisher) pushChangesOrAll(ctx context.Context, j *pushJob) error {
 	if err != nil {
 		return err
 	}
-	if !ownVersion(site, e.CID) {
+	if !ownVersion(site, e.CID) || rememberedAfter(site, e.CID, j.cid) {
 		return fmt.Errorf("%s holds %s at sequence %d: %w", hostURL, e.CID, e.Sequence, errSuperseded)
 	}
 	upload, carry, err := p.changes(ctx, eng, hostURL, j.cid, e.CID)
@@ -587,19 +605,24 @@ func (p *Publisher) Keepalive(ctx context.Context, siteID string) error {
 	if err != nil {
 		return err // offline: try again next time
 	}
-	if rec.Value != "/ipfs/"+*site.LastPublishedCID {
-		if site.IPNSSequence == 0 {
+	if c := strings.TrimPrefix(rec.Value, "/ipfs/"); c != *site.LastPublishedCID {
+		switch {
+		case site.IPNSSequence == 0:
 			// never published from here: the network's record is the baseline
-			cid := strings.TrimPrefix(rec.Value, "/ipfs/")
 			return p.saveSite(site.ID, func(s *store.Site) {
-				rememberVersion(s, cid)
-				s.LastPublishedCID, s.IPNSSequence, s.PublishedElsewhere = &cid, rec.Sequence, false
+				rememberVersion(s, c)
+				s.LastPublishedCID, s.IPNSSequence, s.PublishedElsewhere = &c, rec.Sequence, false
 			})
-		}
-		if rec.Sequence >= site.IPNSSequence {
+		case ownVersion(site, c):
+			// one of this machine's older versions (an earlier renewal's, before a
+			// version was taken in): the network is behind, so the last publish is
+			// renewed above it, below. Taking it in would put the older version
+			// back, over whatever was taken in since.
+		case rec.Sequence >= site.IPNSSequence:
 			return p.takeIn(ctx, site, rec)
+		default:
+			return nil // network is behind us; the DHT will catch up
 		}
-		return nil // network is behind us; the DHT will catch up
 	}
 	seq := max(rec.Sequence, site.IPNSSequence) + 1
 	pctx, cancel := context.WithTimeout(ctx, publishTimeout)

@@ -63,3 +63,19 @@ func ownVersion(site *store.Site, c string) bool {
 	}
 	return false
 }
+
+// rememberedAfter says whether this machine learned of version a after b: a
+// version taken in, say, after b was made. An upload of b must not go over a,
+// or it would drop what a added. Unknown versions say nothing.
+func rememberedAfter(site *store.Site, a, b string) bool {
+	ia, ib := -1, -1
+	for i, v := range versionsOf(site) {
+		switch v {
+		case a:
+			ia = i
+		case b:
+			ib = i
+		}
+	}
+	return ib >= 0 && ia > ib
+}

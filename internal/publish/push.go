@@ -437,7 +437,11 @@ func (p *Publisher) pushDir(ctx context.Context, site *store.Site, key, cid stri
 		case 409:
 			return "", &hostConflict{fmt.Sprintf("%s: %s", base, strings.TrimSpace(string(body)))}
 		}
-		return "", &hostRefusal{fmt.Sprintf("%s: %s: %s", what, resp.Status, strings.TrimSpace(string(body)))}
+		msg := fmt.Sprintf("%s: %s: %s", what, resp.Status, strings.TrimSpace(string(body)))
+		if resp.StatusCode == http.StatusTooManyRequests {
+			return "", errors.New(msg) // later, not never
+		}
+		return "", &hostRefusal{msg}
 	}
 	var small, big []pushFile
 	for _, f := range files {
