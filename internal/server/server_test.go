@@ -377,4 +377,7 @@ func TestSaveCanSkipOrDeferTheRender(t *testing.T) {
 		}
 		time.Sleep(50 * time.Millisecond)
 	}
+
+	s.mu.Lock() // the deferred render holds s.mu until it has written everything
+	s.mu.Unlock()
 }
