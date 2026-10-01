@@ -13,6 +13,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/mejango/croptop/internal/host"
 	"github.com/mejango/croptop/internal/ipfs"
@@ -206,13 +207,18 @@ func (r *changesRig) agent() (post func(title string)) {
 	}
 }
 
-// keeps checks that the host holds res, the laptop's last publish, and that
-// it and the laptop's copy of the site both have the post titled title.
-func (r *changesRig) keeps(res Result, title string) {
+// keeps checks that the host holds res, the laptop's last publish; that it
+// and the laptop's copy of the site both have the post titled title; and that
+// the laptop's edit, text in the rig's post, is in it too.
+func (r *changesRig) keeps(res Result, title, edit string) {
 	r.t.Helper()
 	e, err := r.entry()
 	if err != nil || e.CID != res.CID {
 		r.t.Fatalf("the host holds %+v, %v; the laptop published %+v", e, err, res)
+	}
+	a, status, err := httpGet(context.Background(), r.srv.URL+"/ipfs/"+e.CID+"/"+r.post.ID+"/article.json")
+	if err != nil || status != 200 || !strings.Contains(string(a), edit) {
+		r.t.Fatalf("the laptop's edit %q is not in the host's version: %d, %v", edit, status, err)
 	}
 	b, status, err := httpGet(context.Background(), r.srv.URL+"/ipfs/"+e.CID+"/planet.json")
 	if err != nil || status != 200 {
@@ -377,7 +383,7 @@ func TestAnAgentPostDuringAPublishIsKept(t *testing.T) {
 		if used != 2 {
 			t.Fatalf("the refused push was not made again once: %d manifest pushes", used)
 		}
-		r.keeps(res, "Agent wrote this first")
+		r.keeps(res, "Agent wrote this first", "laptop edit")
 	})
 	t.Run("between the laptop's looks at the host", func(t *testing.T) {
 		r := newChangesRig(t)
@@ -385,7 +391,7 @@ func TestAnAgentPostDuringAPublishIsKept(t *testing.T) {
 		r.p.Node = &racyNode{noPeers: r.laptop, during: func() { post("Agent wrote this meanwhile") }}
 		r.edit("\n\nlaptop edit")
 		_, _, res := r.push()
-		r.keeps(res, "Agent wrote this meanwhile")
+		r.keeps(res, "Agent wrote this meanwhile", "laptop edit")
 	})
 }
 
@@ -450,5 +456,214 @@ func TestPublishUploadsBigChangesInTheBackground(t *testing.T) {
 	}
 	if e, err := r.entry(); err != nil || e.CID != before.CID {
 		t.Fatalf("the host holds %+v, %v; it holds the old version until the upload follows", e, err)
+	}
+}
+
+// While one upload runs, a newer version waits in its place and only the
+// newest goes up after. A site whose host has no version is queued by the
+// minute's catch-up.
+func TestBackgroundPushesKeepOnlyTheNewest(t *testing.T) {
+	ctx := context.Background()
+	h := &host.Host{Domain: "crop.test", DataDir: t.TempDir(), Engine: offlineNode(t)}
+	if err := h.Start(); err != nil {
+		t.Fatal(err)
+	}
+	release := make(chan struct{})
+	var mu sync.Mutex
+	var cids []string
+	blocked := true
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == "POST" && r.URL.Path == "/v0/host/push" {
+			mu.Lock()
+			if len(cids) == 0 || cids[len(cids)-1] != r.Header.Get("X-Croptop-Cid") {
+				cids = append(cids, r.Header.Get("X-Croptop-Cid"))
+			}
+			wait := blocked
+			mu.Unlock()
+			if wait {
+				<-release
+			}
+		}
+		h.ServeHTTP(w, r)
+	}))
+	defer srv.Close()
+	defer func() {
+		mu.Lock()
+		if blocked {
+			blocked = false
+			close(release)
+		}
+		mu.Unlock()
+	}()
+
+	laptop := offlineNode(t)
+	s := &store.Store{Root: t.TempDir()}
+	if err := os.CopyFS(s.SiteDir(fixtureID), os.DirFS("../store/testdata/site")); err != nil {
+		t.Fatal(err)
+	}
+	ipnsName, err := laptop.Keystore().Generate(fixtureID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	site, err := s.Site(fixtureID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	site.IPNS = ipnsName
+	SetHost(site, srv.URL)
+	if err := s.SaveSite(site); err != nil {
+		t.Fatal(err)
+	}
+	p := &Publisher{Store: s, Node: laptop, Render: &render.Renderer{Store: s, Templates: templates.FS, CIDs: laptop}, SkipPrewarm: true}
+	version := func(text string) (string, uint64) {
+		t.Helper()
+		posts, err := s.Posts(fixtureID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		posts[0].Content = text
+		if err := s.SavePost(fixtureID, posts[0]); err != nil {
+			t.Fatal(err)
+		}
+		if err := p.Render.Render(ctx, fixtureID); err != nil {
+			t.Fatal(err)
+		}
+		c, err := laptop.AddDir(ctx, s.PublicDir(fixtureID))
+		if err != nil {
+			t.Fatal(err)
+		}
+		site, err := s.Site(fixtureID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		site.IPNSSequence++
+		site.LastPublishedCID = &c
+		if err := s.SaveSite(site); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := laptop.SignRecord(fixtureID, c, site.IPNSSequence); err != nil {
+			t.Fatal(err)
+		}
+		return c, site.IPNSSequence
+	}
+	queue := func(c string, seq uint64) {
+		t.Helper()
+		site, err := s.Site(fixtureID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		p.queuePush(site, c, seq)
+	}
+	a, sa := version("a")
+	queue(a, sa)
+	time.Sleep(200 * time.Millisecond) // a's upload is now blocked at the host
+	b, sb := version("b")
+	queue(b, sb)
+	c, sc := version("c")
+	queue(c, sc)
+	mu.Lock()
+	blocked = false
+	close(release)
+	mu.Unlock()
+	waitFor(t, "the newest version reaching the host", func() bool {
+		e, err := hostEntry(ctx, srv.URL, ipnsName)
+		return err == nil && e.CID == c
+	})
+	mu.Lock()
+	for _, x := range cids {
+		if x == b {
+			mu.Unlock()
+			t.Fatalf("a version replaced while waiting was pushed anyway: %v", cids)
+		}
+	}
+	mu.Unlock()
+
+	// a host with no version of the site gets it from the minute's catch-up
+	h2 := &host.Host{Domain: "crop.test", DataDir: t.TempDir(), Engine: offlineNode(t)}
+	if err := h2.Start(); err != nil {
+		t.Fatal(err)
+	}
+	srv2 := httptest.NewServer(h2)
+	defer srv2.Close()
+	if site, err = s.Site(fixtureID); err != nil {
+		t.Fatal(err)
+	}
+	SetHost(site, srv2.URL)
+	if err := s.SaveSite(site); err != nil {
+		t.Fatal(err)
+	}
+	if err := p.CatchUp(ctx, fixtureID); err != nil {
+		t.Fatal(err)
+	}
+	waitFor(t, "catch-up sending the site to a host that had no version of it", func() bool {
+		e, err := hostEntry(ctx, srv2.URL, ipnsName)
+		return err == nil && e.CID == c
+	})
+}
+
+// A background upload whose version another machine has published past (an
+// agent's post) does not replace it, which the host refuses anyway: the
+// laptop takes that version in and publishes again, so the host ends with both
+// the agent's post and the laptop's edit.
+func TestABackgroundUploadOvertakenElsewherePublishesAgain(t *testing.T) {
+	ctx := context.Background()
+	r := newChangesRig(t)
+	post := r.agent()
+
+	// the laptop makes a version at the next sequence that does not reach the
+	// host yet, as a big change announced first would
+	r.edit("\n\nlaptop edit")
+	if err := r.p.Render.Render(ctx, fixtureID); err != nil {
+		t.Fatal(err)
+	}
+	mine, err := r.laptop.AddDir(ctx, r.store.PublicDir(fixtureID))
+	if err != nil {
+		t.Fatal(err)
+	}
+	site, err := r.store.Site(fixtureID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	seq := site.IPNSSequence + 1
+	if _, err := r.laptop.SignRecord(fixtureID, mine, seq); err != nil {
+		t.Fatal(err)
+	}
+	if err := r.p.published(fixtureID, mine, seq); err != nil {
+		t.Fatal(err)
+	}
+	// meanwhile an agent posts on the host's version, at the same sequence
+	post("Agent wrote this meanwhile")
+	agents, err := r.entry()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if site, err = r.store.Site(fixtureID); err != nil {
+		t.Fatal(err)
+	}
+	if err := r.p.pushVersion(ctx, &pushJob{site, mine, seq}); !errors.Is(err, errSuperseded) {
+		t.Fatalf("an upload the host has moved past: %v, want errSuperseded", err)
+	}
+	r.p.queuePush(site, mine, seq)
+	// taking the agent's version in makes it this machine's last publish for a
+	// moment; what is waited for is the version published on top of it
+	waitFor(t, "the laptop publishing again on top of the agent's version", func() bool {
+		site, err := r.store.Site(fixtureID)
+		e, herr := r.entry()
+		return err == nil && herr == nil && site.LastPublishedCID != nil && *site.LastPublishedCID != mine &&
+			*site.LastPublishedCID != agents.CID && e.CID == *site.LastPublishedCID
+	})
+	if site, err = r.store.Site(fixtureID); err != nil {
+		t.Fatal(err)
+	}
+	r.keeps(Result{CID: *site.LastPublishedCID, Sequence: site.IPNSSequence}, "Agent wrote this meanwhile", "laptop edit")
+}
+
+// waitFor polls cond for up to 30 s.
+func waitFor(t *testing.T, what string, cond func() bool) {
+	t.Helper()
+	for deadline := time.Now().Add(30 * time.Second); !cond(); time.Sleep(100 * time.Millisecond) {
+		if time.Now().After(deadline) {
+			t.Fatalf("timed out waiting for %s", what)
+		}
 	}
 }

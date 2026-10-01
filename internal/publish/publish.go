@@ -45,6 +45,11 @@ type Publisher struct {
 	// a stale copy over a fresh publish and flagged the site as published
 	// elsewhere (CROPTOP, 2026-09-19).
 	mu sync.Mutex
+	// pushMu guards pending and pushing: one background upload runs per site,
+	// and the newest version waiting replaces an older one.
+	pushMu  sync.Mutex
+	pending map[string]*pushJob
+	pushing map[string]bool
 }
 
 func (p *Publisher) log(format string, a ...any) {
@@ -158,25 +163,141 @@ func (p *Publisher) publishOnce(ctx context.Context, siteID string, force bool, 
 	}
 	if !p.SkipPrewarm {
 		if p.Wait {
-			if err := p.Push(ctx, site, cid, seq); err != nil {
+			if err := p.pushVersion(ctx, &pushJob{site, cid, seq}); err != nil {
 				p.log("push to %s failed: %v", HostOf(site), err)
 			} else {
 				p.log("pushed %s to %s", site.Name, HostOf(site))
 			}
 			p.warm(site, cid)
 		} else {
-			go func() {
-				ctx := context.Background() // no deadline: an upload is given up when it stops moving, not when time is up
-				if err := p.Push(ctx, site, cid, seq); err != nil {
-					p.log("push to %s failed: %v", HostOf(site), err)
-				} else {
-					p.log("pushed %s to %s", site.Name, HostOf(site))
-				}
-				p.warm(site, cid)
-			}() // Task 8 replaces this with the per-site queue
+			p.queuePush(site, cid, seq)
+			go p.warm(site, cid)
 		}
 	}
 	return Result{CID: cid, Sequence: seq}, nil, nil
+}
+
+type pushJob struct {
+	site *store.Site
+	cid  string
+	seq  uint64
+}
+
+// errSuperseded: another machine published past the version being uploaded,
+// an agent's post say. Uploading it would replace that version, so it is taken
+// in and the site published again instead.
+var errSuperseded = errors.New("the host holds a newer version published elsewhere")
+
+// queuePush uploads a version in the background, one upload per site at a
+// time. A version queued while another uploads replaces any older one
+// waiting, so after a long upload only the newest goes up, as a changes-only
+// push when it can be. A failed upload is retried with growing waits while
+// it is still the newest.
+func (p *Publisher) queuePush(site *store.Site, cid string, seq uint64) {
+	p.pushMu.Lock()
+	defer p.pushMu.Unlock()
+	if p.pending == nil {
+		p.pending, p.pushing = map[string]*pushJob{}, map[string]bool{}
+	}
+	p.pending[site.ID] = &pushJob{site, cid, seq}
+	if !p.pushing[site.ID] {
+		p.pushing[site.ID] = true
+		go p.runPushes(site.ID)
+	}
+}
+
+func (p *Publisher) runPushes(siteID string) {
+	wait := time.Minute
+	for {
+		p.pushMu.Lock()
+		j := p.pending[siteID]
+		delete(p.pending, siteID)
+		if j == nil {
+			p.pushing[siteID] = false
+			p.pushMu.Unlock()
+			return
+		}
+		p.pushMu.Unlock()
+		err := p.pushVersion(context.Background(), j)
+		switch {
+		case err == nil:
+			p.log("pushed %s to %s", j.site.Name, HostOf(j.site))
+			wait = time.Minute
+			continue
+		case errors.Is(err, errSuperseded):
+			// take that version in and publish on top of it: a new version is
+			// queued (or pushed) by the publish, and this loop picks it up
+			p.log("%s: %v; taking it in and publishing again", j.site.Name, err)
+			if _, err := p.Publish(context.Background(), siteID, false); err != nil {
+				p.log("publishing %s again: %v", j.site.Name, err)
+			}
+			continue
+		}
+		p.log("push of %s to %s failed: %v; trying again in %s", j.site.Name, HostOf(j.site), err, wait)
+		p.pushMu.Lock()
+		if p.pending[siteID] == nil {
+			p.pending[siteID] = j
+		}
+		p.pushMu.Unlock()
+		time.Sleep(wait)
+		if wait < 30*time.Minute {
+			wait *= 2
+		}
+	}
+}
+
+// pushVersion sends a version the network already has to the site's host:
+// only what changed when the host holds an earlier version, otherwise every
+// file. An upload cut short resumes where it stopped. A version the host
+// already holds is done; one that another machine published past is
+// errSuperseded.
+func (p *Publisher) pushVersion(ctx context.Context, j *pushJob) error {
+	hostURL := HostOf(j.site)
+	settled := func() (bool, error) { // the host has this version, or moved past it
+		hctx, cancel := context.WithTimeout(ctx, hostTimeout)
+		e, err := hostEntry(hctx, hostURL, j.site.IPNS)
+		cancel()
+		switch {
+		case err != nil:
+			return false, nil
+		case e.CID == j.cid:
+			return true, nil
+		case e.Sequence < j.seq:
+			return false, nil
+		}
+		if site, err := p.Store.Site(j.site.ID); err == nil && deref(site.LastPublishedCID) == e.CID {
+			return true, nil // this machine's own newer version is there
+		}
+		return true, fmt.Errorf("%s holds %s at sequence %d: %w", hostURL, e.CID, e.Sequence, errSuperseded)
+	}
+	if done, err := settled(); done {
+		return err
+	}
+	err := p.pushChangesOrAll(ctx, j)
+	var hc *hostConflict
+	if errors.As(err, &hc) { // the host moved meanwhile, or the push committed and its answer was lost
+		if done, serr := settled(); done {
+			return serr
+		}
+	}
+	return err
+}
+
+// pushChangesOrAll sends what changed since the version the host holds when
+// it can, otherwise the whole version.
+func (p *Publisher) pushChangesOrAll(ctx context.Context, j *pushJob) error {
+	if eng, ok := p.Node.(changesEngine); ok {
+		hostURL := HostOf(j.site)
+		hctx, cancel := context.WithTimeout(ctx, hostTimeout)
+		e, err := hostEntry(hctx, hostURL, j.site.IPNS)
+		cancel()
+		if err == nil && e.AcceptsManifest {
+			if upload, carry, err := p.changes(ctx, eng, hostURL, j.cid, e.CID); err == nil && eng.CheckManifest(ctx, j.cid, e.CID, upload, carry) == nil {
+				return p.pushDir(ctx, j.site, j.site.ID, j.cid, j.seq, pushSpec{Parent: e.CID, Files: upload, Carry: carry})
+			}
+		}
+	}
+	return p.Push(ctx, j.site, j.cid, j.seq)
 }
 
 // publishChanges sends only what changed since the version the host holds,
@@ -344,8 +465,14 @@ func (p *Publisher) CatchUp(ctx context.Context, siteID string) error {
 	hctx, cancel := context.WithTimeout(ctx, hostTimeout)
 	e, err := hostEntry(hctx, HostOf(site), site.IPNS)
 	cancel()
-	if err != nil || !hostAhead(site, e, *site.LastPublishedCID) {
-		return nil // nothing newer there, or our own push is still on its way
+	switch {
+	case errors.Is(err, errNoVersion), err == nil && e.Sequence < site.IPNSSequence && e.CID != *site.LastPublishedCID:
+		// the host is behind this machine: an upload was cut short (the app quit,
+		// the laptop slept) or never made; send it, resuming what the host holds
+		p.queuePush(site, *site.LastPublishedCID, site.IPNSSequence)
+		return nil
+	case err != nil || !hostAhead(site, e, *site.LastPublishedCID):
+		return nil // our own version is there
 	}
 	return p.takeIn(ctx, site, e.record())
 }
