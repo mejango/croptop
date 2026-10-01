@@ -55,7 +55,7 @@ async function serveBare(request, url, env, ctx) {
   }
   if (p === "/install.sh") return new Response(installSh, { headers: { "content-type": "text/x-shellscript; charset=utf-8", "cache-control": "public, max-age=300" } });
   if (p === "/install.ps1") return new Response(installPs1, { headers: { "content-type": "text/plain; charset=utf-8", "cache-control": "public, max-age=300" } });
-  if (p === "/agents.md" || p === "/agents") return new Response(agentsMd, { headers: { "content-type": "text/markdown; charset=utf-8", "cache-control": "public, max-age=300" } });
+  if (p === "/agents.md" || p === "/agents" || p === "/agents/") return new Response(agentsMd, { headers: { "content-type": "text/markdown; charset=utf-8", "cache-control": "public, max-age=300" } });
   if (p === "/install" || p === "/download") return Response.redirect("https://github.com/" + "mejango/croptop/releases/latest", 302);
   if (p === "/directory" || (p === "/" && !env.ROOT)) return directory(env);
   const [name, ...restParts] = p.slice(1).split("/");
@@ -159,7 +159,7 @@ async function cached(env, key, fn) {
 async function serveSite(request, env, cid, path, base) {
   if (request.method !== "GET" && request.method !== "HEAD") return text("method not allowed", 405);
   const pushed = await env.REGISTRY.get("pushed:" + cid);
-  if (pushed) return serveFromR2(request, env, cid, path, base);
+  if (pushed) return serveFromR2(request, env, cid, path, base, true, pushed === "manifest");
   return serveUpstream(request, env, cid, path);
 }
 
@@ -183,7 +183,7 @@ async function serveUpstream(request, env, cid, path) {
   return text(`no upstream could serve ${cid}${path}` + (last ? ` (${last.status})` : ""), 502);
 }
 
-async function serveFromR2(request, env, cid, path, base, upstream = true) {
+async function serveFromR2(request, env, cid, path, base, upstream = true, isManifest = false) {
   let rel = path.slice(1);
   try { rel = decodeURIComponent(rel); } catch {} // stored under the names as pushed
   const obj = await r2(env, cid, path.endsWith("/") ? rel + "index.html" : rel);
@@ -194,8 +194,7 @@ async function serveFromR2(request, env, cid, path, base, upstream = true) {
   }
   if (!obj) {
     // manifest pushes don't fall back to upstream: if it's not in the manifest, it's gone
-    const carry = await carryOf(env, cid);
-    if (carry.get("__isManifest") === true) return text("not here", 404);
+    if (isManifest) return text("not here", 404);
     return upstream ? serveUpstream(request, env, cid, path) : text("not here", 404);
   }
   const h = new Headers();
@@ -221,7 +220,6 @@ async function r2(env, cid, rel, headOnly) {
   const o = await env.SITES[op](`sites/${cid}/${rel}`);
   if (o) return o;
   const from = (await carryOf(env, cid)).get(rel);
-  if (from === true) return null; // skip the __isManifest flag
   return from ? env.SITES[op](`sites/${from}/${rel}`) : null;
 }
 
@@ -256,18 +254,26 @@ async function saveManifestCarry(env, cid, parent, carry) {
   const from = new Map(await carryOf(env, parent)); // the parent's files carried from older versions
   for (const rel of await filesOf(env, parent)) from.set(rel, parent);
   const uploaded = await filesOf(env, cid);
+  const ancestors = (p) => { const out = []; for (let i = p.indexOf("/"); i >= 0; i = p.indexOf("/", i + 1)) out.push(p.slice(0, i)); return out; };
   const paths = carry.map((raw) => String(raw).replace(/^\/+|\/+$/g, ""));
-  const out = new Map();
+  const set = new Set();
   for (const p of paths) {
     if (!p || p.split("/").some((s) => s === "" || s === "." || s === "..")) return `bad carried path ${p}`;
-    if (paths.some((q) => q !== p && p.startsWith(q + "/"))) return `carried path ${p} is inside another carried path`;
-    if (uploaded.some((rel) => rel === p || rel.startsWith(p + "/"))) return `uploaded files overlap carried path ${p}`;
-    let found = false;
-    if (from.has(p)) { out.set(p, from.get(p)); found = true; }
-    for (const [rel, src] of from) if (rel.startsWith(p + "/")) { out.set(rel, src); found = true; }
-    if (!found) return `carried path ${p} is not in the parent`;
+    if (set.has(p)) return `carried path ${p} is given twice`;
+    set.add(p);
   }
-  out.set("__isManifest", true); // flag to prevent upstream fallback
+  const up = new Set(uploaded);
+  for (const p of paths) {
+    if (ancestors(p).some((a) => set.has(a))) return `carried path ${p} is inside another carried path`;
+    if (up.has(p) || ancestors(p).some((a) => up.has(a))) return `uploaded files overlap carried path ${p}`;
+  }
+  for (const rel of uploaded) if (ancestors(rel).some((a) => set.has(a))) return `uploaded files overlap carried path ${ancestors(rel).find((a) => set.has(a))}`;
+  const out = new Map(), found = new Set();
+  for (const [rel, src] of from) {
+    const hit = set.has(rel) ? rel : ancestors(rel).find((a) => set.has(a));
+    if (hit) { out.set(rel, src); found.add(hit); }
+  }
+  for (const p of paths) if (!found.has(p)) return `carried path ${p} is not in the parent`;
   await env.SITES.put(`carry/${cid}.json`, JSON.stringify(Object.fromEntries(out)));
   carries.set(cid, out);
   return "";
@@ -288,14 +294,7 @@ async function held(env, cid) {
 
 // filesOf lists the files pushed with a version, not the ones it carries.
 async function filesOf(env, cid) {
-  const out = [];
-  let cursor;
-  do {
-    const page = await env.SITES.list({ prefix: `sites/${cid}/`, cursor, limit: 1000 });
-    for (const o of page.objects) out.push(o.key.slice(`sites/${cid}/`.length));
-    cursor = page.truncated ? page.cursor : undefined;
-  } while (cursor);
-  return out;
+  return (await held(env, cid)).map((f) => f.path);
 }
 
 // heads/<ipns> in R2 is the version this host holds for a site. R2 reads are
@@ -567,7 +566,7 @@ async function push(request, url, env, ctx) {
     e.cid = cid; e.sequence = seq; e.updated = new Date().toISOString();
     if (h("Record")) e.record = h("Record");
     await saveEntry(env, e);
-    await env.REGISTRY.put("pushed:" + cid, "1");
+    await env.REGISTRY.put("pushed:" + cid, manifest !== null ? "manifest" : "1");
     if (e.record) ctx.waitUntil(republish(env, ipns, e.record));
   }
   await env.REGISTRY.put("lastpush:" + ipns, JSON.stringify(Object.fromEntries(["Ipns", "Cid", "Seq", "Time", "Sig", "Record"].map((k) => ["X-Croptop-" + k, request.headers.get("X-Croptop-" + k) || ""]))), { expirationTtl: 3600 });
@@ -634,7 +633,7 @@ async function pushChunk(request, env, ctx, cid, h, signedHost) {
 async function notifyNode(env, request, cid, signedHost) {
   try {
     const keys = await filesOf(env, cid);
-    for (const rel of (await carryOf(env, cid)).keys()) if (rel !== "__isManifest") keys.push(rel); // the node rebuilds the whole version
+    for (const rel of (await carryOf(env, cid)).keys()) keys.push(rel); // the node rebuilds the whole version
     const headers = { ...UA, "Content-Type": "application/json", "X-Croptop-Signed-Host": signedHost };
     for (const k of ["Ipns", "Cid", "Seq", "Time", "Sig", "Record"]) { const v = request.headers.get("X-Croptop-" + k); if (v) headers["X-Croptop-" + k] = v; }
     const r = await fetch(`${env.NODE}/v0/host/pull`, { method: "POST", headers, body: JSON.stringify({ base: `https://${cid}.${env.DOMAIN}/`, files: keys }) });

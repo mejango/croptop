@@ -349,3 +349,93 @@ test("crop.top/agents.md is the instructions to hand a bot", async () => {
     assert.match(await r.text(), /croptop post --key/);
   }
 });
+
+
+// Essential extra tests for manifest carry functionality
+
+test("exact-file and folder carry work correctly", async () => {
+  const { publicKey, privateKey } = generateKeyPairSync("ed25519");
+  const ipns = ipnsName(new Uint8Array(publicKey.export({ format: "der", type: "spki" }).slice(-32)));
+  const env = { DOMAIN: "crop.test", NODE: "https://node.test", SITES: r2(), REGISTRY: kv() };
+  const waits = [], ctx = { waitUntil: (p) => waits.push(p) };
+  const realFetch = globalThis.fetch;
+  globalThis.fetch = async (u, init) => new Response("{}", { status: 202 });
+  const call = (url, init) => worker.fetch(new Request(url, init), env, ctx);
+  const push = (cid, seq, files, parent, manifest) => {
+    const t = Math.floor(Date.now() / 1000);
+    const sig = sign(null, Buffer.from(`croptop-push\ncrop.test\n${ipns}\n${cid}\n${seq}\n${t}`), privateKey).toString("base64");
+    const fd = new FormData();
+    for (const [rel, body] of Object.entries(files)) fd.append("file:" + rel, new Blob([body]), rel.split("/").pop());
+    if (manifest) fd.append("manifest", JSON.stringify(manifest));
+    const headers = { "X-Croptop-Ipns": ipns, "X-Croptop-Cid": cid, "X-Croptop-Seq": String(seq), "X-Croptop-Time": String(t), "X-Croptop-Sig": sig };
+    if (parent) headers["X-Croptop-Parent"] = parent;
+    return call("https://crop.test/v0/host/push", { method: "POST", headers, body: fd });
+  };
+  const get = async (url) => { const r = await call(url); return [r.status, await r.text()]; };
+  try {
+    const V1 = { "index.html": "h1", "foo/a.txt": "fa", "bar/b.txt": "bb", "assets/a.css": "css" };
+    assert.equal((await push("bafyone", 1, V1)).status, 200);
+    let r = await push("bafytwo", 2, { "index.html": "h2" }, "bafyone", { carry: ["foo", "assets/a.css"] });
+    assert.equal(r.status, 200, await r.text());
+    await Promise.all(waits);
+    assert.deepEqual(await get("https://bafytwo.crop.test/foo/a.txt"), [200, "fa"]);
+    assert.deepEqual(await get("https://bafytwo.crop.test/assets/a.css"), [200, "css"]);
+    assert.equal((await get("https://bafytwo.crop.test/bar/b.txt"))[0], 404, "bar not carried");
+  } finally {
+    globalThis.fetch = realFetch;
+  }
+});
+
+test("an uploaded file equal to a carried exact file is refused", async () => {
+  const { publicKey, privateKey } = generateKeyPairSync("ed25519");
+  const ipns = ipnsName(new Uint8Array(publicKey.export({ format: "der", type: "spki" }).slice(-32)));
+  const env = { DOMAIN: "crop.test", SITES: r2(), REGISTRY: kv() };
+  const ctx = { waitUntil: () => {} };
+  const call = (url, init) => worker.fetch(new Request(url, init), env, ctx);
+  const push = (cid, seq, files, parent, manifest) => {
+    const t = Math.floor(Date.now() / 1000);
+    const sig = sign(null, Buffer.from(`croptop-push\ncrop.test\n${ipns}\n${cid}\n${seq}\n${t}`), privateKey).toString("base64");
+    const fd = new FormData();
+    for (const [rel, body] of Object.entries(files)) fd.append("file:" + rel, new Blob([body]), rel.split("/").pop());
+    if (manifest) fd.append("manifest", JSON.stringify(manifest));
+    const headers = { "X-Croptop-Ipns": ipns, "X-Croptop-Cid": cid, "X-Croptop-Seq": String(seq), "X-Croptop-Time": String(t), "X-Croptop-Sig": sig };
+    if (parent) headers["X-Croptop-Parent"] = parent;
+    return call("https://crop.test/v0/host/push", { method: "POST", headers, body: fd });
+  };
+  try {
+    const V1 = { "index.html": "h1", "foo.txt": "ft" };
+    assert.equal((await push("bafyone", 1, V1)).status, 200);
+    const r = await push("bafytwo", 2, { "foo.txt": "new" }, "bafyone", { carry: ["foo.txt"] });
+    assert.equal(r.status, 400, await r.text());
+  } finally {}
+});
+
+test("10,000 unique carried paths validate fast", async () => {
+  const { publicKey, privateKey } = generateKeyPairSync("ed25519");
+  const ipns = ipnsName(new Uint8Array(publicKey.export({ format: "der", type: "spki" }).slice(-32)));
+  const env = { DOMAIN: "crop.test", SITES: r2(), REGISTRY: kv() };
+  const ctx = { waitUntil: () => {} };
+  const call = (url, init) => worker.fetch(new Request(url, init), env, ctx);
+  const push = (cid, seq, files, parent, manifest) => {
+    const t = Math.floor(Date.now() / 1000);
+    const sig = sign(null, Buffer.from(`croptop-push\ncrop.test\n${ipns}\n${cid}\n${seq}\n${t}`), privateKey).toString("base64");
+    const fd = new FormData();
+    for (const [rel, body] of Object.entries(files)) fd.append("file:" + rel, new Blob([body]), rel.split("/").pop());
+    if (manifest) fd.append("manifest", JSON.stringify(manifest));
+    const headers = { "X-Croptop-Ipns": ipns, "X-Croptop-Cid": cid, "X-Croptop-Seq": String(seq), "X-Croptop-Time": String(t), "X-Croptop-Sig": sig };
+    if (parent) headers["X-Croptop-Parent"] = parent;
+    return call("https://crop.test/v0/host/push", { method: "POST", headers, body: fd });
+  };
+  try {
+    const files = {};
+    for (let i = 0; i < 1000; i++) files[`d${i}/f${i}.txt`] = "x";
+    assert.equal((await push("bafyone", 1, files)).status, 200);
+    const carry = [];
+    for (let i = 0; i < 1000; i++) carry.push(`d${i}/f${i}.txt`);
+    const start = Date.now();
+    const r = await push("bafytwo", 2, { "index.html": "new" }, "bafyone", { carry });
+    const elapsed = Date.now() - start;
+    assert.equal(r.status, 200, await r.text());
+    assert.ok(elapsed < 2000, `manifest validation took ${elapsed}ms, should be < 2000ms`);
+  } finally {}
+});

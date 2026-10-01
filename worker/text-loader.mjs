@@ -1,4 +1,4 @@
-// wrangler imports the install scripts as text (the Text rule in wrangler.toml);
+// wrangler imports text imports (scripts and docs) as text (the Text rule in wrangler.toml);
 // under node this hook does the same: node --experimental-loader ./text-loader.mjs --test test/
 import { readFile } from "node:fs/promises";
 
