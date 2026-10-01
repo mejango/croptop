@@ -42,7 +42,7 @@ function r2() {
     async delete(k) { m.delete(k); },
     async list({ prefix, cursor, limit = 1000 }) {
       const keys = [...m.keys()].filter((k) => k.startsWith(prefix)).sort(), at = Number(cursor || 0);
-      return { objects: keys.slice(at, at + limit).map((key) => ({ key })), truncated: at + limit < keys.length, cursor: String(at + limit) };
+      return { objects: keys.slice(at, at + limit).map((key) => ({ key, size: m.get(key).bytes.length })), truncated: at + limit < keys.length, cursor: String(at + limit) };
     },
   };
 }
@@ -284,5 +284,68 @@ test("routing passes through node 429 with retry-after", async () => {
     assert.equal(r.headers.get("retry-after"), "10");
   } finally {
     globalThis.fetch = realFetch;
+  }
+});
+
+test("a manifest push keeps only what it uploads and carries", async () => {
+  const { publicKey, privateKey } = generateKeyPairSync("ed25519");
+  const ipns = ipnsName(new Uint8Array(publicKey.export({ format: "der", type: "spki" }).slice(-32)));
+  const env = { DOMAIN: "crop.test", NODE: "https://node.test", SITES: r2(), REGISTRY: kv() };
+  const waits = [], ctx = { waitUntil: (p) => waits.push(p) };
+  const pulls = [];
+  const realFetch = globalThis.fetch;
+  globalThis.fetch = async (u, init) => { if (String(u).endsWith("/v0/host/pull")) pulls.push(JSON.parse(init.body)); return new Response("{}", { status: 202 }); };
+  const call = (url, init) => worker.fetch(new Request(url, init), env, ctx);
+  const push = (cid, seq, files, parent, manifest, part) => {
+    const t = Math.floor(Date.now() / 1000);
+    const sig = sign(null, Buffer.from(`croptop-push\ncrop.test\n${ipns}\n${cid}\n${seq}\n${t}`), privateKey).toString("base64");
+    const fd = new FormData();
+    for (const [rel, body] of Object.entries(files)) fd.append("file:" + rel, new Blob([body]), rel.split("/").pop());
+    if (manifest) fd.append("manifest", JSON.stringify(manifest));
+    const headers = { "X-Croptop-Ipns": ipns, "X-Croptop-Cid": cid, "X-Croptop-Seq": String(seq), "X-Croptop-Time": String(t), "X-Croptop-Sig": sig };
+    if (parent) headers["X-Croptop-Parent"] = parent;
+    if (part) headers["X-Croptop-Part"] = part;
+    return call("https://crop.test/v0/host/push", { method: "POST", headers, body: fd });
+  };
+  const body = async (url) => { const r = await call(url); return [r.status, await r.text()]; };
+  try {
+    assert.equal((await push("bafyone", 1, { "index.html": "home", "assets/a.css": "css", "p1/index.html": "one", "p1/photo.jpg": "photo", "p2/index.html": "two" })).status, 200);
+    const r = await push("bafytwo", 2, { "index.html": "home 2", "p3/index.html": "three" }, "bafyone", { carry: ["assets", "p1"] });
+    assert.equal(r.status, 200, await r.text());
+    await Promise.all(waits);
+    assert.deepEqual(await body("https://bafytwo.crop.test/index.html"), [200, "home 2"]);
+    assert.deepEqual(await body("https://bafytwo.crop.test/assets/a.css"), [200, "css"]);
+    assert.deepEqual(await body("https://bafytwo.crop.test/p1/photo.jpg"), [200, "photo"]);
+    assert.deepEqual(await body("https://bafytwo.crop.test/p3/index.html"), [200, "three"]);
+    assert.equal((await call("https://bafytwo.crop.test/p2/index.html")).status, 404, "neither uploaded nor carried: gone");
+    assert.deepEqual(pulls.at(-1).files.sort(), ["assets/a.css", "index.html", "p1/index.html", "p1/photo.jpg", "p3/index.html"]);
+    const [, entry] = await body(`https://crop.test/v0/host/keys/${ipns}`);
+    assert.equal(JSON.parse(entry).acceptsManifest, true);
+    // each bad manifest gets its own fake cid: files stored by a refused push stay under it
+    for (const [cid, files, parent, manifest] of [
+      ["bafythreea", { "index.html": "3" }, "bafytwo", { carry: ["nope"] }],
+      ["bafythreeb", { "p1/x.txt": "x" }, "bafytwo", { carry: ["p1"] }],
+      ["bafythreec", { "index.html": "3" }, "bafytwo", { carry: ["p1", "p1/photo.jpg"] }],
+      ["bafythreed", { "index.html": "3" }, "", { carry: [] }],
+    ]) {
+      const res = await push(cid, 3, files, parent, manifest);
+      assert.equal(res.status, 400, `${JSON.stringify(manifest)}: ${await res.text()}`);
+    }
+    // part 1 of 2 stays stored, uncommitted; the listing shows it
+    assert.equal((await push("bafyfour", 4, { "a.txt": "aaaa" }, "", null, "1/2")).status, 200);
+    assert.deepEqual(JSON.parse((await body("https://crop.test/v0/host/versions/bafyfour/files"))[1]), [{ path: "a.txt", size: 4 }]);
+    assert.equal((await call("https://crop.test/v0/host/versions/not-a-cid/files")).status, 400);
+  } finally {
+    globalThis.fetch = realFetch;
+  }
+});
+
+test("crop.top/agents.md is the instructions to hand a bot", async () => {
+  const env = { DOMAIN: "crop.test", SITES: r2(), REGISTRY: kv() };
+  for (const p of ["/agents.md", "/agents"]) {
+    const r = await worker.fetch(new Request("https://crop.test" + p), env, { waitUntil() {} });
+    assert.equal(r.status, 200);
+    assert.match(r.headers.get("content-type"), /text\/markdown/);
+    assert.match(await r.text(), /croptop post --key/);
   }
 });

@@ -3,7 +3,7 @@ main = "src/index.js"
 compatibility_date = "2026-09-01"
 
 # the install scripts are served from the bare domain
-rules = [{ type = "Text", globs = ["**/*.sh", "**/*.ps1"] }]
+rules = [{ type = "Text", globs = ["**/*.sh", "**/*.ps1", "**/*.md"] }]
 
 # crop.top: the bare domain and every subdomain
 routes = [
