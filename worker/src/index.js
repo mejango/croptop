@@ -319,8 +319,13 @@ async function claimVersion(env, cid, ipns) {
   return true;
 }
 
-function pushConflict(cur, seq, parent) {
+// pushConflict says why a push of cid at seq cannot replace cur, or "". A push
+// with a parent must be built on the version held here. A whole version at the
+// held sequence with other content would replace it unseen: two machines that
+// chose the same next sequence, a laptop and an agent say.
+function pushConflict(cur, seq, cid, parent) {
   if (cur && seq < cur.sequence) return `host already has sequence ${cur.sequence}`;
+  if (!parent && cur && cur.cid && seq === cur.sequence && cur.cid !== cid) return `host holds ${cur.cid} at sequence ${seq}`;
   if (parent && (!cur || cur.cid !== parent)) return `host holds ${cur ? cur.cid : "nothing"}, not ${parent}`;
   return "";
 }
@@ -524,7 +529,7 @@ async function push(request, url, env, ctx) {
   if (!ok) return text("bad signature", 403);
   const existing = await entryByKey(env, ipns);
   const cur = await headOf(env, ipns, existing);
-  const conflict = pushConflict(cur, seq, parent);
+  const conflict = pushConflict(cur, seq, cid, parent);
   if (conflict) return text(conflict, 409);
   if (!(await claimVersion(env, cid, ipns))) return text("that version belongs to another site", 409);
   if (Number(request.headers.get("content-length") || 0) > MAX_PUSH) return text("push too large", 413);

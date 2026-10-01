@@ -586,7 +586,7 @@ func TestVersionMustBeACID(t *testing.T) {
 		if code, body := push(srv, root, 1, ""); code != 200 {
 			t.Fatalf("push of a real version: %d %s", code, body)
 		}
-		if code, body := push(srv, "bafyupload", 1, "1/2"); code != 200 { // somebody else's upload under way
+		if code, body := push(srv, "bafyupload", 2, "1/2"); code != 200 { // the next version's upload under way
 			t.Fatalf("part of a push: %d %s", code, body)
 		}
 		before := snapshot(top)
@@ -1149,5 +1149,32 @@ func TestStartClearsOldStaging(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(recent, "a.txt")); err != nil {
 		t.Fatalf("a recent staging dir must stay: %v", err)
+	}
+}
+
+// conflict keeps every version a host holds: a push either builds on it (its
+// parent), comes after it (a higher sequence), or is that same version again.
+// A whole version at the held sequence with other content is refused: two
+// machines chose the same next sequence, and the later one would replace the
+// earlier unseen.
+func TestConflictKeepsEveryVersion(t *testing.T) {
+	held := &Entry{CID: "bafyheld", Sequence: 5}
+	for _, tc := range []struct {
+		name              string
+		e                 *Entry
+		seq               uint64
+		cid, parent, want string
+	}{
+		{"a first push", nil, 1, "bafyfirst", "", ""},
+		{"a newer whole version", held, 6, "bafynew", "", ""},
+		{"the held version again", held, 5, "bafyheld", "", ""},
+		{"another version at the held sequence", held, 5, "bafytwin", "", "host holds bafyheld at sequence 5"},
+		{"an older sequence", held, 4, "bafyold", "", "host already has sequence 5"},
+		{"a post on the held version", held, 6, "bafypost", "bafyheld", ""},
+		{"a post on another version", held, 6, "bafypost", "bafyother", "host holds bafyheld, not bafyother"},
+	} {
+		if got := conflict(tc.e, tc.seq, tc.cid, tc.parent); got != tc.want {
+			t.Errorf("%s: %q, want %q", tc.name, got, tc.want)
+		}
 	}
 }

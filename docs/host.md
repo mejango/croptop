@@ -148,7 +148,10 @@ makes `yoursite.crop.top` or
 - `POST /v0/host/push`: headers `X-Croptop-Ipns`, `X-Croptop-Cid`, `X-Croptop-Seq`,
   `X-Croptop-Time`, `X-Croptop-Sig` (over `croptop-push\n<domain>\n<ipns>\n<cid>\n<seq>\n<time>`),
   optional `X-Croptop-Record` (the signed IPNS record, base64); body is the block
-  stream `croptop` produces. Refused when the host already has a newer sequence.
+  stream `croptop` produces. Refused (409) when the host already has a newer
+  sequence, or, for a push without a parent, another version at the same
+  sequence: two machines chose the same next one, and the later would replace
+  the earlier unseen.
   Every request carries its own `X-Croptop-Time` and signature, and a host
   refuses one over 10 minutes old, so a long push signs each part as it goes.
   A `block:<cid>` part carries the new root block, which the host keeps.

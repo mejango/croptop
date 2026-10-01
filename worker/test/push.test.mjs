@@ -130,6 +130,16 @@ test("a push on a parent carries the rest of the site and refuses a stale parent
     };
     const first = await Promise.all([push("bafyseven", 10, { "c.html": "c" }, "bafylegacy"), push("bafyeight", 10, { "d.html": "d" }, "bafylegacy")]);
     assert.deepEqual(first.map((r) => r.status).sort(), [200, 409]);
+
+    // a whole version at the sequence the host holds, with other content,
+    // would replace it unseen (two machines chose the same next sequence):
+    // refused; the next sequence is not
+    env.SITES.put = put;
+    const head = JSON.parse((await body(`https://crop.test/v0/host/keys/${ipns}`))[1]);
+    const twin = await push("bafytwin", head.sequence, { "e.html": "e" });
+    assert.equal(twin.status, 409);
+    assert.equal(await twin.text(), `host holds ${head.cid} at sequence ${head.sequence}`);
+    assert.equal((await push("bafynext", head.sequence + 1, { "f.html": "f" })).status, 200);
   } finally {
     globalThis.fetch = realFetch;
   }

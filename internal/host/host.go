@@ -688,7 +688,7 @@ func (h *Host) push(w http.ResponseWriter, r *http.Request) {
 	}
 	parent := r.Header.Get("X-Croptop-Parent")
 	h.mu.Lock()
-	msg := conflict(h.reg.Keys[ipnsName], seq, parent)
+	msg := conflict(h.reg.Keys[ipnsName], seq, c, parent)
 	h.mu.Unlock()
 	if msg != "" {
 		http.Error(w, msg, 409)
@@ -791,7 +791,7 @@ func (h *Host) push(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	h.mu.Lock()
-	if msg := conflict(h.reg.Keys[ipnsName], seq, parent); msg != "" {
+	if msg := conflict(h.reg.Keys[ipnsName], seq, c, parent); msg != "" {
 		h.mu.Unlock()
 		http.Error(w, msg, 409)
 		return
@@ -825,13 +825,17 @@ func (h *Host) push(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, 200, map[string]any{"cid": c, "sequence": seq, "blocks": n, "name": e.Name})
 }
 
-// conflict says why a push at seq cannot replace e, or "". A push with a
+// conflict says why a push of c at seq cannot replace e, or "". A push with a
 // parent was built on that version, so it must still be the one held here:
-// otherwise the push would drop whatever replaced it.
-func conflict(e *Entry, seq uint64, parent string) string {
+// otherwise the push would drop whatever replaced it. A whole version at the
+// sequence of another one would replace it unseen: two machines that chose the
+// same next sequence, a laptop and an agent say.
+func conflict(e *Entry, seq uint64, c, parent string) string {
 	switch {
 	case e != nil && seq < e.Sequence:
 		return fmt.Sprintf("host already has sequence %d", e.Sequence)
+	case parent == "" && e != nil && e.CID != "" && seq == e.Sequence && e.CID != c:
+		return fmt.Sprintf("host holds %s at sequence %d", e.CID, seq)
 	case parent != "" && (e == nil || e.CID != parent):
 		have := "nothing"
 		if e != nil && e.CID != "" {
