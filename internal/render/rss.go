@@ -27,7 +27,7 @@ func init() {
 	pongo2.RegisterFilter("rfc822", func(in *pongo2.Value, _ *pongo2.Value) (*pongo2.Value, *pongo2.Error) {
 		if m, ok := in.Interface().(map[string]any); ok {
 			if u, ok := m["timeIntervalSince1970"].(int64); ok {
-				return pongo2.AsValue(time.Unix(u, 0).Local().Format("Mon, 02 Jan 2006 15:04:05 -0700")), nil
+				return pongo2.AsValue(time.Unix(u, 0).UTC().Format("Mon, 02 Jan 2006 15:04:05 -0700")), nil
 			}
 		}
 		return in, nil

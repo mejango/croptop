@@ -1,6 +1,7 @@
 package render
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"encoding/xml"
@@ -10,6 +11,7 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/mejango/croptop/internal/gateway"
 	"github.com/mejango/croptop/internal/ipfs"
@@ -329,5 +331,72 @@ func TestHostileTagsGetNoPage(t *testing.T) {
 		if strings.ContainsAny(e.Name(), `'"<`) {
 			t.Errorf("unsafe tag page %s", e.Name())
 		}
+	}
+}
+
+// Two renders of the same site give the same bytes whatever the clock, RSS
+// dates do not depend on the machine's time zone, and an attachment already
+// in place is not copied again.
+func TestRendersAreStable(t *testing.T) {
+	r, s := fixtureRenderer(t)
+	ctx := context.Background()
+	zone := time.Local
+	t.Cleanup(func() { time.Local = zone })
+	read := func(name string) []byte {
+		b, err := os.ReadFile(filepath.Join(s.PublicDir(fixtureID), name))
+		if err != nil {
+			t.Fatal(err)
+		}
+		return b
+	}
+	posts, err := s.Posts(fixtureID)
+	if err != nil || len(posts) == 0 {
+		t.Fatal("fixture has no posts", err)
+	}
+	p := posts[0]
+	src := filepath.Join(s.PostDir(fixtureID, p.ID), "big.bin")
+	if err := os.MkdirAll(filepath.Dir(src), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(src, bytes.Repeat([]byte("x"), 1<<20), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	p.Attachments = append(p.Attachments, "big.bin")
+	if err := s.SavePost(fixtureID, p); err != nil {
+		t.Fatal(err)
+	}
+
+	time.Local = time.FixedZone("BRT", -3*3600)
+	if err := r.Render(ctx, fixtureID); err != nil {
+		t.Fatal(err)
+	}
+	index, rss := read("index.html"), read("rss.xml")
+	dst := filepath.Join(s.PublicDir(fixtureID), p.ID, "big.bin")
+	si, _ := os.Stat(src)
+	di, err := os.Stat(dst)
+	if err != nil || !di.ModTime().Equal(si.ModTime()) {
+		t.Fatalf("the copy of an attachment must keep its modification time: %v", err)
+	}
+	if err := os.Chmod(dst, 0o444); err != nil { // a second copy would fail to open it for writing
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { os.Chmod(dst, 0o644) })
+
+	time.Sleep(1100 * time.Millisecond) // the old build_timestamp was the second of the render
+	if err := r.Render(ctx, fixtureID); err != nil {
+		t.Fatalf("an attachment already in place was copied again: %v", err)
+	}
+	if !bytes.Equal(index, read("index.html")) {
+		t.Fatal("index.html changed between two renders of the same site")
+	}
+	time.Local = time.FixedZone("JST", 9*3600)
+	if err := r.Render(ctx, fixtureID); err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(rss, read("rss.xml")) {
+		t.Fatal("rss.xml changed with the machine's time zone")
+	}
+	if strings.Contains(string(rss), "-0300") {
+		t.Fatal("rss.xml dates are not in UTC")
 	}
 }

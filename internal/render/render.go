@@ -20,7 +20,6 @@ import (
 	"sort"
 	"strings"
 	"sync"
-	"time"
 
 	_ "golang.org/x/image/webp"
 
@@ -289,7 +288,7 @@ func (r *Renderer) baseContext(site *store.Site, posts []*store.Post, meta *Meta
 		"page_description_html": Markdown(site.About),
 		"template_settings":     tmplSettings,
 		"user_settings":         userSettings,
-		"build_timestamp":       time.Now().Unix(),
+		"build_timestamp":       buildStamp(pub),
 		"style_css_sha256":      styleHash,
 	}
 	for _, slot := range []string{"Head", "BodyStart", "BodyEnd"} {
@@ -610,7 +609,17 @@ func copyFS(fsys fs.FS, dir, dest string) error {
 	})
 }
 
+// copyFile copies src to dst unless dst already has src's size and
+// modification time. The copy keeps src's modification time, so the next
+// render skips it: big attachments are not copied again on every render.
 func copyFile(src, dst string) error {
+	si, err := os.Stat(src)
+	if err != nil {
+		return err
+	}
+	if di, err := os.Stat(dst); err == nil && di.Size() == si.Size() && di.ModTime().Equal(si.ModTime()) {
+		return nil
+	}
 	in, err := os.Open(src)
 	if err != nil {
 		return err
@@ -627,7 +636,42 @@ func copyFile(src, dst string) error {
 		out.Close()
 		return err
 	}
-	return out.Close()
+	if err := out.Close(); err != nil {
+		return err
+	}
+	return os.Chtimes(dst, si.ModTime(), si.ModTime())
+}
+
+// buildStamp stands in for a build time: templates add it to asset URLs to
+// bust caches. It hashes what those URLs point at (template assets, avatar,
+// favicon, template settings), so two renders of the same site give the same
+// bytes on any machine. Six bytes keep it under 2^53 for templates that do
+// arithmetic on it.
+func buildStamp(pub string) int64 {
+	var paths []string
+	filepath.WalkDir(filepath.Join(pub, "assets"), func(p string, d fs.DirEntry, err error) error {
+		if err == nil && !d.IsDir() {
+			paths = append(paths, p)
+		}
+		return nil
+	})
+	sort.Strings(paths)
+	paths = append(paths, filepath.Join(pub, "avatar.png"), filepath.Join(pub, "favicon.ico"), filepath.Join(pub, "templateSettings.json"))
+	h := sha256.New()
+	for _, p := range paths {
+		b, err := os.ReadFile(p)
+		if err != nil {
+			continue
+		}
+		rel, _ := filepath.Rel(pub, p)
+		fmt.Fprintf(h, "%s\x00%d\x00", filepath.ToSlash(rel), len(b))
+		h.Write(b)
+	}
+	var n int64
+	for _, b := range h.Sum(nil)[:6] {
+		n = n<<8 | int64(b)
+	}
+	return n
 }
 
 func sha256hex(s string) string {
