@@ -57,15 +57,31 @@ func (e *Embedded) NamePublish(ctx context.Context, key, c string, seq uint64) e
 	if err != nil {
 		return err
 	}
-	_, name, _ := e.siteKey(key)
-	id, _ := cid.Decode(c)
-	if err := e.putRecord(ctx, name, b); err != nil {
+	return e.AnnounceRecord(ctx, key, c, b)
+}
+
+// AnnounceRecord sends a record SignRecord made to the network (DHT, pubsub,
+// the routing endpoints), reads it back, and provides the version: the second
+// half of NamePublish, for a version a host received before the network.
+func (e *Embedded) AnnounceRecord(ctx context.Context, key, c string, rec []byte) error {
+	if e.dht == nil {
+		return fmt.Errorf("node not started")
+	}
+	_, name, err := e.siteKey(key)
+	if err != nil {
+		return err
+	}
+	id, err := cid.Decode(c)
+	if err != nil {
+		return err
+	}
+	if err := e.putRecord(ctx, name, rec); err != nil {
 		return err
 	}
 	if !e.Offline {
 		// read our own record back from the network as a check
-		if rec, err := e.NetworkRecord(ctx, name.String()); err == nil {
-			e.Log(fmt.Sprintf("ipns readback: network now has sequence %d -> %s", rec.Sequence, rec.Value))
+		if r, err := e.NetworkRecord(ctx, name.String()); err == nil {
+			e.Log(fmt.Sprintf("ipns readback: network now has sequence %d -> %s", r.Sequence, r.Value))
 		} else {
 			e.Log("ipns readback: " + err.Error())
 		}

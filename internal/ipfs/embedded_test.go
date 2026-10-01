@@ -4,6 +4,8 @@ import (
 	"bytes"
 	"context"
 	"crypto/rand"
+	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -13,6 +15,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/ipfs/boxo/ipld/merkledag"
+	ft "github.com/ipfs/boxo/ipld/unixfs"
 	"github.com/ipfs/boxo/ipns"
 	"github.com/ipfs/boxo/path"
 	"github.com/ipfs/go-cid"
@@ -534,5 +538,279 @@ func TestSavePeersKeepsPublicAddressesAndTheLastGoodList(t *testing.T) {
 	c.savePeers()
 	if back, err := os.ReadFile(c.peersFile()); err != nil || !bytes.Equal(back, sentinel) {
 		t.Fatalf("an empty list replaced the last good one: %q %v", back, err)
+	}
+}
+
+func writeTree(t *testing.T, files map[string]string) string {
+	t.Helper()
+	dir := t.TempDir()
+	for rel, body := range files {
+		p := filepath.Join(dir, filepath.FromSlash(rel))
+		os.MkdirAll(filepath.Dir(p), 0o755)
+		if err := os.WriteFile(p, []byte(body), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	return dir
+}
+
+// A manifest rebuild gives the same root as adding the whole new tree, which
+// is how a host checks a changes-only push; the client's check agrees; and a
+// version's files can be listed and read back from its blocks alone.
+func TestRebuildMatchesAFullAdd(t *testing.T) {
+	ctx := context.Background()
+	e := NewEmbedded(t.TempDir())
+	e.Offline = true
+	if err := e.Start(ctx); err != nil {
+		t.Fatal(err)
+	}
+	defer e.Stop()
+	parent, err := e.AddDir(ctx, writeTree(t, map[string]string{"index.html": "home", "assets/site.css": "css", "assets/font.woff": "font", "p1/index.html": "one", "p1/photo.jpg": "photo", "p2/index.html": "two"}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	// the new version: the home page and p1's page changed, p2 deleted, p3 new
+	want, err := e.AddDir(ctx, writeTree(t, map[string]string{"index.html": "home 2", "assets/site.css": "css", "assets/font.woff": "font", "p1/index.html": "one 2", "p1/photo.jpg": "photo", "p3/index.html": "three"}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	upload, carry := []string{"index.html", "p1/index.html", "p3/index.html"}, []string{"assets", "p1/photo.jpg"}
+	got, err := e.Rebuild(ctx, parent, writeTree(t, map[string]string{"index.html": "home 2", "p1/index.html": "one 2", "p3/index.html": "three"}), carry)
+	if err != nil || got != want {
+		t.Fatalf("rebuild gave %s, %v; adding the whole tree gives %s", got, err, want)
+	}
+	if err := e.CheckManifest(ctx, want, parent, upload, carry); err != nil {
+		t.Fatalf("check: %v", err)
+	}
+	if err := e.CheckManifest(ctx, want, parent, upload, []string{"assets"}); err == nil {
+		t.Fatal("a manifest that drops p1/photo.jpg must not check out")
+	}
+	ups := writeTree(t, map[string]string{"p1/index.html": "x"})
+	for _, bad := range [][]string{{"nope"}, {"p1"}, {"assets", "assets/site.css"}, {"../x"}, {""}} {
+		if _, err := e.Rebuild(ctx, parent, ups, bad); err == nil {
+			t.Fatalf("carry %q must be refused", bad)
+		}
+	}
+	files, err := e.Files(ctx, want)
+	if err != nil || len(files) != 6 || files[0].Path != "assets/font.woff" || files[0].Size != 4 || files[0].CID == "" {
+		t.Fatalf("files: %v, %v", files, err)
+	}
+	r, size, err := e.OpenFile(ctx, want, "p1/index.html")
+	if err != nil {
+		t.Fatal(err)
+	}
+	b, _ := io.ReadAll(r)
+	r.Close()
+	if string(b) != "one 2" || size != 5 {
+		t.Fatalf("read back %q (%d)", b, size)
+	}
+}
+
+// Big folders are sharded (HAMT); rebuilding one from carried names and a few
+// uploads still matches a full add.
+func TestRebuildMatchesAFullAddOfAShardedFolder(t *testing.T) {
+	ctx := context.Background()
+	e := NewEmbedded(t.TempDir())
+	e.Offline = true
+	if err := e.Start(ctx); err != nil {
+		t.Fatal(err)
+	}
+	defer e.Stop()
+	name := func(i int) string { return fmt.Sprintf("post-%04d-%s.html", i, strings.Repeat("a", 28)) }
+	before, after := map[string]string{}, map[string]string{}
+	for i := 0; i < 4000; i++ {
+		before[name(i)] = fmt.Sprint(i)
+		after[name(i)] = fmt.Sprint(i)
+	}
+	after[name(7)] = "changed"
+	delete(after, name(8))
+	after["new.html"] = "new"
+	parent, err := e.AddDir(ctx, writeTree(t, before))
+	if err != nil {
+		t.Fatal(err)
+	}
+	b, _ := e.Block(ctx, parent)
+	nd, _ := merkledag.DecodeProtobuf(b)
+	if fsn, err := ft.FSNodeFromBytes(nd.Data()); err != nil || fsn.Type() != ft.THAMTShard {
+		t.Fatal("the folder is not sharded; raise the count or the name length")
+	}
+	want, err := e.AddDir(ctx, writeTree(t, after))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var carry []string
+	for n := range after {
+		if n != name(7) && n != "new.html" {
+			carry = append(carry, n)
+		}
+	}
+	got, err := e.Rebuild(ctx, parent, writeTree(t, map[string]string{name(7): "changed", "new.html": "new"}), carry)
+	if err != nil || got != want {
+		t.Fatalf("rebuild gave %s, %v; adding the whole tree gives %s", got, err, want)
+	}
+	if err := e.CheckManifest(ctx, want, parent, []string{name(7), "new.html"}, carry); err != nil {
+		t.Fatalf("check: %v", err)
+	}
+}
+
+// A node that holds only a version's folder blocks can still rebuild the next
+// version, sharded folders included: the carried files are linked, never
+// fetched, and nothing is stored under their CIDs (a sharded folder adds each
+// child to its DAG before linking it, which stored an empty block there).
+func TestRebuildFromFolderBlocksAloneStoresNothingForCarriedFiles(t *testing.T) {
+	ctx := context.Background()
+	start := func() *Embedded {
+		e := NewEmbedded(t.TempDir())
+		e.Offline = true
+		if err := e.Start(ctx); err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() { e.Stop() })
+		return e
+	}
+	a, b := start(), start()
+	name := func(i int) string { return fmt.Sprintf("post-%04d-%s.html", i, strings.Repeat("a", 200)) }
+	before, after := map[string]string{}, map[string]string{}
+	for i := 0; i < 1500; i++ {
+		before[name(i)] = fmt.Sprint(i)
+		after[name(i)] = fmt.Sprint(i)
+	}
+	after[name(7)] = "changed"
+	parent, err := a.AddDir(ctx, writeTree(t, before))
+	if err != nil {
+		t.Fatal(err)
+	}
+	pb, _ := a.Block(ctx, parent)
+	nd, _ := merkledag.DecodeProtobuf(pb)
+	if fsn, err := ft.FSNodeFromBytes(nd.Data()); err != nil || fsn.Type() != ft.THAMTShard {
+		t.Fatal("the folder is not sharded; raise the count or the name length")
+	}
+	want, err := a.AddDir(ctx, writeTree(t, after))
+	if err != nil {
+		t.Fatal(err)
+	}
+	carried, err := a.Links(ctx, parent) // name -> CID, of what b is never given
+	if err != nil {
+		t.Fatal(err)
+	}
+	delete(carried, name(7))
+	blocks, err := a.DirBlocks(ctx, parent)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for c, data := range blocks {
+		if err := b.PutBlock(ctx, c, data); err != nil {
+			t.Fatal(err)
+		}
+	}
+	var carry []string
+	for n := range carried {
+		carry = append(carry, n)
+	}
+	got, err := b.Rebuild(ctx, parent, writeTree(t, map[string]string{name(7): "changed"}), carry)
+	if err != nil || got != want {
+		t.Fatalf("rebuild from the folder blocks gave %s, %v; adding the whole tree gives %s", got, err, want)
+	}
+	for _, c := range carried {
+		if data, err := b.Block(ctx, c); err == nil {
+			t.Fatalf("b stored %d bytes under %s, the CID of a carried file it was never given", len(data), c)
+		}
+	}
+	// and b can list the version from those folders, with the sizes the links hold
+	files, err := b.Files(ctx, got)
+	if err != nil || len(files) != len(after) {
+		t.Fatalf("b lists %d files, want %d: %v", len(files), len(after), err)
+	}
+	for _, f := range files {
+		if f.Path == name(7) && f.Size != int64(len("changed")) {
+			t.Fatalf("the changed file is %d bytes", f.Size)
+		}
+	}
+}
+
+// Files and OpenFile read a version from its blocks whatever shape its files
+// have: a small one, an empty one, and one chunked into several blocks, which
+// reads back whole and seeks.
+func TestFilesAndOpenFileReadChunkedAndEmptyFiles(t *testing.T) {
+	ctx := context.Background()
+	e := NewEmbedded(t.TempDir())
+	e.Offline = true
+	if err := e.Start(ctx); err != nil {
+		t.Fatal(err)
+	}
+	defer e.Stop()
+	big := make([]byte, 3*chunkSize+1234) // its root is a dag-pb node over raw leaves
+	rand.Read(big)
+	dir := writeTree(t, map[string]string{"index.html": "home", "empty": "", "media/clip.bin": string(big)})
+	root, err := e.AddDir(ctx, dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []VersionFile{{"empty", 0, ""}, {"index.html", 4, ""}, {"media/clip.bin", int64(len(big)), ""}}
+	files, err := e.Files(ctx, root)
+	if err != nil || len(files) != len(want) {
+		t.Fatalf("files: %v, %v", files, err)
+	}
+	for i, w := range want {
+		own, err := e.FileCID(ctx, filepath.Join(dir, filepath.FromSlash(w.Path)))
+		if err != nil || files[i].Path != w.Path || files[i].Size != w.Size || files[i].CID != own {
+			t.Fatalf("file %d is %+v, want %s of %d bytes with CID %s (%v)", i, files[i], w.Path, w.Size, own, err)
+		}
+	}
+	r, size, err := e.OpenFile(ctx, root, "media/clip.bin")
+	if err != nil || size != int64(len(big)) {
+		t.Fatalf("open: %d bytes, %v", size, err)
+	}
+	if _, err := r.Seek(chunkSize+10, io.SeekStart); err != nil {
+		t.Fatal(err)
+	}
+	part := make([]byte, 100)
+	if _, err := io.ReadFull(r, part); err != nil || !bytes.Equal(part, big[chunkSize+10:chunkSize+110]) {
+		t.Fatalf("read after a seek across a chunk: %v", err)
+	}
+	if _, err := r.Seek(0, io.SeekStart); err != nil {
+		t.Fatal(err)
+	}
+	if all, err := io.ReadAll(r); err != nil || !bytes.Equal(all, big) {
+		t.Fatalf("read back %d bytes of %d: %v", len(all), len(big), err)
+	}
+	r.Close()
+	r, size, err = e.OpenFile(ctx, root, "empty")
+	if err != nil || size != 0 {
+		t.Fatalf("open empty: %d, %v", size, err)
+	}
+	if all, _ := io.ReadAll(r); len(all) != 0 {
+		t.Fatalf("empty file read back %d bytes", len(all))
+	}
+	r.Close()
+	if _, _, err := e.OpenFile(ctx, root, "nope.html"); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("a missing file gave %v", err)
+	}
+	for _, bad := range []string{"media", "index.html/x", "../x", ""} {
+		if _, _, err := e.OpenFile(ctx, root, bad); err == nil {
+			t.Fatalf("OpenFile %q must fail", bad)
+		}
+	}
+}
+
+// A record signed first and announced later is what the network then holds.
+func TestAnnounceASignedRecord(t *testing.T) {
+	ctx := context.Background()
+	e := NewEmbedded(t.TempDir())
+	e.Offline = true
+	if err := e.Start(ctx); err != nil {
+		t.Fatal(err)
+	}
+	defer e.Stop()
+	name, _ := e.Keystore().Generate("s")
+	const c = "bafybeigdfeslmj3qh7cwiehrd5l4cfq6qhgctcxxlk6ou3y3ywq5wfqil4"
+	rec, err := e.SignRecord("s", c, 3)
+	if err != nil {
+		t.Fatal(err)
+	}
+	e.AnnounceRecord(ctx, "s", c, rec) // stored locally first; offline there is no peer to send it to
+	got, err := e.GetRecord(ctx, name)
+	if err != nil || string(got) != string(rec) {
+		t.Fatalf("the network holds another record: %v", err)
 	}
 }
