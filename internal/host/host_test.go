@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"path"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -342,6 +343,9 @@ func TestBadSignatureAndNames(t *testing.T) {
 	if c := post("www", "k51qzi5uqu5dilqjwgdm3zj0g24zaowqfxoargdm1lbj7s4frpwuzqp2tmxm4g", ""); c != 400 {
 		t.Fatalf("reserved: %d", c)
 	}
+	if c := post("agents", "k51qzi5uqu5dilqjwgdm3zj0g24zaowqfxoargdm1lbj7s4frpwuzqp2tmxm4g", ""); c != 400 {
+		t.Fatalf("agents is reserved for the Worker's /agents.md: %d", c)
+	}
 	if c := post("Bad Name", "k51qzi5uqu5dilqjwgdm3zj0g24zaowqfxoargdm1lbj7s4frpwuzqp2tmxm4g", ""); c != 400 {
 		t.Fatalf("invalid: %d", c)
 	}
@@ -617,5 +621,200 @@ func TestRoutingSlotsAreReleased(t *testing.T) {
 	}
 	if n := len(h.lookupSlots); n != 0 {
 		t.Fatalf("%d lookup slots still held after the lookups ended", n)
+	}
+}
+
+// A manifest push is rebuilt from the parent the host holds plus the uploaded
+// files: carried paths stay, everything else is gone, and the result must
+// hash to the signed CID. Bad manifests are refused, and a push cut short can
+// see what it already left here.
+func TestManifestPush(t *testing.T) {
+	ctx := context.Background()
+	h := &Host{Domain: "crop.test", DataDir: t.TempDir(), Engine: offline(t)}
+	if err := h.Start(); err != nil {
+		t.Fatal(err)
+	}
+	srv := httptest.NewServer(h)
+	defer srv.Close()
+	site := offline(t)
+	ipnsName, _ := site.Keystore().Generate("site1")
+	tree := func(files map[string]string) (string, string) {
+		dir := t.TempDir()
+		for rel, body := range files {
+			p := filepath.Join(dir, filepath.FromSlash(rel))
+			os.MkdirAll(filepath.Dir(p), 0o755)
+			os.WriteFile(p, []byte(body), 0o644)
+		}
+		c, err := site.AddDir(ctx, dir)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return dir, c
+	}
+	push := func(c string, seq uint64, parent, part string, files map[string]string, manifest string) (int, string) {
+		now := time.Now().Unix()
+		sig, _ := site.Keystore().Sign("site1", PushMessage("crop.test", ipnsName, c, seq, now)) // signing host, as the existing test
+		var buf bytes.Buffer
+		mw := multipart.NewWriter(&buf)
+		for rel, body := range files {
+			fw, _ := mw.CreateFormFile("file:"+rel, path.Base(rel))
+			fw.Write([]byte(body))
+		}
+		if manifest != "" {
+			mw.WriteField("manifest", manifest)
+		}
+		mw.Close()
+		req, _ := http.NewRequest("POST", srv.URL+"/v0/host/push", &buf)
+		req.Host = "crop.test" // as the existing test
+		req.Header.Set("Content-Type", mw.FormDataContentType())
+		req.Header.Set("X-Croptop-Ipns", ipnsName)
+		req.Header.Set("X-Croptop-Cid", c)
+		req.Header.Set("X-Croptop-Seq", strconv.FormatUint(seq, 10))
+		req.Header.Set("X-Croptop-Time", strconv.FormatInt(now, 10))
+		req.Header.Set("X-Croptop-Sig", base64.StdEncoding.EncodeToString(sig))
+		if parent != "" {
+			req.Header.Set("X-Croptop-Parent", parent)
+		}
+		if part != "" {
+			req.Header.Set("X-Croptop-Part", part)
+		}
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		b, _ := io.ReadAll(resp.Body)
+		resp.Body.Close()
+		return resp.StatusCode, string(b)
+	}
+	v1Files := map[string]string{"index.html": "home", "assets/a.css": "css", "p1/index.html": "one", "p1/photo.jpg": "photo", "p2/index.html": "two"}
+	_, v1 := tree(v1Files)
+	_, v2 := tree(map[string]string{"index.html": "home 2", "assets/a.css": "css", "p1/index.html": "one", "p1/photo.jpg": "photo", "p3/index.html": "three"})
+	if code, body := push(v1, 1, "", "", v1Files, ""); code != 200 {
+		t.Fatalf("v1: %d %s", code, body)
+	}
+	if code, body := push(v2, 2, v1, "", map[string]string{"index.html": "home 2", "p3/index.html": "three"}, `{"carry":["assets","p1"]}`); code != 200 {
+		t.Fatalf("manifest push: %d %s", code, body)
+	}
+	h.mu.Lock()
+	held := h.reg.Keys[ipnsName].CID
+	h.mu.Unlock()
+	if held != v2 { // v2 has no p2: the rebuild left it out
+		t.Fatalf("host holds %s, want %s", held, v2)
+	}
+	_, v3 := tree(map[string]string{"index.html": "home 3"})
+	for _, bad := range []struct{ parent, manifest string }{
+		{v2, `{"carry":["nope"]}`},              // not in the parent
+		{v2, `{"carry":["index.html"]}`},        // uploaded and carried
+		{v2, `{"carry":["p1","p1/photo.jpg"]}`}, // one carried path inside another
+		{"", `{"carry":[]}`},                    // no parent
+	} {
+		if code, body := push(v3, 3, bad.parent, "", map[string]string{"index.html": "home 3"}, bad.manifest); code != 400 {
+			t.Fatalf("manifest %s on %q: %d %s, want 400", bad.manifest, bad.parent, code, body)
+		}
+	}
+	resp, err := http.Get(srv.URL + "/v0/host/keys/" + ipnsName)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var entry struct {
+		AcceptsManifest bool `json:"acceptsManifest"`
+	}
+	json.NewDecoder(resp.Body).Decode(&entry)
+	resp.Body.Close()
+	if !entry.AcceptsManifest {
+		t.Fatal("keys must advertise acceptsManifest")
+	}
+	// part 1 of 2 of a version stays staged; the listing shows it
+	_, v4 := tree(map[string]string{"a.txt": "aaaa", "b.txt": "b"})
+	if code, body := push(v4, 4, "", "1/2", map[string]string{"a.txt": "aaaa"}, ""); code != 200 {
+		t.Fatalf("part 1: %d %s", code, body)
+	}
+	resp, err = http.Get(srv.URL + "/v0/host/versions/" + v4 + "/files")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var staged []struct {
+		Path string `json:"path"`
+		Size int64  `json:"size"`
+	}
+	json.NewDecoder(resp.Body).Decode(&staged)
+	resp.Body.Close()
+	if len(staged) != 1 || staged[0].Path != "a.txt" || staged[0].Size != 4 {
+		t.Fatalf("staged files: %v", staged)
+	}
+	if resp, err := http.Get(srv.URL + "/v0/host/versions/not-a-cid/files"); err != nil || resp.StatusCode != 400 {
+		t.Fatalf("a bad cid must be refused: %v %v", resp, err)
+	}
+
+	// The rebuilt version is served from the blocks the host holds, a manifest
+	// that makes some other tree than the signed CID moves nothing, and a push
+	// in parts is committed by the manifest in its last part.
+	get := func(p string) (int, string) {
+		resp, err := http.Get(srv.URL + p)
+		if err != nil {
+			t.Fatal(err)
+		}
+		b, _ := io.ReadAll(resp.Body)
+		resp.Body.Close()
+		return resp.StatusCode, string(b)
+	}
+	for p, want := range map[string]string{"/p1/photo.jpg": "photo", "/assets/a.css": "css", "/p3/index.html": "three", "/index.html": "home 2"} {
+		if code, body := get("/ipfs/" + v2 + p); code != 200 || body != want {
+			t.Fatalf("%s of the rebuilt version: %d %q, want %q", p, code, body, want)
+		}
+	}
+	if code, body := push(v3, 3, v2, "", map[string]string{"index.html": "home 3"}, `{"carry":["assets"]}`); code != 400 || !strings.Contains(body, "not "+v3) {
+		t.Fatalf("files and carried paths that make another tree: %d %s", code, body)
+	}
+	for _, bad := range []string{`{"carry":`, `{"carry":"p1"}`} {
+		if code, body := push(v3, 3, v2, "", map[string]string{"index.html": "home 3"}, bad); code != 400 {
+			t.Fatalf("manifest %s: %d %s, want 400", bad, code, body)
+		}
+	}
+	h.mu.Lock()
+	held = h.reg.Keys[ipnsName].CID
+	h.mu.Unlock()
+	if held != v2 {
+		t.Fatalf("refused pushes moved the host to %s", held)
+	}
+	_, v5 := tree(map[string]string{"index.html": "home 5", "assets/a.css": "css", "p1/index.html": "one", "p1/photo.jpg": "photo", "p5/index.html": "five"})
+	if code, body := push(v5, 5, v2, "1/2", map[string]string{"index.html": "home 5"}, ""); code != 200 {
+		t.Fatalf("part 1 of a manifest push: %d %s", code, body)
+	}
+	if code, body := push(v5, 5, v2, "2/2", map[string]string{"p5/index.html": "five"}, `{"carry":["assets","p1"]}`); code != 200 {
+		t.Fatalf("part 2 of a manifest push: %d %s", code, body)
+	}
+	h.mu.Lock()
+	held = h.reg.Keys[ipnsName].CID
+	h.mu.Unlock()
+	if held != v5 {
+		t.Fatalf("host holds %s, want %s", held, v5)
+	}
+	if code, body := get("/v0/host/versions/" + v5 + "/files"); code != 200 || strings.TrimSpace(body) != "[]" {
+		t.Fatalf("a committed push leaves nothing staged: %d %s", code, body)
+	}
+}
+
+// A push left unfinished two days ago will not be resumed: a host starting up
+// clears it out, and keeps what is more recent.
+func TestStartClearsOldStaging(t *testing.T) {
+	dir := t.TempDir()
+	stage := filepath.Join(dir, "host", "staging")
+	old, recent := filepath.Join(stage, "bafyold"), filepath.Join(stage, "bafyrecent")
+	for _, d := range []string{old, recent} {
+		os.MkdirAll(d, 0o755)
+		os.WriteFile(filepath.Join(d, "a.txt"), []byte("a"), 0o644)
+	}
+	then := time.Now().Add(-49 * time.Hour)
+	os.Chtimes(old, then, then)
+	h := &Host{Domain: "crop.test", DataDir: dir, Engine: offline(t)}
+	if err := h.Start(); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(old); !os.IsNotExist(err) {
+		t.Fatalf("a staging dir untouched for 49 hours must go: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(recent, "a.txt")); err != nil {
+		t.Fatalf("a recent staging dir must stay: %v", err)
 	}
 }

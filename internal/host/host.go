@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"html"
 	"io"
+	"io/fs"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -74,8 +75,34 @@ type cached struct {
 
 var nameRe = regexp.MustCompile(`^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$`)
 
+var cidRe = regexp.MustCompile(`^(bafy|Qm)[a-zA-Z0-9]+$`)
+
+type stagedFile struct {
+	Path string `json:"path"`
+	Size int64  `json:"size"`
+}
+
+// stagedFiles lists the files under dir, as the push that put them there
+// named them.
+func stagedFiles(dir string) []stagedFile {
+	out := []stagedFile{}
+	filepath.WalkDir(dir, func(p string, d fs.DirEntry, err error) error {
+		if err != nil || d.IsDir() {
+			return nil
+		}
+		info, err := d.Info()
+		if err != nil {
+			return nil
+		}
+		rel, _ := filepath.Rel(dir, p)
+		out = append(out, stagedFile{filepath.ToSlash(rel), info.Size()})
+		return nil
+	})
+	return out
+}
+
 // Reserved names the directory and API need, plus the usual suspects.
-var reserved = map[string]bool{"www": true, "api": true, "v0": true, "ipfs": true, "ipns": true, "push": true, "host": true, "admin": true, "mail": true, "static": true, "assets": true, "docs": true, "app": true, "routing": true}
+var reserved = map[string]bool{"www": true, "api": true, "v0": true, "ipfs": true, "ipns": true, "push": true, "host": true, "admin": true, "mail": true, "static": true, "assets": true, "docs": true, "app": true, "routing": true, "agents": true}
 
 func (h *Host) log(f string, a ...any) {
 	if h.Log != nil {
@@ -111,6 +138,15 @@ func (h *Host) Start() error {
 	h.Engine.RoutingPuts, h.Engine.PeersURL = nil, ""
 	h.routingSlots = make(chan struct{}, 32)
 	h.lookupSlots = make(chan struct{}, 32)
+	// a push left unfinished two days ago will not be resumed
+	stage := filepath.Join(h.DataDir, "host", "staging")
+	if ents, err := os.ReadDir(stage); err == nil {
+		for _, ent := range ents {
+			if info, err := ent.Info(); err == nil && time.Since(info.ModTime()) > 48*time.Hour {
+				os.RemoveAll(filepath.Join(stage, ent.Name()))
+			}
+		}
+	}
 	return nil
 }
 
@@ -451,11 +487,22 @@ func (h *Host) serveAPI(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, "not found", 404)
 			return
 		}
-		// acceptsParent: pushes of only what changed are understood here
+		// acceptsParent: pushes of only what changed are understood here;
+		// acceptsManifest: so are pushes that say what to keep, and so delete
 		writeJSON(w, 200, struct {
 			Entry
-			AcceptsParent bool `json:"acceptsParent"`
-		}{pub, true})
+			AcceptsParent   bool `json:"acceptsParent"`
+			AcceptsManifest bool `json:"acceptsManifest"`
+		}{pub, true, true})
+	case strings.HasPrefix(p, "versions/") && strings.HasSuffix(p, "/files") && r.Method == "GET":
+		// what an unfinished push of this version left here, so its retry
+		// sends only the rest
+		c := strings.TrimSuffix(strings.TrimPrefix(p, "versions/"), "/files")
+		if !cidRe.MatchString(c) {
+			http.Error(w, "bad cid", 400)
+			return
+		}
+		writeJSON(w, 200, stagedFiles(filepath.Join(h.DataDir, "host", "staging", c)))
 	case strings.HasPrefix(p, "blocks/") && r.Method == "GET":
 		// one raw block this host holds; clients check it against its CID
 		b, err := h.Engine.Block(r.Context(), strings.TrimPrefix(p, "blocks/"))
@@ -643,7 +690,9 @@ func (h *Host) push(w http.ResponseWriter, r *http.Request) {
 	// must hash to the cid the request was signed for. If a file was too big
 	// for the sender to carry, the missing blocks are fetched from the
 	// network, which verifies the tree by construction. With a parent the
-	// files are only what changed, and they go on top of the parent.
+	// files are only what changed, and they go on top of the parent. A
+	// manifest in the last part lists the parent's paths to keep instead, and
+	// the rest of the parent is dropped.
 	stage := filepath.Join(h.DataDir, "host", "staging", c)
 	if err := os.MkdirAll(stage, 0o755); err != nil {
 		http.Error(w, err.Error(), 500)
@@ -658,7 +707,7 @@ func (h *Host) push(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, 200, map[string]any{"chunk": r.Header.Get("X-Croptop-Chunk")})
 		return
 	}
-	n, err := saveMultipart(r, stage)
+	n, manifest, err := saveMultipart(r, stage)
 	if err != nil {
 		http.Error(w, "reading files: "+err.Error(), 400)
 		return
@@ -669,11 +718,33 @@ func (h *Host) push(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, 200, map[string]any{"part": partNo, "of": partCount, "files": n})
 		return
 	}
+	var carry []string
+	if manifest != "" {
+		var m struct {
+			Carry []string `json:"carry"`
+		}
+		if err := json.Unmarshal([]byte(manifest), &m); err != nil || parent == "" {
+			http.Error(w, "a manifest needs a parent and a carry list", 400)
+			return
+		}
+		carry = append([]string{}, m.Carry...)
+	}
 	defer os.RemoveAll(stage)
 	var got string
-	if parent != "" {
+	switch {
+	case carry != nil:
+		// the version is the uploaded files plus the carried paths: nothing else
+		if got, err = h.Engine.Rebuild(r.Context(), parent, stage, carry); err != nil {
+			http.Error(w, "manifest: "+err.Error(), 400)
+			return
+		}
+		if got != c {
+			http.Error(w, fmt.Sprintf("the files and carried paths make %s, not %s", got, c), 400)
+			return
+		}
+	case parent != "":
 		got, err = h.Engine.AddOver(r.Context(), parent, stage)
-	} else {
+	default:
 		got, err = h.Engine.AddDir(r.Context(), stage)
 	}
 	if err != nil {
@@ -753,22 +824,32 @@ func writeJSON(w http.ResponseWriter, code int, v any) {
 // rides in the field name because Go's multipart reader strips directories
 // from file names. With X-Croptop-Encoding: base64 the parts are base64 text,
 // which lets a forwarded push cross a web application firewall that would
-// otherwise read a site's HTML and scripts as an attack.
-func saveMultipart(r *http.Request, dir string) (int, error) {
+// otherwise read a site's HTML and scripts as an attack. The "manifest" field,
+// if there is one, comes back as the text it was sent as.
+func saveMultipart(r *http.Request, dir string) (int, string, error) {
 	r.Body = http.MaxBytesReader(nil, r.Body, maxPush)
 	mr, err := r.MultipartReader()
 	if err != nil {
-		return 0, err
+		return 0, "", err
 	}
 	b64 := strings.EqualFold(r.Header.Get("X-Croptop-Encoding"), "base64")
 	n := 0
+	var manifest string
 	for {
 		part, err := mr.NextPart()
 		if err == io.EOF {
-			return n, nil
+			return n, manifest, nil
 		}
 		if err != nil {
-			return n, err
+			return n, manifest, err
+		}
+		if part.FormName() == "manifest" {
+			b, err := io.ReadAll(io.LimitReader(part, 8<<20))
+			if err != nil {
+				return n, manifest, err
+			}
+			manifest = string(b)
+			continue
 		}
 		if !strings.HasPrefix(part.FormName(), "file:") {
 			continue
@@ -776,11 +857,11 @@ func saveMultipart(r *http.Request, dir string) (int, error) {
 		rel := filepath.Clean("/" + filepath.FromSlash(strings.TrimPrefix(part.FormName(), "file:")))
 		dst := filepath.Join(dir, rel)
 		if err := os.MkdirAll(filepath.Dir(dst), 0o755); err != nil {
-			return n, err
+			return n, manifest, err
 		}
 		f, err := os.Create(dst)
 		if err != nil {
-			return n, err
+			return n, manifest, err
 		}
 		var src io.Reader = part
 		if b64 {
@@ -789,7 +870,7 @@ func saveMultipart(r *http.Request, dir string) (int, error) {
 		_, err = io.Copy(f, src)
 		f.Close()
 		if err != nil {
-			return n, err
+			return n, manifest, err
 		}
 		n++
 	}
