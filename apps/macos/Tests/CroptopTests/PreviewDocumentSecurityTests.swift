@@ -2,7 +2,7 @@ import XCTest
 @testable import Croptop
 
 final class PreviewDocumentSecurityTests: XCTestCase {
-    func testFeedPolicyRestrictsMediaToAttachmentSchemeAndImageData() throws {
+    func testFeedPolicyRestrictsMediaToAttachmentSchemeAndData() throws {
         let html = PreviewDocument.html(
             title: "Followed post",
             body: "<img src=\"http://127.0.0.1:8086/v0/status\"><video src=\"https://example.com/video.mp4\"></video>",
@@ -10,7 +10,7 @@ final class PreviewDocumentSecurityTests: XCTestCase {
         )
         let policy = try directives(in: html)
         XCTAssertEqual(policy["img-src"], Set(["croptop-preview:", "data:"]))
-        XCTAssertEqual(policy["media-src"], Set(["croptop-preview:"]))
+        XCTAssertEqual(policy["media-src"], Set(["croptop-preview:", "data:"])) // embedded media plays (e950f3b); previews run no scripts
         for directive in ["img-src", "media-src"] {
             let sources = try XCTUnwrap(policy[directive])
             XCTAssertFalse(sources.contains("http:"))
@@ -37,7 +37,7 @@ final class PreviewDocumentSecurityTests: XCTestCase {
         let explicitPolicy = try directives(in: PreviewDocument.html(title: "", body: "", allowRemoteMedia: true))
         XCTAssertEqual(defaultPolicy, explicitPolicy)
         XCTAssertEqual(defaultPolicy["img-src"], Set(["croptop-preview:", "data:", "http:", "https:"]))
-        XCTAssertEqual(defaultPolicy["media-src"], Set(["croptop-preview:", "http:", "https:"]))
+        XCTAssertEqual(defaultPolicy["media-src"], Set(["croptop-preview:", "data:", "http:", "https:"]))
     }
 
     private func directives(in html: String) throws -> [String: Set<String>] {
