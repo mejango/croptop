@@ -2,6 +2,7 @@ package publish
 
 import (
 	"context"
+	"errors"
 	"io"
 	"sort"
 	"strings"
@@ -20,12 +21,22 @@ type changesEngine interface {
 	AnnounceRecord(ctx context.Context, key, c string, rec []byte) error
 }
 
+// errNothingToUpload is what changes answers when the version differs from its
+// parent only by deletions.
+var errNothingToUpload = errors.New("no file changed; deletions alone go up as a full push")
+
 // changes says how version root differs from parent, a version the host
 // holds. It returns the files to upload and the paths to carry, each the
 // largest unchanged file or folder. Anything of parent in neither list is
-// deleted. parent's folders come from this node's blocks or, when it lacks
-// them, from the host, checked against their CIDs. Where a folder cannot be
-// compared, all its files are uploaded: more bytes, never a wrong version.
+// deleted. The carry list is never nil: an empty one is still a manifest push,
+// which drops what is not uploaded, where a nil one would be a plain push on
+// top of parent and keep it. If root differs from parent but no file changed,
+// only deletions remain, and it returns errNothingToUpload: a push is
+// committed with the last file sent, so a manifest push with no files cannot
+// be made (the Worker answers 400), and such a version goes up whole.
+// parent's folders come from this node's blocks or, when it lacks them, from
+// the host, checked against their CIDs. Where a folder cannot be compared, all
+// its files are uploaded: more bytes, never a wrong version.
 func (p *Publisher) changes(ctx context.Context, eng changesEngine, hostURL, root, parent string) (upload, carry []string, err error) {
 	files, err := eng.Files(ctx, root)
 	if err != nil {
@@ -78,7 +89,16 @@ func (p *Publisher) changes(ctx context.Context, eng changesEngine, hostURL, roo
 		return up, keep, nil
 	}
 	upload, carry, err = walk("", root, parent)
+	if err != nil {
+		return nil, nil, err
+	}
+	if len(upload) == 0 && root != parent {
+		return nil, nil, errNothingToUpload
+	}
 	sort.Strings(upload)
 	sort.Strings(carry)
-	return upload, carry, err
+	if carry == nil {
+		carry = []string{}
+	}
+	return upload, carry, nil
 }
