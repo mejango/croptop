@@ -565,8 +565,19 @@ async function push(request, url, env, ctx) {
       const bad = await saveManifestCarry(env, cid, parent, carry);
       if (bad) return text(bad, 400);
     } else if (parent) await saveCarry(env, cid, parent);
-    const onlyIf = !parent ? undefined : cur.etag ? { etagMatches: cur.etag } : { etagDoesNotMatch: "*" };
-    const moved = await env.SITES.put(`heads/${ipns}`, JSON.stringify({ cid, sequence: seq }), onlyIf ? { onlyIf } : {});
+    // every push moves the head only from the one it began on: an agent's post
+    // that landed while this push ran is never overwritten unseen. A push
+    // without a parent that finds the head moved checks again, and goes ahead
+    // only if what is there now is still no conflict.
+    const head = JSON.stringify({ cid, sequence: seq });
+    const from = (c) => ({ onlyIf: c && c.etag ? { etagMatches: c.etag } : { etagDoesNotMatch: "*" } });
+    let moved = await env.SITES.put(`heads/${ipns}`, head, from(cur));
+    if (!moved && !parent) {
+      const now = await headOf(env, ipns, await entryByKey(env, ipns));
+      const again = pushConflict(now, seq, cid, parent);
+      if (again) return text(again, 409);
+      moved = await env.SITES.put(`heads/${ipns}`, head, from(now));
+    }
     if (!moved) return text("the site changed during this push; post again", 409);
     e.cid = cid; e.sequence = seq; e.updated = new Date().toISOString();
     if (h("Record")) e.record = h("Record");

@@ -40,9 +40,10 @@ key. It needs no copy of the site, no gateway, and nothing kept between runs.
 - Never print, log or echo the key.
 - If the command fails with "host already has sequence" or "host holds …, not
   …", the site changed while you were posting. Run the same command again.
-- If it fails with "the network has a newer version of this site", the owner
-  published from a machine that didn't reach the host. Tell the owner; posting
-  again won't fix it.
+- If it fails with "the network has a newer version of this site", the owner's
+  latest publish has not reached the host yet: a big one uploads in the
+  background. Wait a few minutes and run it again. If it keeps failing, tell the
+  owner.
 - Some owners publish to their own host instead of crop.top. For those sites,
   add `--host https://<their host>`. The agent and the owner's app must use the
   same host.

@@ -140,6 +140,29 @@ test("a push on a parent carries the rest of the site and refuses a stale parent
     assert.equal(twin.status, 409);
     assert.equal(await twin.text(), `host holds ${head.cid} at sequence ${head.sequence}`);
     assert.equal((await push("bafynext", head.sequence + 1, { "f.html": "f" })).status, 200);
+
+    // a whole version whose head write comes after an agent's post landed
+    // (its upload ran while the post was made) checks again, and does not
+    // overwrite the post at the same sequence
+    const at = JSON.parse((await body(`https://crop.test/v0/host/keys/${ipns}`))[1]);
+    let release, reached;
+    const gate = new Promise((go) => { release = go; });
+    const atHead = new Promise((go) => { reached = go; });
+    let holdNext = true;
+    env.SITES.put = async (k, b, o) => {
+      if (k.startsWith("heads/") && holdNext) { holdNext = false; reached(); await gate; }
+      return put(k, b, o);
+    };
+    const laptop = push("bafylaptop", at.sequence + 1, { "g.html": "g" });
+    await atHead;
+    const agent = await push("bafyagent", at.sequence + 1, { "h.html": "h" }, at.cid);
+    assert.equal(agent.status, 200);
+    release();
+    const late = await laptop;
+    assert.equal(late.status, 409);
+    assert.equal(await late.text(), `host holds bafyagent at sequence ${at.sequence + 1}`);
+    env.SITES.put = put;
+    assert.equal(JSON.parse((await body(`https://crop.test/v0/host/keys/${ipns}`))[1]).cid, "bafyagent");
   } finally {
     globalThis.fetch = realFetch;
   }

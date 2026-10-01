@@ -747,13 +747,22 @@ func (h *Host) push(w http.ResponseWriter, r *http.Request) {
 		}
 		carry = append([]string{}, m.Carry...)
 	}
-	defer os.RemoveAll(stage)
+	keep := false // after the host's own failure (a 500) the staged files stay for the retry
+	defer func() {
+		if !keep {
+			os.RemoveAll(stage)
+		}
+	}()
+	// The commit is not tied to the connection: a client that sleeps, or gives
+	// up waiting on a long commit, finds it done when it asks again, instead of
+	// the whole upload thrown away. Every step is bounded.
+	cctx := context.WithoutCancel(r.Context())
 	var got string
 	switch {
 	case carry != nil:
 		// the version is the uploaded files plus the carried paths: nothing else.
 		// A parent block this host lacks is waited for, so the rebuild is bounded.
-		rctx, cancel := context.WithTimeout(r.Context(), h.rebuildTimeout)
+		rctx, cancel := context.WithTimeout(cctx, h.rebuildTimeout)
 		got, err = h.Engine.Rebuild(rctx, parent, stage, carry)
 		cancel()
 		switch {
@@ -763,6 +772,7 @@ func (h *Host) push(w http.ResponseWriter, r *http.Request) {
 		case err != nil:
 			// the host's own failure: what it says (a path on this disk, say) is for its log
 			h.log("push %s: rebuilding %s: %v", ipnsName, c, err)
+			keep = true
 			http.Error(w, "manifest: could not rebuild", 500)
 			return
 		}
@@ -771,17 +781,23 @@ func (h *Host) push(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	case parent != "":
-		got, err = h.Engine.AddOver(r.Context(), parent, stage)
+		actx, cancel := context.WithTimeout(cctx, h.rebuildTimeout)
+		got, err = h.Engine.AddOver(actx, parent, stage)
+		cancel()
 	default:
-		got, err = h.Engine.AddDir(r.Context(), stage)
+		actx, cancel := context.WithTimeout(cctx, h.rebuildTimeout)
+		got, err = h.Engine.AddDir(actx, stage)
+		cancel()
 	}
 	if err != nil {
-		http.Error(w, "adding files: "+err.Error(), 500)
+		h.log("push %s: adding %s: %v", ipnsName, c, err)
+		keep = true
+		http.Error(w, "adding files: could not add them", 500)
 		return
 	}
 	if got != c {
 		h.log("push %s: files hash to %s, fetching the rest of %s from the network", ipnsName, got, c)
-		fctx, cancel := context.WithTimeout(r.Context(), 10*time.Minute)
+		fctx, cancel := context.WithTimeout(cctx, 10*time.Minute)
 		err = h.Engine.Get(fctx, "/ipfs/"+c, filepath.Join(stage, "..", c+".fetch"))
 		cancel()
 		os.RemoveAll(filepath.Join(stage, "..", c+".fetch"))

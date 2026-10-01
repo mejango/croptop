@@ -170,8 +170,10 @@ makes `yoursite.crop.top` or
   publish can delete. A carried path the parent lacks, overlapping paths, or
   a manifest without a parent is `400`. The Go host rebuilds the version and
   checks it hashes to `X-Croptop-Cid`.
-- `GET /v0/host/versions/<cid>/files`: `[{"path", "size"}]`, the files a push
-  of `<cid>` left here without finishing, so its retry sends only the rest.
+- `GET /v0/host/versions/<cid>/files`: `[{"path", "size"}]`, the files of
+  `<cid>` this host already has, so a retry of a push cut short sends only the
+  rest. The Go host lists what an unfinished push staged; crop.top lists every
+  file it stores under the version, finished versions included.
 - `GET /agents.md` (crop.top): the instructions to hand a bot (docs/agents.md).
 - `GET /v0/host/blocks/<cid>`: one raw block, such as a pushed version's root.
   Clients check it against the CID.

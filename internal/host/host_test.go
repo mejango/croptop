@@ -865,7 +865,7 @@ func newManifestEnv(t *testing.T) *manifestEnv {
 		}
 		return dir, c
 	}
-	push := func(c string, seq uint64, parent, part string, files map[string]string, manifest string) (int, string) {
+	request := func(c string, seq uint64, parent, part string, files map[string]string, manifest string) *http.Request {
 		now := time.Now().Unix()
 		sig, _ := site.Keystore().Sign("site1", PushMessage("crop.test", ipnsName, c, seq, now)) // signing host, as the existing test
 		var buf bytes.Buffer
@@ -892,7 +892,10 @@ func newManifestEnv(t *testing.T) *manifestEnv {
 		if part != "" {
 			req.Header.Set("X-Croptop-Part", part)
 		}
-		resp, err := client.Do(req)
+		return req
+	}
+	push := func(c string, seq uint64, parent, part string, files map[string]string, manifest string) (int, string) {
+		resp, err := client.Do(request(c, seq, parent, part, files, manifest))
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -1087,6 +1090,10 @@ func TestManifestPushFailureOfTheHostIsA500(t *testing.T) {
 	}
 	if all := strings.Join(logged(), "\n"); !strings.Contains(all, "permission denied") {
 		t.Fatalf("the host did not log what failed: %q", all)
+	}
+	// the host's own failure keeps what was uploaded for the retry
+	if _, err := os.Stat(filepath.Join(h.DataDir, "host", "staging", v2, "zz.txt")); err != nil {
+		t.Fatalf("a 500 threw the staged upload away: %v", err)
 	}
 }
 
