@@ -327,14 +327,17 @@ final class API {
         return String(decoding: data, as: UTF8.self)
     }
 
-    // Posts are multipart, the way Planet's API takes them.
-    func savePost(site: String, id: String?, form: Multipart, attachmentMode: String = "append") async throws -> Post {
-        let path = id == nil ? "/v0/planets/my/\(site)/articles" : "/v0/planets/my/\(site)/articles/\(id!)?attachmentMode=\(attachmentMode)"
+    // Posts are multipart, the way Planet's API takes them. render: nil renders the
+    // site before answering, "later" renders it behind the answer, "skip" leaves it
+    // to a publish that follows.
+    func savePost(site: String, id: String?, form: Multipart, attachmentMode: String = "append", render: String? = nil) async throws -> Post {
+        var path = id == nil ? "/v0/planets/my/\(site)/articles" : "/v0/planets/my/\(site)/articles/\(id!)?attachmentMode=\(attachmentMode)"
+        if let render { path += (id == nil ? "?" : "&") + "render=\(render)" }
         return try decoder.decode(Post.self, from: try await send("POST", path, form: form))
     }
     func deletePost(site: String, id: String) async throws { _ = try await send("DELETE", "/v0/planets/my/\(site)/articles/\(id)") }
-    func deleteAttachment(site: String, post: String, name: String) async throws {
-        _ = try await send("DELETE", "/v0/planets/my/\(site)/articles/\(post)/attachments/\(name.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? name)")
+    func deleteAttachment(site: String, post: String, name: String, render: String? = nil) async throws {
+        _ = try await send("DELETE", "/v0/planets/my/\(site)/articles/\(post)/attachments/\(name.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? name)" + (render.map { "?render=\($0)" } ?? ""))
     }
 
     // A file of one of my sites as the console serves it (attachments, covers).

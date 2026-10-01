@@ -19,6 +19,7 @@ struct EditorView: View {
     @State private var added: [URL] = []             // files to upload on save
     @State private var removed: Set<String> = []
     @State private var saving = false
+    @State private var savingToPublish = false
     @State private var deleting = false
     @State private var loaded = false
     @State private var dropping = false
@@ -53,7 +54,7 @@ struct EditorView: View {
                             IconActionButton(saving ? "Saving…" : "Save", systemImage: "checkmark") { save(publish: false) }
                                 .disabled(saving || deleting).keyboardShortcut("s")
                         }
-                        Button("Save & publish") { save(publish: true) }.buttonStyle(BorderedButton(kind: .hot)).disabled(saving || deleting).keyboardShortcut("s", modifiers: [.command, .shift])
+                        Button(savingToPublish ? "Publishing…" : "Save & publish") { save(publish: true) }.buttonStyle(BorderedButton(kind: .hot)).disabled(saving || deleting).keyboardShortcut("s", modifiers: [.command, .shift])
                     }
                 }
                 VStack(alignment: .leading, spacing: 8) {
@@ -197,6 +198,11 @@ struct EditorView: View {
     func save(publish: Bool) {
         guard !saving, !deleting else { return }
         saving = true
+        savingToPublish = publish
+        // The site renders behind the save, or as part of the publish, so the editor
+        // closes as soon as the post is stored. A publish already running would not
+        // render this post, so the save renders it then.
+        let render = publish && !model.publishing.contains(siteID) ? "skip" : "later"
         Task {
             do {
                 let f = Multipart()
@@ -205,14 +211,15 @@ struct EditorView: View {
                 f.field("heroImage", hero)
                 for u in added { f.file("attachments", u) }
                 f.close()
-                for name in removed { if let id = postID { try? await API.shared.deleteAttachment(site: siteID, post: id, name: name) } }
-                _ = try await API.shared.savePost(site: siteID, id: postID, form: f)
+                for name in removed { if let id = postID { try? await API.shared.deleteAttachment(site: siteID, post: id, name: name, render: "skip") } }
+                _ = try await API.shared.savePost(site: siteID, id: postID, form: f, render: render)
                 UserDefaults.standard.set(siteID, forKey: "quickSite")
                 await model.loadPosts(siteID)
                 model.screen = .site(siteID)
                 if publish { model.publish(siteID) } else { model.toast("Saved. Publish the site when you're ready.") }
             } catch { model.show(error) }
             saving = false
+            savingToPublish = false
         }
     }
 }

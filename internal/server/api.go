@@ -556,8 +556,14 @@ func (s *Server) savePostAndRender(w http.ResponseWriter, r *http.Request, siteI
 		writeErr(w, 500, err)
 		return
 	}
-	s.render(r.Context(), siteID)
-	post, _ = s.Store.Post(siteID, post.ID) // render may fill cids and dimensions
+	switch r.URL.Query().Get("render") {
+	case "skip": // a publish follows, and it renders
+	case "later": // the caller moves on; the render waits its turn behind any publish (s.mu)
+		go s.render(context.Background(), siteID)
+	default:
+		s.render(r.Context(), siteID)
+		post, _ = s.Store.Post(siteID, post.ID) // render may fill cids and dimensions
+	}
 	writeJSON(w, 200, post)
 }
 

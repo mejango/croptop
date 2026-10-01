@@ -13,6 +13,7 @@ import (
 	"strings"
 	"testing"
 	"testing/fstest"
+	"time"
 
 	"github.com/mejango/croptop/internal/config"
 	"github.com/mejango/croptop/internal/follow"
@@ -318,5 +319,62 @@ func TestPlausibleSettingsPersistAndRender(t *testing.T) {
 	}
 	if !strings.Contains(string(html), `data-domain="example.test"`) || !strings.Contains(string(html), "https://plausible.io/js/plausible.local.js") {
 		t.Fatal("Plausible script not rendered")
+	}
+}
+
+// Save & publish saves with render=skip (the publish renders right after), and
+// a plain save with render=later: both answer at once, even while a publish
+// holds the render lock, and the deferred render lands once the lock is free.
+func TestSaveCanSkipOrDeferTheRender(t *testing.T) {
+	s, ts := testServer(t)
+	body, ctype := multipartBody(t, map[string]string{"name": "Test Site", "template": "Croptop"}, nil)
+	_, site := do(t, "POST", ts.URL+"/v0/planets/my", body, ctype)
+	id := site["id"].(string)
+	page := func(pid string) string { return filepath.Join(s.Store.PublicDir(id), pid, "index.html") }
+	client := &http.Client{Timeout: 5 * time.Second} // a save that waits for the lock times out instead of hanging
+	save := func(render, title string) string {
+		body, ctype := multipartBody(t, map[string]string{"title": title, "content": "x"}, nil)
+		req, _ := http.NewRequest("POST", ts.URL+"/v0/planets/my/"+id+"/articles?render="+render, body)
+		req.Header.Set("Content-Type", ctype)
+		start := time.Now()
+		resp, err := client.Do(req)
+		if err != nil {
+			t.Fatalf("render=%s: %v", render, err)
+		}
+		defer resp.Body.Close()
+		var post map[string]any
+		json.NewDecoder(resp.Body).Decode(&post)
+		if resp.StatusCode != 200 || time.Since(start) > 2*time.Second {
+			t.Fatalf("render=%s: %d after %s", render, resp.StatusCode, time.Since(start))
+		}
+		return post["id"].(string)
+	}
+
+	s.mu.Lock() // a publish in progress
+	held := true
+	unlock := func() {
+		if held {
+			held = false
+			s.mu.Unlock()
+		}
+	}
+	t.Cleanup(unlock) // runs before ts.Close, so a failed save cannot hang the server's shutdown
+	skipped := save("skip", "Skipped")
+	later := save("later", "Later")
+	_, errSkipped := os.Stat(page(skipped))
+	_, errLater := os.Stat(page(later))
+	unlock()
+	if errSkipped == nil || errLater == nil {
+		t.Fatal("a skipped or deferred save rendered while a publish held the lock")
+	}
+	deadline := time.Now().Add(10 * time.Second)
+	for {
+		if _, err := os.Stat(page(later)); err == nil {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("render=later never rendered")
+		}
+		time.Sleep(50 * time.Millisecond)
 	}
 }
