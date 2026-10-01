@@ -11,6 +11,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -585,10 +586,23 @@ func TestRebuildMatchesAFullAdd(t *testing.T) {
 	if err := e.CheckManifest(ctx, want, parent, upload, []string{"assets"}); err == nil {
 		t.Fatal("a manifest that drops p1/photo.jpg must not check out")
 	}
+	// every way a manifest is wrong on its own terms is refused as that, so a
+	// host answers its caller with it and keeps its own failures apart
 	ups := writeTree(t, map[string]string{"p1/index.html": "x"})
-	for _, bad := range [][]string{{"nope"}, {"p1"}, {"assets", "assets/site.css"}, {"../x"}, {""}} {
-		if _, err := e.Rebuild(ctx, parent, ups, bad); err == nil {
-			t.Fatalf("carry %q must be refused", bad)
+	for _, bad := range []struct {
+		carry []string
+		why   string
+	}{
+		{[]string{"nope"}, "not in the parent"},
+		{[]string{"index.html/x"}, "through a file"},
+		{[]string{"p1"}, "the upload p1/index.html is inside it"},
+		{[]string{"p1/index.html"}, "the upload p1/index.html is given twice"},
+		{[]string{"assets", "assets/site.css"}, "one carried path inside another"},
+		{[]string{"../x"}, "climbs out of the version"},
+		{[]string{""}, "empty"},
+	} {
+		if _, err := e.Rebuild(ctx, parent, ups, bad.carry); !errors.Is(err, ErrBadManifest) {
+			t.Fatalf("carry %q (%s): %v, want a bad manifest", bad.carry, bad.why, err)
 		}
 	}
 	files, err := e.Files(ctx, want)
@@ -604,6 +618,46 @@ func TestRebuildMatchesAFullAdd(t *testing.T) {
 	if string(b) != "one 2" || size != 5 {
 		t.Fatalf("read back %q (%d)", b, size)
 	}
+}
+
+// A failure of the machine is not a bad manifest: a node that does not hold the
+// parent cannot say what it has, and a staged file it cannot read cannot be
+// added. A host answers those with an error of its own, not as a 400.
+func TestRebuildFailuresOfTheMachineAreNotBadManifests(t *testing.T) {
+	ctx := context.Background()
+	start := func() *Embedded {
+		e := NewEmbedded(t.TempDir())
+		e.Offline = true
+		if err := e.Start(ctx); err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() { e.Stop() })
+		return e
+	}
+	a, b := start(), start()
+	parent, err := a.AddDir(ctx, writeTree(t, map[string]string{"index.html": "home", "assets/site.css": "css"}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	// b was never given the parent's blocks, and waits for them until its
+	// context ends: even an offline node does
+	short, cancel := context.WithTimeout(ctx, 500*time.Millisecond)
+	defer cancel()
+	if _, err := b.Rebuild(short, parent, writeTree(t, map[string]string{"index.html": "home 2"}), []string{"assets"}); err == nil || errors.Is(err, ErrBadManifest) {
+		t.Fatalf("without the parent's blocks: %v, want a failure that is not a bad manifest", err)
+	}
+	t.Run("a staged file that cannot be read", func(t *testing.T) {
+		if runtime.GOOS == "windows" || os.Geteuid() == 0 {
+			t.Skip("the file stays readable")
+		}
+		ups := writeTree(t, map[string]string{"zz.txt": "zz"})
+		if err := os.Chmod(filepath.Join(ups, "zz.txt"), 0); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := a.Rebuild(ctx, parent, ups, []string{"assets"}); err == nil || errors.Is(err, ErrBadManifest) {
+			t.Fatalf("with an unreadable upload: %v, want a failure that is not a bad manifest", err)
+		}
+	})
 }
 
 // Big folders are sharded (HAMT); rebuilding one from carried names and a few

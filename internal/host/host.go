@@ -6,6 +6,7 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"html"
 	"io"
@@ -27,9 +28,12 @@ import (
 
 const (
 	maxPush      = 512 << 20
+	maxManifest  = 8 << 20
 	skew         = 10 * time.Minute
 	resolveCache = time.Minute
 )
+
+var errManifestTooLarge = errors.New("manifest too large")
 
 // Entry is what the host knows about one site key.
 type Entry struct {
@@ -64,8 +68,9 @@ type Host struct {
 	gw    http.Handler
 	cache map[string]cached
 
-	routingSlots chan struct{} // routing PUTs in flight; full means 429
-	lookupSlots  chan struct{} // routing GETs searching the DHT; full means 429
+	routingSlots   chan struct{} // routing PUTs in flight; full means 429
+	lookupSlots    chan struct{} // routing GETs searching the DHT; full means 429
+	rebuildTimeout time.Duration // how long a manifest push may rebuild its version
 }
 
 type cached struct {
@@ -138,6 +143,7 @@ func (h *Host) Start() error {
 	h.Engine.RoutingPuts, h.Engine.PeersURL = nil, ""
 	h.routingSlots = make(chan struct{}, 32)
 	h.lookupSlots = make(chan struct{}, 32)
+	h.rebuildTimeout = 10 * time.Minute
 	// a push left unfinished two days ago will not be resumed
 	stage := filepath.Join(h.DataDir, "host", "staging")
 	if ents, err := os.ReadDir(stage); err == nil {
@@ -708,6 +714,10 @@ func (h *Host) push(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	n, manifest, err := saveMultipart(r, stage)
+	if errors.Is(err, errManifestTooLarge) {
+		http.Error(w, err.Error(), 400)
+		return
+	}
 	if err != nil {
 		http.Error(w, "reading files: "+err.Error(), 400)
 		return
@@ -715,6 +725,11 @@ func (h *Host) push(w http.ResponseWriter, r *http.Request) {
 	var partNo, partCount int
 	fmt.Sscanf(r.Header.Get("X-Croptop-Part"), "%d/%d", &partNo, &partCount)
 	if partCount > 0 && partNo < partCount {
+		if manifest != "" {
+			// it names what the whole version keeps, so it goes in the part that commits it
+			http.Error(w, "the manifest goes in the final part", 400)
+			return
+		}
 		writeJSON(w, 200, map[string]any{"part": partNo, "of": partCount, "files": n})
 		return
 	}
@@ -733,9 +748,19 @@ func (h *Host) push(w http.ResponseWriter, r *http.Request) {
 	var got string
 	switch {
 	case carry != nil:
-		// the version is the uploaded files plus the carried paths: nothing else
-		if got, err = h.Engine.Rebuild(r.Context(), parent, stage, carry); err != nil {
+		// the version is the uploaded files plus the carried paths: nothing else.
+		// A parent block this host lacks is waited for, so the rebuild is bounded.
+		rctx, cancel := context.WithTimeout(r.Context(), h.rebuildTimeout)
+		got, err = h.Engine.Rebuild(rctx, parent, stage, carry)
+		cancel()
+		switch {
+		case errors.Is(err, ipfs.ErrBadManifest):
 			http.Error(w, "manifest: "+err.Error(), 400)
+			return
+		case err != nil:
+			// the host's own failure: what it says (a path on this disk, say) is for its log
+			h.log("push %s: rebuilding %s: %v", ipnsName, c, err)
+			http.Error(w, "manifest: could not rebuild", 500)
 			return
 		}
 		if got != c {
@@ -825,7 +850,8 @@ func writeJSON(w http.ResponseWriter, code int, v any) {
 // from file names. With X-Croptop-Encoding: base64 the parts are base64 text,
 // which lets a forwarded push cross a web application firewall that would
 // otherwise read a site's HTML and scripts as an attack. The "manifest" field,
-// if there is one, comes back as the text it was sent as.
+// if there is one, comes back as the text it was sent as; one over maxManifest
+// is an error.
 func saveMultipart(r *http.Request, dir string) (int, string, error) {
 	r.Body = http.MaxBytesReader(nil, r.Body, maxPush)
 	mr, err := r.MultipartReader()
@@ -844,9 +870,12 @@ func saveMultipart(r *http.Request, dir string) (int, string, error) {
 			return n, manifest, err
 		}
 		if part.FormName() == "manifest" {
-			b, err := io.ReadAll(io.LimitReader(part, 8<<20))
+			b, err := io.ReadAll(io.LimitReader(part, maxManifest+1))
 			if err != nil {
 				return n, manifest, err
+			}
+			if len(b) > maxManifest { // cut short it would be read as some other manifest, or none
+				return n, manifest, errManifestTooLarge
 			}
 			manifest = string(b)
 			continue

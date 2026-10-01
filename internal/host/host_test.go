@@ -13,6 +13,7 @@ import (
 	"os"
 	"path"
 	"path/filepath"
+	"runtime"
 	"strconv"
 	"strings"
 	"testing"
@@ -624,20 +625,33 @@ func TestRoutingSlotsAreReleased(t *testing.T) {
 	}
 }
 
-// A manifest push is rebuilt from the parent the host holds plus the uploaded
-// files: carried paths stay, everything else is gone, and the result must
-// hash to the signed CID. Bad manifests are refused, and a push cut short can
-// see what it already left here.
-func TestManifestPush(t *testing.T) {
+// manifestEnv is a host with a publisher's node beside it. tree adds files to
+// that node and gives their folder and CID; push sends a signed push of files
+// to the host the way a client does, and gives the status and body it got; get
+// asks the host for a path.
+type manifestEnv struct {
+	h        *Host
+	srv      *httptest.Server
+	ipnsName string
+	tree     func(files map[string]string) (dir, cid string)
+	push     func(c string, seq uint64, parent, part string, files map[string]string, manifest string) (int, string)
+	get      func(p string) (int, string)
+}
+
+func newManifestEnv(t *testing.T) *manifestEnv {
+	t.Helper()
 	ctx := context.Background()
 	h := &Host{Domain: "crop.test", DataDir: t.TempDir(), Engine: offline(t)}
 	if err := h.Start(); err != nil {
 		t.Fatal(err)
 	}
 	srv := httptest.NewServer(h)
-	defer srv.Close()
+	t.Cleanup(srv.Close)
 	site := offline(t)
 	ipnsName, _ := site.Keystore().Generate("site1")
+	// a request that never gets its answer fails the test, which would
+	// otherwise hang on the host's own long waits
+	client := &http.Client{Timeout: 30 * time.Second}
 	tree := func(files map[string]string) (string, string) {
 		dir := t.TempDir()
 		for rel, body := range files {
@@ -678,7 +692,7 @@ func TestManifestPush(t *testing.T) {
 		if part != "" {
 			req.Header.Set("X-Croptop-Part", part)
 		}
-		resp, err := http.DefaultClient.Do(req)
+		resp, err := client.Do(req)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -686,6 +700,25 @@ func TestManifestPush(t *testing.T) {
 		resp.Body.Close()
 		return resp.StatusCode, string(b)
 	}
+	get := func(p string) (int, string) {
+		resp, err := client.Get(srv.URL + p)
+		if err != nil {
+			t.Fatal(err)
+		}
+		b, _ := io.ReadAll(resp.Body)
+		resp.Body.Close()
+		return resp.StatusCode, string(b)
+	}
+	return &manifestEnv{h, srv, ipnsName, tree, push, get}
+}
+
+// A manifest push is rebuilt from the parent the host holds plus the uploaded
+// files: carried paths stay, everything else is gone, and the result must
+// hash to the signed CID. Bad manifests are refused, and a push cut short can
+// see what it already left here.
+func TestManifestPush(t *testing.T) {
+	env := newManifestEnv(t)
+	h, srv, ipnsName, tree, push, get := env.h, env.srv, env.ipnsName, env.tree, env.push, env.get
 	v1Files := map[string]string{"index.html": "home", "assets/a.css": "css", "p1/index.html": "one", "p1/photo.jpg": "photo", "p2/index.html": "two"}
 	_, v1 := tree(v1Files)
 	_, v2 := tree(map[string]string{"index.html": "home 2", "assets/a.css": "css", "p1/index.html": "one", "p1/photo.jpg": "photo", "p3/index.html": "three"})
@@ -711,6 +744,10 @@ func TestManifestPush(t *testing.T) {
 		if code, body := push(v3, 3, bad.parent, "", map[string]string{"index.html": "home 3"}, bad.manifest); code != 400 {
 			t.Fatalf("manifest %s on %q: %d %s, want 400", bad.manifest, bad.parent, code, body)
 		}
+	}
+	// a file uploaded inside a folder that is carried whole
+	if code, body := push(v3, 3, v2, "", map[string]string{"index.html": "home 3", "p1/extra.html": "x"}, `{"carry":["p1"]}`); code != 400 {
+		t.Fatalf("an upload inside a carried folder: %d %s, want 400", code, body)
 	}
 	resp, err := http.Get(srv.URL + "/v0/host/keys/" + ipnsName)
 	if err != nil {
@@ -742,22 +779,25 @@ func TestManifestPush(t *testing.T) {
 	if len(staged) != 1 || staged[0].Path != "a.txt" || staged[0].Size != 4 {
 		t.Fatalf("staged files: %v", staged)
 	}
-	if resp, err := http.Get(srv.URL + "/v0/host/versions/not-a-cid/files"); err != nil || resp.StatusCode != 400 {
-		t.Fatalf("a bad cid must be refused: %v %v", resp, err)
+	resp, err = http.Get(srv.URL + "/v0/host/versions/not-a-cid/files")
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp.Body.Close()
+	if resp.StatusCode != 400 {
+		t.Fatalf("a bad cid must be refused: %d", resp.StatusCode)
+	}
+	// what a pattern without its anchors would let through: a path out of the
+	// folder (the %2f decodes to a slash) and a cid with a newline after it
+	for _, c := range []string{"bafyabc%2f..%2f..", "bafyabc%0a"} {
+		if code, body := get("/v0/host/versions/" + c + "/files"); code != 400 && code != 404 {
+			t.Fatalf("cid %q: %d %s, want 400 or 404", c, code, body)
+		}
 	}
 
 	// The rebuilt version is served from the blocks the host holds, a manifest
 	// that makes some other tree than the signed CID moves nothing, and a push
 	// in parts is committed by the manifest in its last part.
-	get := func(p string) (int, string) {
-		resp, err := http.Get(srv.URL + p)
-		if err != nil {
-			t.Fatal(err)
-		}
-		b, _ := io.ReadAll(resp.Body)
-		resp.Body.Close()
-		return resp.StatusCode, string(b)
-	}
 	for p, want := range map[string]string{"/p1/photo.jpg": "photo", "/assets/a.css": "css", "/p3/index.html": "three", "/index.html": "home 2"} {
 		if code, body := get("/ipfs/" + v2 + p); code != 200 || body != want {
 			t.Fatalf("%s of the rebuilt version: %d %q, want %q", p, code, body, want)
@@ -778,6 +818,10 @@ func TestManifestPush(t *testing.T) {
 		t.Fatalf("refused pushes moved the host to %s", held)
 	}
 	_, v5 := tree(map[string]string{"index.html": "home 5", "assets/a.css": "css", "p1/index.html": "one", "p1/photo.jpg": "photo", "p5/index.html": "five"})
+	// the manifest says what the whole version keeps, so only the last part may carry it
+	if code, body := push(v5, 5, v2, "1/2", map[string]string{"index.html": "home 5"}, `{"carry":["assets","p1"]}`); code != 400 || strings.TrimSpace(body) != "the manifest goes in the final part" {
+		t.Fatalf("a manifest in the first of two parts: %d %s, want 400 and the final part named", code, body)
+	}
 	if code, body := push(v5, 5, v2, "1/2", map[string]string{"index.html": "home 5"}, ""); code != 200 {
 		t.Fatalf("part 1 of a manifest push: %d %s", code, body)
 	}
@@ -792,6 +836,95 @@ func TestManifestPush(t *testing.T) {
 	}
 	if code, body := get("/v0/host/versions/" + v5 + "/files"); code != 200 || strings.TrimSpace(body) != "[]" {
 		t.Fatalf("a committed push leaves nothing staged: %d %s", code, body)
+	}
+}
+
+// Only a manifest the host refuses on its own terms is the pusher's fault. A
+// failure of the host's own, such as a staged file it cannot read, is a 500
+// that keeps the host's disk to itself and leaves the detail in its log.
+func TestManifestPushFailureOfTheHostIsA500(t *testing.T) {
+	if runtime.GOOS == "windows" || os.Geteuid() == 0 {
+		t.Skip("the file stays readable")
+	}
+	env := newManifestEnv(t)
+	h, tree, push := env.h, env.tree, env.push
+	logs := make(chan string, 16)
+	h.Log = func(s string) {
+		select {
+		case logs <- s:
+		default:
+		}
+	}
+	logged := func() (all []string) {
+		for {
+			select {
+			case l := <-logs:
+				all = append(all, l)
+			default:
+				return
+			}
+		}
+	}
+	v1Files := map[string]string{"index.html": "home", "assets/a.css": "css"}
+	_, v1 := tree(v1Files)
+	if code, body := push(v1, 1, "", "", v1Files, ""); code != 200 {
+		t.Fatalf("v1: %d %s", code, body)
+	}
+	_, v2 := tree(map[string]string{"index.html": "home 2", "assets/a.css": "css", "zz.txt": "zz"})
+	// part 1 only stages zz.txt, which is unreadable when the last part rebuilds
+	if code, body := push(v2, 2, v1, "1/2", map[string]string{"zz.txt": "zz"}, ""); code != 200 {
+		t.Fatalf("part 1: %d %s", code, body)
+	}
+	if err := os.Chmod(filepath.Join(h.DataDir, "host", "staging", v2, "zz.txt"), 0); err != nil {
+		t.Fatal(err)
+	}
+	code, body := push(v2, 2, v1, "2/2", map[string]string{"index.html": "home 2"}, `{"carry":["assets"]}`)
+	if code != 500 {
+		t.Fatalf("a staged file the host cannot read: %d %s, want 500", code, body)
+	}
+	if strings.Contains(body, h.DataDir) || strings.Contains(body, "permission") {
+		t.Fatalf("the answer hands the host's disk to the pusher: %s", body)
+	}
+	if all := strings.Join(logged(), "\n"); !strings.Contains(all, "permission denied") {
+		t.Fatalf("the host did not log what failed: %q", all)
+	}
+}
+
+// A parent whose blocks this host does not hold would have the rebuild wait
+// for peers: the wait is bounded, and giving up is the host's failure.
+func TestManifestPushWithoutTheParentsBlocksGivesUp(t *testing.T) {
+	env := newManifestEnv(t)
+	h, tree, push := env.h, env.tree, env.push
+	h.rebuildTimeout = 300 * time.Millisecond
+	_, v1 := tree(map[string]string{"index.html": "home", "assets/a.css": "css"}) // only the publisher's node has these blocks
+	h.mu.Lock()
+	h.reg.Keys[env.ipnsName] = &Entry{IPNS: env.ipnsName, CID: v1, Sequence: 1}
+	h.mu.Unlock()
+	_, v2 := tree(map[string]string{"index.html": "home 2", "assets/a.css": "css"})
+	if code, body := push(v2, 2, v1, "", map[string]string{"index.html": "home 2"}, `{"carry":["assets"]}`); code != 500 {
+		t.Fatalf("a parent whose blocks are not here: %d %s, want 500", code, body)
+	}
+}
+
+// A manifest is read up to 8 MiB. One byte more is refused as too large, not
+// cut short and refused as JSON that does not parse.
+func TestManifestSizeLimit(t *testing.T) {
+	env := newManifestEnv(t)
+	tree, push := env.tree, env.push
+	v1Files := map[string]string{"index.html": "home", "assets/a.css": "css"}
+	_, v1 := tree(v1Files)
+	if code, body := push(v1, 1, "", "", v1Files, ""); code != 200 {
+		t.Fatalf("v1: %d %s", code, body)
+	}
+	_, v2 := tree(map[string]string{"index.html": "home 2"})
+	// an empty carry list padded with spaces, which JSON allows
+	manifest := func(n int) string { return `{"carry":[]}` + strings.Repeat(" ", n-len(`{"carry":[]}`)) }
+	files := map[string]string{"index.html": "home 2"}
+	if code, body := push(v2, 2, v1, "", files, manifest(8<<20+1)); code != 400 || strings.TrimSpace(body) != "manifest too large" {
+		t.Fatalf("a manifest one byte over the limit: %d %s, want 400 manifest too large", code, body)
+	}
+	if code, body := push(v2, 2, v1, "", files, manifest(8<<20)); code != 200 {
+		t.Fatalf("a manifest of exactly the limit: %d %s", code, body)
 	}
 }
 

@@ -262,10 +262,28 @@ func (e *Embedded) PutBlock(ctx context.Context, c string, data []byte) error {
 	return e.bstore.Put(ctx, b)
 }
 
+// ErrBadManifest is what Rebuild's refusals of a manifest on its own terms
+// match: a path that climbs out of the version, one the parent does not have,
+// paths that sit inside each other or are given twice. A failure of the
+// machine (an unreadable file, a block that cannot be read or stored) never
+// matches it, so a host can tell its caller's fault from its own.
+var ErrBadManifest = errors.New("bad manifest")
+
+// refusal is an error that reads as its text and matches ErrBadManifest, so
+// what a host tells its caller names the path and not the sentinel.
+type refusal string
+
+func (r refusal) Error() string        { return string(r) }
+func (r refusal) Is(target error) bool { return target == ErrBadManifest }
+
+func refuse(format string, args ...any) error { return refusal(fmt.Sprintf(format, args...)) }
+
 // Rebuild adds the files under dir on top of the paths carry names in parent:
 // the version a manifest push describes. What is neither uploaded nor carried
 // is not in it. A host checks a push by comparing the result with the CID the
 // push was signed for. Only parent's folders on the carried paths are read.
+// It gives up when ctx ends, which a parent with blocks missing here needs.
+// What is wrong with the manifest itself matches ErrBadManifest.
 func (e *Embedded) Rebuild(ctx context.Context, parent, dir string, carry []string) (string, error) {
 	if e.dag == nil {
 		return "", fmt.Errorf("node not started")
@@ -462,13 +480,13 @@ func (t *tree) put(rel string, leaf *tree) error {
 			at.kids[name] = next
 		}
 		if next.leaf() {
-			return fmt.Errorf("%q is inside %q, which is taken whole", rel, strings.Join(parts[:i+1], "/"))
+			return refuse("%q is inside %q, which is taken whole", rel, strings.Join(parts[:i+1], "/"))
 		}
 		at = next
 	}
 	last := parts[len(parts)-1]
 	if _, dup := at.kids[last]; dup {
-		return fmt.Errorf("%q is given twice, or holds another given path", rel)
+		return refuse("%q is given twice, or holds another given path", rel)
 	}
 	at.kids[last] = leaf
 	return nil
@@ -532,7 +550,7 @@ func (f *folders) link(ctx context.Context, root cid.Cid, parts []string) (*ipld
 			}
 			d, err := uio.NewDirectoryFromNode(f.dag, nd)
 			if err != nil {
-				return nil, fmt.Errorf("%q is not a folder", strings.Join(parts[:i], "/"))
+				return nil, refuse("%q is not a folder", strings.Join(parts[:i], "/"))
 			}
 			links, err := d.Links(ctx)
 			if err != nil {
@@ -561,8 +579,11 @@ func (f *folders) carried(ctx context.Context, parent cid.Cid, carry []string) (
 			return nil, err
 		}
 		l, err := f.link(ctx, parent, parts)
-		if err != nil {
-			return nil, fmt.Errorf("carried %q is not in the parent: %w", rel, err)
+		switch {
+		case errors.Is(err, fs.ErrNotExist):
+			return nil, refuse("carried %q is not in the parent", rel)
+		case err != nil: // a path through a file, or folders that cannot be read
+			return nil, fmt.Errorf("carried %q: %w", rel, err)
 		}
 		if err := t.put(rel, &tree{node: linkOnly{l.Cid, l.Size}}); err != nil {
 			return nil, err
@@ -622,7 +643,7 @@ func splitPath(rel string) ([]string, error) {
 	parts := strings.Split(strings.Trim(rel, "/"), "/")
 	for _, s := range parts {
 		if s == "" || s == "." || s == ".." {
-			return nil, fmt.Errorf("bad path %q", rel)
+			return nil, refuse("bad path %q", rel)
 		}
 	}
 	return parts, nil
