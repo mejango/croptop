@@ -552,7 +552,7 @@ func TestBackgroundPushesKeepOnlyTheNewest(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		p.queuePush(site, c, seq)
+		p.queuePush(site, c, seq, nil)
 	}
 	a, sa := version("a")
 	queue(a, sa)
@@ -640,10 +640,10 @@ func TestABackgroundUploadOvertakenElsewherePublishesAgain(t *testing.T) {
 	if site, err = r.store.Site(fixtureID); err != nil {
 		t.Fatal(err)
 	}
-	if err := r.p.pushVersion(ctx, &pushJob{site, mine, seq}); !errors.Is(err, errSuperseded) {
+	if err := r.p.pushVersion(ctx, &pushJob{site: site, cid: mine, seq: seq}); !errors.Is(err, errSuperseded) {
 		t.Fatalf("an upload the host has moved past: %v, want errSuperseded", err)
 	}
-	r.p.queuePush(site, mine, seq)
+	r.p.queuePush(site, mine, seq, nil)
 	// taking the agent's version in makes it this machine's last publish for a
 	// moment; what is waited for is the version published on top of it
 	waitFor(t, "the laptop publishing again on top of the agent's version", func() bool {

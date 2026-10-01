@@ -105,9 +105,13 @@ func (p *Publisher) pull(ctx context.Context, site *store.Site, rec *ipfs.Record
 			}
 		}
 	}
-	// we have absorbed that version; publishing on top of it is legitimate
+	// we have absorbed that version; publishing on top of it is legitimate. The
+	// sequence never goes down: this machine may have announced higher already,
+	// and the next publish must go above both.
 	return added, updated, p.saveSite(site.ID, func(s *store.Site) {
-		s.LastPublishedCID, s.IPNSSequence, s.PublishedElsewhere = &cid, rec.Sequence, false
+		rememberVersion(s, deref(s.LastPublishedCID))
+		rememberVersion(s, cid)
+		s.LastPublishedCID, s.IPNSSequence, s.PublishedElsewhere = &cid, max(s.IPNSSequence, rec.Sequence), false
 	})
 }
 

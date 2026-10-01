@@ -56,6 +56,10 @@ type Server struct {
 	mu sync.Mutex // serializes render/publish per process
 }
 
+// Locker is the console's render and publish lock, for background work that
+// renders (the publisher's Gate).
+func (s *Server) Locker() sync.Locker { return &s.mu }
+
 var uuidRe = regexp.MustCompile(`^[0-9A-Fa-f]{8}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{12}$`)
 
 func (s *Server) Handler() http.Handler {

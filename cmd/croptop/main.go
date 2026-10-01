@@ -549,6 +549,12 @@ func (a *app) serve(listen string, noOpen bool) error {
 		return err
 	}
 	defer a.engine.Stop()
+	ui, _ := fs.Sub(web.FS, ".")
+	srv := &server.Server{
+		Store: a.store, Pub: a.pub, Follow: a.follow, Tpl: a.tpl, Node: a.engine, Cfg: a.cfg, UI: ui, Templates: a.tmpl,
+		Version: version, DataDir: a.dataDir, Log: println, Quit: cancel,
+	}
+	a.pub.Gate = srv.Locker() // before the background loops: a background publish never renders while the console does
 	go a.pub.RunKeepalive(ctx, 10*time.Minute)
 	go a.follow.Run(ctx, 6*time.Hour)
 	go func() { // DHT provider records expire after 48h
@@ -564,11 +570,6 @@ func (a *app) serve(listen string, noOpen bool) error {
 			}
 		}
 	}()
-	ui, _ := fs.Sub(web.FS, ".")
-	srv := &server.Server{
-		Store: a.store, Pub: a.pub, Follow: a.follow, Tpl: a.tpl, Node: a.engine, Cfg: a.cfg, UI: ui, Templates: a.tmpl,
-		Version: version, DataDir: a.dataDir, Log: println, Quit: cancel,
-	}
 	url := "http://" + strings.Replace(a.cfg.Listen, "0.0.0.0", "127.0.0.1", 1)
 	println("console at " + url)
 	if !noOpen {

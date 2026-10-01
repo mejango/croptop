@@ -35,10 +35,9 @@ type Posted struct {
 
 // postEngine is what Post needs beyond ipfs.Engine; the embedded engine has it.
 type postEngine interface {
-	Links(ctx context.Context, c string) (map[string]string, error)
+	blockLister
 	AddOver(ctx context.Context, base, dir string) (string, error)
 	SignRecord(key, c string, seq uint64) ([]byte, error)
-	PutBlock(ctx context.Context, c string, data []byte) error
 	FileCID(ctx context.Context, path string) (string, error)
 }
 
@@ -217,6 +216,7 @@ func (p *Publisher) readVersion(ctx context.Context, eng postEngine, hostURL, c,
 type blockLister interface {
 	Links(ctx context.Context, c string) (map[string]string, error)
 	PutBlock(ctx context.Context, c string, data []byte) error
+	Block(ctx context.Context, c string) ([]byte, error) // only what this node holds
 }
 
 // links lists the directory c. Its block comes from the host first, which
@@ -225,9 +225,11 @@ type blockLister interface {
 // one: the engine answers a sharded folder whose other blocks never came with
 // what it had read when the time ran out, and no error.
 func (p *Publisher) links(ctx context.Context, eng blockLister, hostURL, c string) (map[string]string, error) {
-	if b, status, err := httpGet(ctx, hostURL+"/v0/host/blocks/"+c); err == nil && status == 200 {
-		if err := eng.PutBlock(ctx, c, b); err != nil {
-			p.log("block %s from %s: %v", c, hostURL, err)
+	if _, err := eng.Block(ctx, c); err != nil { // not here: the host has it the moment it is pushed
+		if b, status, err := httpGet(ctx, hostURL+"/v0/host/blocks/"+c); err == nil && status == 200 {
+			if err := eng.PutBlock(ctx, c, b); err != nil {
+				p.log("block %s from %s: %v", c, hostURL, err)
+			}
 		}
 	}
 	lctx, cancel := context.WithTimeout(ctx, ipfsFetchTimeout)

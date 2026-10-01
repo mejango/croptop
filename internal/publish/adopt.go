@@ -95,6 +95,7 @@ func (p *Publisher) Adopt(ctx context.Context, nameOrENS string, pemBytes []byte
 		return "", err
 	}
 	site.LastPublishedCID = &cid
+	rememberVersion(site, cid)
 	if rec, err := p.Node.NetworkRecord(ctx, name); err == nil {
 		site.IPNSSequence = rec.Sequence
 	}

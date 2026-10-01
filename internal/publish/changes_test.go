@@ -249,8 +249,10 @@ func TestChangesDoesNotAskForTheBlockOfAFileThatBecameAFolder(t *testing.T) {
 	ctx := testCtx(t)
 	old := map[string]string{"index.html": "home", "notes.txt": "a file that becomes a folder"}
 	now := map[string]string{"index.html": "home", "notes.txt/index.html": "now a folder", "notes.txt/more.html": "with more"}
-	laptop := offlineNode(t)
-	parent, err := laptop.AddDir(ctx, writeSite(t, old))
+	// the parent was published from another machine: this one reads its
+	// folders from the host, and holds none of its files
+	other, laptop := offlineNode(t), offlineNode(t)
+	parent, err := other.AddDir(ctx, writeSite(t, old))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -258,7 +260,7 @@ func TestChangesDoesNotAskForTheBlockOfAFileThatBecameAFolder(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	links, err := laptop.Links(ctx, parent)
+	links, err := other.Links(ctx, parent)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -270,6 +272,11 @@ func TestChangesDoesNotAskForTheBlockOfAFileThatBecameAFolder(t *testing.T) {
 		mu.Lock()
 		asked = append(asked, r.URL.Path)
 		mu.Unlock()
+		c := strings.TrimPrefix(r.URL.Path, "/v0/host/blocks/")
+		if b, err := other.Block(r.Context(), c); err == nil && c != file { // a Worker refuses raw blocks
+			w.Write(b)
+			return
+		}
 		http.NotFound(w, r)
 	}))
 	defer srv.Close()
@@ -301,8 +308,10 @@ func TestChangesOnAnEndedContextIsAnError(t *testing.T) {
 	defer cancel()
 	old := map[string]string{"index.html": "home", "assets/site.css": "css", "p1/index.html": "one", "p1/photo.jpg": "photo"}
 	now := map[string]string{"index.html": "home 2", "assets/site.css": "css", "p1/index.html": "one 2", "p1/photo.jpg": "photo"}
-	laptop := offlineNode(t)
-	parent, err := laptop.AddDir(ctx, writeSite(t, old))
+	// the parent was published from another machine, so its folders come from
+	// the host
+	other, laptop := offlineNode(t), offlineNode(t)
+	parent, err := other.AddDir(ctx, writeSite(t, old))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -310,15 +319,22 @@ func TestChangesOnAnEndedContextIsAnError(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	links, err := laptop.Links(ctx, parent)
+	links, err := other.Links(ctx, parent)
 	if err != nil {
 		t.Fatal(err)
 	}
 	nested := links["p1"] // the folder the walk goes into after the top one
 	// the host's answer for that folder is a 404 that comes as the context ends
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if strings.HasSuffix(r.URL.Path, nested) {
+		c := strings.TrimPrefix(r.URL.Path, "/v0/host/blocks/")
+		if c == nested {
 			cancel()
+			http.NotFound(w, r)
+			return
+		}
+		if b, err := other.Block(r.Context(), c); err == nil {
+			w.Write(b)
+			return
 		}
 		http.NotFound(w, r)
 	}))

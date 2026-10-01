@@ -108,12 +108,19 @@ type pushSpec struct {
 	Files  []string // the version's files to send; nil sends them all
 	Carry  []string // non-nil makes a manifest push: the version is Files plus these paths of Parent
 	Dir    string   // send the files under this directory instead (post --key's staging dir)
+	Record []byte   // the signed record the host is to serve; nil takes the one the engine last signed for the key
 }
 
 // hostConflict is a push the host refused because the site moved on (409).
 type hostConflict struct{ msg string }
 
 func (e *hostConflict) Error() string { return e.msg }
+
+// hostRefusal is any other answer than 200 or 409: the host took the request
+// and said no, which sending the same again will not change.
+type hostRefusal struct{ msg string }
+
+func (e *hostRefusal) Error() string { return e.msg }
 
 // versionReader reads a version's files from the engine's blocks: the
 // embedded engine does, the kubo one does not.
@@ -377,10 +384,12 @@ func (p *Publisher) pushDir(ctx context.Context, site *store.Site, key, cid stri
 		return err
 	}
 	var record string
-	if rs, ok := p.Node.(interface{ Record(string) []byte }); ok {
-		if rec := rs.Record(key); len(rec) > 0 {
-			record = base64.StdEncoding.EncodeToString(rec)
-		}
+	rec := spec.Record
+	if rec == nil {
+		rec = recordOf(p.Node, key)
+	}
+	if len(rec) > 0 {
+		record = base64.StdEncoding.EncodeToString(rec)
 	}
 	var blocks map[string][]byte
 	if bs, ok := p.Node.(interface {
@@ -428,7 +437,7 @@ func (p *Publisher) pushDir(ctx context.Context, site *store.Site, key, cid stri
 		case 409:
 			return "", &hostConflict{fmt.Sprintf("%s: %s", base, strings.TrimSpace(string(body)))}
 		}
-		return "", fmt.Errorf("%s: %s: %s", what, resp.Status, strings.TrimSpace(string(body)))
+		return "", &hostRefusal{fmt.Sprintf("%s: %s: %s", what, resp.Status, strings.TrimSpace(string(body)))}
 	}
 	var small, big []pushFile
 	for _, f := range files {
