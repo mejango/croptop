@@ -3035,7 +3035,7 @@ Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
 Run by the main session. Before any deploy, tag or release, confirm with the user.
 
 - [ ] **Step 1: Full test run:** `go vet ./... && go test -p 1 ./... -count=1 -timeout 15m && (cd worker && node --experimental-loader ./text-loader.mjs --test test/) && (cd apps/macos && swift test)`. Expect every Go package `ok`, Worker `# fail 0`, and Swift `0 failures`.
-- [ ] **Step 2: Merge.** Bump `installer/macos-build-number` to 1157 and commit "Changes-only publishing and resumable uploads (build 1157)". Fast-forward main and push.
+- [ ] **Step 2: Merge.** Bump `installer/macos-build-number` to 1158 and commit "Changes-only publishing and resumable uploads (build 1158)". Fast-forward main and push.
 - [ ] **Step 3: Deploy the node.** Build a clean `git archive` folder plus the `templates/croptop` submodule, use `mktemp -d` (not `rm -rf`), then `railway up <dir> --path-as-root --service croptop-host --environment production --ci`. Verify:
   - `GET /v0/host/keys/<ipns>` on the Railway URL shows `"acceptsManifest":true`;
   - `GET /v0/host/versions/bafyx/files` → `[]`;
@@ -3045,7 +3045,7 @@ Run by the main session. Before any deploy, tag or release, confirm with the use
   - a keys entry shows `acceptsManifest: true`;
   - `https://crop.top/v0/host/versions/bafyx/files` → `[]`;
   - `/`, `/follo/` and `/directory` → 200.
-- [ ] **Step 5: Release.** Tag `v0.13.18`, push, and wait for goreleaser. Run `installer/release-macos.sh 0.13.18` with the user's notary key (`SPARKLE_KEY_FILE=~/Documents/croptop-signing/sparkle-ed25519.key AC_API_KEY_PATH=<p8> AC_API_KEY_ID=<id> AC_API_ISSUER_ID=<issuer>`). Check the appcast shows `<sparkle:version>1157`. Add a release note: publishes upload only what changed; first uploads resume; Save & publish leaves the editor at once.
+- [ ] **Step 5: Release.** Tag `v0.13.19`, push, and wait for goreleaser. Run `installer/release-macos.sh 0.13.19` with the user's notary key (`SPARKLE_KEY_FILE=~/Documents/croptop-signing/sparkle-ed25519.key AC_API_KEY_PATH=<p8> AC_API_KEY_ID=<id> AC_API_ISSUER_ID=<issuer>`). Check the appcast shows `<sparkle:version>1158`. Add a release note: publishes upload only what changed; first uploads resume. (Save & publish and the host fix shipped in v0.13.18.)
 - [ ] **Step 6: Live check** (with the user's go-ahead, since it publishes their site):
   1. Once the app has updated, publish JANGO. The log shows the full upload going out in the background, with no "context deadline exceeded".
   2. Over the next ~50 minutes, `https://crop.top/v0/host/keys/<jango ipns>` gains a `cid`.
