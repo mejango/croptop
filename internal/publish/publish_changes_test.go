@@ -272,3 +272,47 @@ func TestPublishSendsOnlyWhatChanged(t *testing.T) {
 		t.Fatalf("a host that refused every push was pushed to %d times, want 3", used)
 	}
 }
+
+// A change too big to push inside Publish, which the console runs under its
+// lock and a time limit, is announced first and uploaded after: the call sends
+// the host nothing and still publishes. What counts is what would be uploaded,
+// not the size of the site: an edit under the limit is pushed inside Publish.
+func TestPublishUploadsBigChangesInTheBackground(t *testing.T) {
+	ctx := context.Background()
+	limit := syncPushMax
+	t.Cleanup(func() { syncPushMax = limit })
+	r := newChangesRig(t)
+
+	// the site is over this limit, what a one-post edit uploads is not
+	syncPushMax = r.full() / 2
+	r.edit("\n\nsmall")
+	if sent, used, res := r.push(); used != 1 {
+		t.Fatalf("an edit under the limit sent %d bytes in %d manifest pushes, want it pushed inside Publish", sent, used)
+	} else if e, err := r.entry(); err != nil || e.CID != res.CID {
+		t.Fatalf("host holds %+v, %v; published %s", e, err, res.CID)
+	}
+
+	syncPushMax = 1
+	before, err := r.entry()
+	if err != nil {
+		t.Fatal(err)
+	}
+	r.edit(" and some more")
+	sent, used, res := r.push() // no error
+	if sent != 0 || used != 0 {
+		t.Fatalf("a change over the limit sent %d bytes in %d manifest pushes during Publish", sent, used)
+	}
+	if res.CID == before.CID || res.Sequence <= before.Sequence {
+		t.Fatalf("published %+v on top of the host's %+v", res, before)
+	}
+	site, _ := r.store.Site(fixtureID)
+	if site.LastPublishedCID == nil || *site.LastPublishedCID != res.CID || site.IPNSSequence != res.Sequence {
+		t.Fatalf("the version is not recorded as published: %+v", site)
+	}
+	if rec, err := r.laptop.NetworkRecord(ctx, r.ipns); err != nil || rec.Value != "/ipfs/"+res.CID || rec.Sequence != res.Sequence {
+		t.Fatalf("the network holds %+v, %v; published %+v", rec, err, res)
+	}
+	if e, err := r.entry(); err != nil || e.CID != before.CID {
+		t.Fatalf("the host holds %+v, %v; it holds the old version until the upload follows", e, err)
+	}
+}

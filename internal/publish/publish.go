@@ -22,6 +22,13 @@ const (
 	publishTimeout = 3 * time.Minute
 )
 
+// syncPushMax is the most a publish sends the host before it announces, in
+// bytes of the files that changed: about 75 s at 230 KB/s. A bigger change is
+// announced first and uploaded in the background, so that a big upload never
+// holds Publish, which the console runs under its lock and a time limit. A
+// variable so that tests can lower it.
+var syncPushMax int64 = 16 << 20
+
 type Publisher struct {
 	Store  *store.Store
 	Node   ipfs.Engine
@@ -52,10 +59,11 @@ type Result struct {
 }
 
 // Publish renders, adds, and publishes one site. When the host can take only
-// what changed, the version goes to the host first and is announced after.
-// If someone posted meanwhile (an agent, another machine), that version is
-// taken in and the site is rendered and pushed again, at most twice.
-// Otherwise the version is announced first and uploaded in the background.
+// what changed, and that is not much (syncPushMax), the version goes to the
+// host first and is announced after. If someone posted meanwhile (an agent,
+// another machine), that version is taken in and the site is rendered and
+// pushed again, at most twice. Otherwise the version is announced first and
+// uploaded in the background.
 func (p *Publisher) Publish(ctx context.Context, siteID string, force bool) (Result, error) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
@@ -168,9 +176,10 @@ func (p *Publisher) publishOnce(ctx context.Context, siteID string, force bool, 
 // publishChanges sends only what changed since the version the host holds,
 // then announces the same record. done is false when that is not possible:
 // another engine, an older host, a host holding another version, a diff
-// that does not check out, or a host that cannot be reached. The caller then
-// announces first and uploads in the background. behind is the version the
-// host has instead, when another push got there first.
+// that does not check out, a change over syncPushMax, or a host that cannot
+// be reached. The caller then announces first and uploads in the background.
+// behind is the version the host has instead, when another push got there
+// first.
 func (p *Publisher) publishChanges(ctx context.Context, site *store.Site, cid string, seq uint64, base string) (res Result, behind *ipfs.Record, done bool, err error) {
 	eng, ok := p.Node.(changesEngine)
 	if !ok || base == "" {
@@ -187,8 +196,20 @@ func (p *Publisher) publishChanges(ctx context.Context, site *store.Site, cid st
 	if err == nil {
 		err = eng.CheckManifest(ctx, cid, e.CID, upload, carry)
 	}
+	var files []pushFile // what the push would send, with sizes
+	if err == nil {
+		files, _, err = p.pushFiles(ctx, cid, pushSpec{Files: upload})
+	}
 	if err != nil {
 		p.log("changes since %s: %v; sending the whole site", e.CID, err)
+		return Result{}, nil, false, nil
+	}
+	var size int64
+	for _, f := range files {
+		size += f.size
+	}
+	if size > syncPushMax {
+		p.log("%.1f MB changed; announcing first, the upload follows", float64(size)/(1<<20))
 		return Result{}, nil, false, nil
 	}
 	rec, err := eng.SignRecord(site.ID, cid, seq)
