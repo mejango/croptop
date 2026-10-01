@@ -589,7 +589,7 @@ func (s *Server) publishSite(w http.ResponseWriter, r *http.Request, force bool)
 	}
 	res, err := s.Pub.Publish(ctx, site.ID, force)
 	if err != nil {
-		if errors.Is(err, publish.ErrPublishedElsewhere) || errors.Is(err, publish.ErrWouldResetSequence) {
+		if errors.Is(err, publish.ErrPublishedElsewhere) || errors.Is(err, publish.ErrWouldResetSequence) || errors.Is(err, publish.ErrSiteBusy) {
 			writeErr(w, 409, err)
 			return
 		}

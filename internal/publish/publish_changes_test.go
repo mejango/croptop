@@ -3,6 +3,7 @@ package publish
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -29,6 +30,7 @@ import (
 type noPeers struct {
 	*ipfs.Embedded
 	beforeAnnounce func(c string)
+	failAnnounce   error // if set, AnnounceRecord fails with it
 }
 
 func (n *noPeers) NamePublish(ctx context.Context, key, c string, seq uint64) error {
@@ -39,7 +41,25 @@ func (n *noPeers) AnnounceRecord(ctx context.Context, key, c string, rec []byte)
 	if n.beforeAnnounce != nil {
 		n.beforeAnnounce(c)
 	}
+	if n.failAnnounce != nil {
+		return n.failAnnounce
+	}
 	return storedLocally(n.Embedded.AnnounceRecord(ctx, key, c, rec))
+}
+
+// racyNode runs during once, inside the laptop's NetworkRecord: after the
+// publish has first read the host and before it reads it again.
+type racyNode struct {
+	*noPeers
+	during func()
+}
+
+func (n *racyNode) NetworkRecord(ctx context.Context, name string) (*ipfs.Record, error) {
+	if f := n.during; f != nil {
+		n.during = nil
+		f()
+	}
+	return n.noPeers.NetworkRecord(ctx, name)
 }
 
 func storedLocally(err error) error {
@@ -68,6 +88,9 @@ type changesRig struct {
 	manifests int   // manifest pushes seen since the last reset
 	refuse    int   // how many of the next manifest pushes to refuse (409)
 	lose      int   // how many of the next to commit without telling the client: it gets a 409 naming its own version
+	// beforeManifest, if set, runs once as the next manifest push arrives,
+	// before the host sees it
+	beforeManifest func()
 }
 
 func newChangesRig(t *testing.T) *changesRig {
@@ -96,7 +119,14 @@ func newChangesRig(t *testing.T) *changesRig {
 			if doLose {
 				r.lose--
 			}
+			var hook func()
+			if isManifest {
+				hook, r.beforeManifest = r.beforeManifest, nil
+			}
 			r.mu.Unlock()
+			if hook != nil {
+				hook()
+			}
 			if doRefuse {
 				http.Error(w, "the site changed during this push; post again", 409)
 				return
@@ -120,11 +150,19 @@ func newChangesRig(t *testing.T) *changesRig {
 	if err := os.CopyFS(r.store.SiteDir(fixtureID), os.DirFS("../store/testdata/site")); err != nil {
 		t.Fatal(err)
 	}
-	r.ipns, _ = r.laptop.Keystore().Generate(fixtureID)
-	site, _ := r.store.Site(fixtureID)
+	var err error
+	if r.ipns, err = r.laptop.Keystore().Generate(fixtureID); err != nil {
+		t.Fatal(err)
+	}
+	site, err := r.store.Site(fixtureID)
+	if err != nil {
+		t.Fatal(err)
+	}
 	site.IPNS = r.ipns
 	SetHost(site, r.srv.URL)
-	r.store.SaveSite(site)
+	if err := r.store.SaveSite(site); err != nil {
+		t.Fatal(err)
+	}
 	r.p = &Publisher{Store: r.store, Node: r.laptop, Render: &render.Renderer{Store: r.store, Templates: templates.FS, CIDs: r.laptop}, SkipPrewarm: true, Wait: true}
 	r.laptop.beforeAnnounce = func(c string) {
 		e, err := hostEntry(ctx, r.srv.URL, r.ipns)
@@ -135,13 +173,62 @@ func newChangesRig(t *testing.T) *changesRig {
 	if err != nil {
 		t.Fatal(err)
 	}
-	site, _ = r.store.Site(fixtureID)
+	if site, err = r.store.Site(fixtureID); err != nil {
+		t.Fatal(err)
+	}
 	if err := r.p.Push(ctx, site, first.CID, first.Sequence); err != nil {
 		t.Fatal(err)
 	}
-	posts, _ := r.store.Posts(fixtureID)
+	posts, err := r.store.Posts(fixtureID)
+	if err != nil || len(posts) == 0 {
+		t.Fatalf("the fixture's posts: %d, %v", len(posts), err)
+	}
 	r.post = posts[0]
 	return r
+}
+
+// agent readies a machine with nothing but the site's key, as `croptop post
+// --key` runs. The post it returns may be called from any goroutine: it adds
+// a post titled title to the site through the host.
+func (r *changesRig) agent() (post func(title string)) {
+	r.t.Helper()
+	pem, err := r.laptop.Keystore().ExportPEM(fixtureID)
+	if err != nil {
+		r.t.Fatal(err)
+	}
+	node := offlineNode(r.t)
+	st := &store.Store{Root: r.t.TempDir()}
+	ap := &Publisher{Store: st, Node: node, Render: &render.Renderer{Store: st, Templates: templates.FS, CIDs: node}}
+	return func(title string) {
+		if _, err := ap.Post(context.Background(), r.srv.URL, pem, NewPost{Title: title}); err != nil {
+			r.t.Errorf("the agent's post %q: %v", title, err)
+		}
+	}
+}
+
+// keeps checks that the host holds res, the laptop's last publish, and that
+// it and the laptop's copy of the site both have the post titled title.
+func (r *changesRig) keeps(res Result, title string) {
+	r.t.Helper()
+	e, err := r.entry()
+	if err != nil || e.CID != res.CID {
+		r.t.Fatalf("the host holds %+v, %v; the laptop published %+v", e, err, res)
+	}
+	b, status, err := httpGet(context.Background(), r.srv.URL+"/ipfs/"+e.CID+"/planet.json")
+	if err != nil || status != 200 {
+		r.t.Fatalf("planet.json of %s: %d, %v", e.CID, status, err)
+	}
+	posts, err := r.store.Posts(fixtureID)
+	if err != nil {
+		r.t.Fatal(err)
+	}
+	local := false
+	for _, p := range posts {
+		local = local || p.Title == title
+	}
+	if onHost := strings.Contains(string(b), title); !local || !onHost {
+		r.t.Fatalf("the post %q is lost: on the laptop %v, in the host's version %v", title, local, onHost)
+	}
 }
 
 // edit adds text to the post, so the next publish has something to send.
@@ -265,11 +352,60 @@ func TestPublishSendsOnlyWhatChanged(t *testing.T) {
 	r.refuseNext(100)
 	r.edit(" and again")
 	r.reset()
-	if _, err := r.p.Publish(ctx, fixtureID, false); err == nil || !strings.Contains(err.Error(), "keeps getting newer versions") {
-		t.Fatalf("a host that refused every push: %v", err)
+	if _, err := r.p.Publish(ctx, fixtureID, false); !errors.Is(err, ErrSiteBusy) {
+		t.Fatalf("a host that refused every push: %v, want ErrSiteBusy", err)
 	}
 	if _, used := r.counts(); used != 3 {
 		t.Fatalf("a host that refused every push was pushed to %d times, want 3", used)
+	}
+}
+
+// An agent's post that reaches the host while the laptop publishes is kept,
+// on the host and on the laptop. It may land before the laptop's push, which
+// the host then refuses, or between the laptop's two looks at the host, which
+// the laptop must notice itself: an upload made without taking it in would
+// replace the agent's version at the same sequence.
+func TestAnAgentPostDuringAPublishIsKept(t *testing.T) {
+	t.Run("before the push", func(t *testing.T) {
+		r := newChangesRig(t)
+		post := r.agent()
+		r.mu.Lock()
+		r.beforeManifest = func() { post("Agent wrote this first") }
+		r.mu.Unlock()
+		r.edit("\n\nlaptop edit")
+		_, used, res := r.push()
+		if used != 2 {
+			t.Fatalf("the refused push was not made again once: %d manifest pushes", used)
+		}
+		r.keeps(res, "Agent wrote this first")
+	})
+	t.Run("between the laptop's looks at the host", func(t *testing.T) {
+		r := newChangesRig(t)
+		post := r.agent()
+		r.p.Node = &racyNode{noPeers: r.laptop, during: func() { post("Agent wrote this meanwhile") }}
+		r.edit("\n\nlaptop edit")
+		_, _, res := r.push()
+		r.keeps(res, "Agent wrote this meanwhile")
+	})
+}
+
+// A version the host has committed is published, even if this machine's own
+// announcement of it then fails: the host serves it and announces it too. It is
+// recorded as this machine's latest, not reported as a failed publish.
+func TestAnAnnounceFailureAfterTheHostCommitsIsNotAFailedPublish(t *testing.T) {
+	r := newChangesRig(t)
+	r.laptop.failAnnounce = errors.New("no peer to announce to")
+	r.edit("\n\nedited")
+	_, used, res := r.push() // fails the test on an error
+	if used != 1 {
+		t.Fatalf("%d manifest pushes, want 1", used)
+	}
+	if e, err := r.entry(); err != nil || e.CID != res.CID {
+		t.Fatalf("the host holds %+v, %v; published %+v", e, err, res)
+	}
+	site, err := r.store.Site(fixtureID)
+	if err != nil || site.LastPublishedCID == nil || *site.LastPublishedCID != res.CID || site.IPNSSequence != res.Sequence {
+		t.Fatalf("the committed version is not recorded as published: %+v, %v", site, err)
 	}
 }
 

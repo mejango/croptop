@@ -14,6 +14,10 @@ var (
 	// been published before and the network is unreachable. Publishing at 1
 	// would be ignored by the network forever.
 	ErrWouldResetSequence = errors.New("cannot reach the IPNS network to learn the current sequence; retry online or publish with --force")
+	// ErrSiteBusy: newer versions kept reaching the site's host while this
+	// machine published, each taken in and published on top of, and the last
+	// try was refused too. Publishing again in a moment usually works.
+	ErrSiteBusy = errors.New("the site keeps getting newer versions; publish again in a moment")
 )
 
 // nextSequence decides the IPNS sequence number for the next publish.

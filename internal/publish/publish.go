@@ -75,9 +75,9 @@ func (p *Publisher) Publish(ctx context.Context, siteID string, force bool) (Res
 		}
 		if attempt == 2 {
 			if site, err := p.Store.Site(siteID); err == nil {
-				return Result{}, fmt.Errorf("%s keeps getting newer versions of %s; publish again in a moment", HostOf(site), site.Name)
+				return Result{}, fmt.Errorf("%s: %w", site.Name, ErrSiteBusy)
 			}
-			return Result{}, fmt.Errorf("the site keeps getting newer versions; publish again in a moment")
+			return Result{}, ErrSiteBusy
 		}
 		site, err := p.Store.Site(siteID)
 		if err != nil {
@@ -116,7 +116,10 @@ func (p *Publisher) publishOnce(ctx context.Context, siteID string, force bool, 
 	if err != nil {
 		return Result{}, nil, err
 	}
-	site, _ = p.Store.Site(siteID) // render may have changed post files, not the site, but reload anyway
+	// render may have changed post files, not the site, but reload anyway
+	if site, err = p.Store.Site(siteID); err != nil {
+		return Result{}, nil, err
+	}
 	rec, netErr := p.latestRecord(ctx, site)
 	if netErr == nil {
 		p.log("network has sequence %d -> %s", rec.Sequence, rec.Value)
@@ -140,6 +143,9 @@ func (p *Publisher) publishOnce(ctx context.Context, siteID string, force bool, 
 		if res, behind, done, err := p.publishChanges(ctx, site, cid, seq, base); done || behind != nil || err != nil {
 			return res, behind, err
 		}
+	}
+	if err := ctx.Err(); err != nil { // the caller gave up: announce nothing
+		return Result{}, nil, err
 	}
 	p.log("publishing %s at sequence %d", cid, seq)
 	pctx, cancel := context.WithTimeout(ctx, publishTimeout)
@@ -179,17 +185,23 @@ func (p *Publisher) publishOnce(ctx context.Context, siteID string, force bool, 
 // that does not check out, a change over syncPushMax, or a host that cannot
 // be reached. The caller then announces first and uploads in the background.
 // behind is the version the host has instead, when another push got there
-// first.
+// first: it is taken in before any upload, which would otherwise replace it.
 func (p *Publisher) publishChanges(ctx context.Context, site *store.Site, cid string, seq uint64, base string) (res Result, behind *ipfs.Record, done bool, err error) {
-	eng, ok := p.Node.(changesEngine)
-	if !ok || base == "" {
+	if base == "" {
 		return Result{}, nil, false, nil
 	}
 	hostURL := HostOf(site)
 	hctx, cancel := context.WithTimeout(ctx, hostTimeout)
 	e, herr := hostEntry(hctx, hostURL, site.IPNS)
 	cancel()
-	if herr != nil || !e.AcceptsManifest || e.CID != base || e.CID == cid {
+	if herr == nil && hostAhead(site, e, base, cid) {
+		// published elsewhere since this machine last looked, an agent's post
+		// say: whatever this machine uploads next would replace it
+		p.log("%s holds %s at sequence %d, published elsewhere; taking it in first", hostURL, e.CID, e.Sequence)
+		return Result{}, e.record(), false, nil
+	}
+	eng, ok := p.Node.(changesEngine)
+	if !ok || herr != nil || !e.AcceptsManifest || e.CID != base || e.CID == cid {
 		return Result{}, nil, false, nil
 	}
 	upload, carry, err := p.changes(ctx, eng, hostURL, cid, e.CID)
@@ -235,6 +247,8 @@ func (p *Publisher) publishChanges(ctx context.Context, site *store.Site, cid st
 		// answer was lost, so what came back is the refusal a retry gets. It is
 		// no news to take in; it only needs announcing.
 		p.log("%s already holds %s; announcing it", hostURL, cid)
+	case err != nil && ctx.Err() != nil: // the caller gave up: announce nothing
+		return Result{}, nil, true, ctx.Err()
 	case err != nil:
 		p.log("push to %s failed: %v; announcing first, the upload follows", hostURL, err)
 		return Result{}, nil, false, nil
@@ -243,7 +257,9 @@ func (p *Publisher) publishChanges(ctx context.Context, site *store.Site, cid st
 	pctx, cancel := context.WithTimeout(ctx, publishTimeout)
 	defer cancel()
 	if err := eng.AnnounceRecord(pctx, site.ID, cid, rec); err != nil {
-		return Result{}, nil, true, err
+		// the host holds this version and announces its record itself: the
+		// publish has happened, and the next one builds on it
+		p.log("announcing %s: %v; %s has it and announces it", cid, err, hostURL)
 	}
 	if err := p.published(site.ID, cid, seq); err != nil {
 		return Result{}, nil, true, err
