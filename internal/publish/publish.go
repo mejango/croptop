@@ -5,6 +5,7 @@ package publish
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 	"sync"
@@ -50,25 +51,62 @@ type Result struct {
 	Sequence uint64
 }
 
-// Publish renders, adds, and publishes one site.
+// Publish renders, adds, and publishes one site. When the host can take only
+// what changed, the version goes to the host first and is announced after.
+// If someone posted meanwhile (an agent, another machine), that version is
+// taken in and the site is rendered and pushed again, at most twice.
+// Otherwise the version is announced first and uploaded in the background.
 func (p *Publisher) Publish(ctx context.Context, siteID string, force bool) (Result, error) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
+	base := ""
+	for attempt := 0; ; attempt++ {
+		res, behind, err := p.publishOnce(ctx, siteID, force, base)
+		if behind == nil || err != nil {
+			return res, err
+		}
+		if attempt == 2 {
+			if site, err := p.Store.Site(siteID); err == nil {
+				return Result{}, fmt.Errorf("%s keeps getting newer versions of %s; publish again in a moment", HostOf(site), site.Name)
+			}
+			return Result{}, fmt.Errorf("the site keeps getting newer versions; publish again in a moment")
+		}
+		site, err := p.Store.Site(siteID)
+		if err != nil {
+			return Result{}, err
+		}
+		if err := p.takeIn(ctx, site, behind); err != nil {
+			return Result{}, err
+		}
+		if site, err = p.Store.Site(siteID); err != nil {
+			return Result{}, err
+		}
+		if site.PublishedElsewhere {
+			return Result{}, ErrPublishedElsewhere
+		}
+		base = strings.TrimPrefix(behind.Value, "/ipfs/")
+	}
+}
+
+// publishOnce makes one attempt. behind is a newer version to take in before
+// the next attempt. base is the version this machine builds on: its last
+// publish, or a version just taken in.
+func (p *Publisher) publishOnce(ctx context.Context, siteID string, force bool, base string) (Result, *ipfs.Record, error) {
 	site, err := p.Store.Site(siteID)
 	if err != nil {
-		return Result{}, err
+		return Result{}, nil, err
 	}
 	if !p.Node.Keystore().Has(site.ID) {
-		return Result{}, fmt.Errorf("no IPNS key for %s on this machine; run `croptop key import %s <file.pem>`", site.Name, site.ID)
+		return Result{}, nil, fmt.Errorf("no IPNS key for %s on this machine; run `croptop key import %s <file.pem>`", site.Name, site.ID)
 	}
 	p.log("rendering %s", site.Name)
 	if err := p.Render.Render(ctx, siteID); err != nil {
-		return Result{}, fmt.Errorf("render: %w", err)
+		return Result{}, nil, fmt.Errorf("render: %w", err)
 	}
 	p.log("adding to IPFS")
 	cid, err := p.Node.AddDir(ctx, p.Store.PublicDir(siteID))
 	if err != nil {
-		return Result{}, err
+		return Result{}, nil, err
 	}
 	site, _ = p.Store.Site(siteID) // render may have changed post files, not the site, but reload anyway
 	rec, netErr := p.latestRecord(ctx, site)
@@ -77,45 +115,141 @@ func (p *Publisher) Publish(ctx context.Context, siteID string, force bool) (Res
 	} else {
 		p.log("network record: %v", netErr)
 	}
-	seq, err := nextSequence(site.IPNSSequence, deref(site.LastPublishedCID), rec, netErr, force)
+	if base == "" {
+		base = deref(site.LastPublishedCID)
+	}
+	seq, err := nextSequence(site.IPNSSequence, base, rec, netErr, force)
+	if err == ErrPublishedElsewhere && !force && rec != nil {
+		return Result{}, rec, nil // take it in, then try again
+	}
 	if err != nil {
 		if err == ErrPublishedElsewhere {
 			p.saveSite(site.ID, func(s *store.Site) { s.PublishedElsewhere = true })
 		}
-		return Result{}, err
+		return Result{}, nil, err
+	}
+	if !force {
+		if res, behind, done, err := p.publishChanges(ctx, site, cid, seq, base); done || behind != nil || err != nil {
+			return res, behind, err
+		}
 	}
 	p.log("publishing %s at sequence %d", cid, seq)
 	pctx, cancel := context.WithTimeout(ctx, publishTimeout)
 	defer cancel()
 	if err := p.Node.NamePublish(pctx, site.ID, cid, seq); err != nil {
-		return Result{}, err
+		return Result{}, nil, err
 	}
-	now := store.Now()
-	if err := p.saveSite(site.ID, func(s *store.Site) {
-		s.IPNSSequence, s.LastPublishedCID, s.LastPublished, s.PublishedElsewhere = seq, &cid, &now, false
-	}); err != nil {
-		return Result{}, err
+	if err := p.published(site.ID, cid, seq); err != nil {
+		return Result{}, nil, err
 	}
 	if !p.SkipPrewarm {
-		p.log("asking gateways to fetch the new version")
-		after := func() {
-			pctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
-			if err := p.Push(pctx, site, cid, seq); err != nil {
+		if p.Wait {
+			if err := p.Push(ctx, site, cid, seq); err != nil {
 				p.log("push to %s failed: %v", HostOf(site), err)
 			} else {
 				p.log("pushed %s to %s", site.Name, HostOf(site))
 			}
-			cancel()
-			p.prewarm(context.Background(), site, cid)
-			p.prewarmAll(site, cid)
-		}
-		if p.Wait {
-			after()
+			p.warm(site, cid)
 		} else {
-			go after()
+			go func() {
+				ctx := context.Background() // no deadline: an upload is given up when it stops moving, not when time is up
+				if err := p.Push(ctx, site, cid, seq); err != nil {
+					p.log("push to %s failed: %v", HostOf(site), err)
+				} else {
+					p.log("pushed %s to %s", site.Name, HostOf(site))
+				}
+				p.warm(site, cid)
+			}() // Task 8 replaces this with the per-site queue
 		}
 	}
-	return Result{CID: cid, Sequence: seq}, nil
+	return Result{CID: cid, Sequence: seq}, nil, nil
+}
+
+// publishChanges sends only what changed since the version the host holds,
+// then announces the same record. done is false when that is not possible:
+// another engine, an older host, a host holding another version, a diff
+// that does not check out, or a host that cannot be reached. The caller then
+// announces first and uploads in the background. behind is the version the
+// host has instead, when another push got there first.
+func (p *Publisher) publishChanges(ctx context.Context, site *store.Site, cid string, seq uint64, base string) (res Result, behind *ipfs.Record, done bool, err error) {
+	eng, ok := p.Node.(changesEngine)
+	if !ok || base == "" {
+		return Result{}, nil, false, nil
+	}
+	hostURL := HostOf(site)
+	hctx, cancel := context.WithTimeout(ctx, hostTimeout)
+	e, herr := hostEntry(hctx, hostURL, site.IPNS)
+	cancel()
+	if herr != nil || !e.AcceptsManifest || e.CID != base || e.CID == cid {
+		return Result{}, nil, false, nil
+	}
+	upload, carry, err := p.changes(ctx, eng, hostURL, cid, e.CID)
+	if err == nil {
+		err = eng.CheckManifest(ctx, cid, e.CID, upload, carry)
+	}
+	if err != nil {
+		p.log("changes since %s: %v; sending the whole site", e.CID, err)
+		return Result{}, nil, false, nil
+	}
+	rec, err := eng.SignRecord(site.ID, cid, seq)
+	if err != nil {
+		return Result{}, nil, false, err
+	}
+	p.log("pushing %d changed files of %s on top of %s", len(upload), cid, e.CID)
+	err = p.pushDir(ctx, site, site.ID, cid, seq, pushSpec{Parent: e.CID, Files: upload, Carry: carry})
+	var hc *hostConflict
+	switch {
+	case errors.As(err, &hc):
+		hctx, cancel := context.WithTimeout(ctx, hostTimeout)
+		cur, herr := hostEntry(hctx, hostURL, site.IPNS)
+		cancel()
+		switch {
+		case herr != nil:
+			return Result{}, nil, false, err
+		case cur.CID != cid:
+			p.log("%v; taking the newer version in", hc)
+			return Result{}, cur.record(), false, nil
+		}
+		// The host holds this very version: the push committed and only its
+		// answer was lost, so what came back is the refusal a retry gets. It is
+		// no news to take in; it only needs announcing.
+		p.log("%s already holds %s; announcing it", hostURL, cid)
+	case err != nil:
+		p.log("push to %s failed: %v; announcing first, the upload follows", hostURL, err)
+		return Result{}, nil, false, nil
+	}
+	p.log("publishing %s at sequence %d", cid, seq)
+	pctx, cancel := context.WithTimeout(ctx, publishTimeout)
+	defer cancel()
+	if err := eng.AnnounceRecord(pctx, site.ID, cid, rec); err != nil {
+		return Result{}, nil, true, err
+	}
+	if err := p.published(site.ID, cid, seq); err != nil {
+		return Result{}, nil, true, err
+	}
+	if !p.SkipPrewarm {
+		if p.Wait {
+			p.warm(site, cid)
+		} else {
+			go p.warm(site, cid)
+		}
+	}
+	return Result{CID: cid, Sequence: seq}, nil, true, nil
+}
+
+// published records a version as this machine's latest.
+func (p *Publisher) published(siteID, cid string, seq uint64) error {
+	now := store.Now()
+	return p.saveSite(siteID, func(s *store.Site) {
+		s.IPNSSequence, s.LastPublishedCID, s.LastPublished, s.PublishedElsewhere = seq, &cid, &now, false
+	})
+}
+
+// warm asks the gateways to fetch a new version.
+func (p *Publisher) warm(site *store.Site, cid string) {
+	p.log("asking gateways to fetch the new version")
+	p.prewarm(context.Background(), site, cid)
+	p.prewarmAll(site, cid)
 }
 
 // Keepalive republishes the current CID so the record does not expire. When
