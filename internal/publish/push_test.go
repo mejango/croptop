@@ -1,16 +1,25 @@
 package publish
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
+	"fmt"
 	"io"
 	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
+	"time"
 
+	"github.com/mejango/croptop/internal/host"
+	"github.com/mejango/croptop/internal/render"
 	"github.com/mejango/croptop/internal/store"
+	"github.com/mejango/croptop/templates"
 )
 
 func TestHostDefaultsAndCustomHost(t *testing.T) {
@@ -114,5 +123,342 @@ func TestPublishPushesDefaultAndCustomHost(t *testing.T) {
 				t.Fatal("publishing did not push to its host")
 			}
 		})
+	}
+}
+
+// An upload keeps going while its body moves, however slowly, and is given
+// up when it stops moving or the host never answers.
+func TestUploadsKeepGoingWhileTheyMove(t *testing.T) {
+	stall, reply := stallAfter, replyWithin
+	stallAfter, replyWithin = 300*time.Millisecond, 300*time.Millisecond
+	t.Cleanup(func() { stallAfter, replyWithin = stall, reply })
+	release := make(chan struct{})
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		io.Copy(io.Discard, r.Body)
+		if r.URL.Path == "/silent" {
+			<-release // the body is in; the answer never comes
+		}
+		w.Write([]byte("ok"))
+	}))
+	defer srv.Close()
+	defer close(release) // runs before srv.Close, which waits for the handler
+	send := func(path string, body io.Reader) error {
+		req, _ := http.NewRequest("POST", srv.URL+path, body)
+		resp, err := sendWatched(req)
+		if err != nil {
+			return err
+		}
+		io.Copy(io.Discard, resp.Body)
+		return resp.Body.Close()
+	}
+	if err := send("/", &slowReader{n: 12, every: 50 * time.Millisecond}); err != nil {
+		t.Fatalf("a slow body that keeps moving was given up: %v", err)
+	}
+	stuck := make(chan struct{})
+	defer close(stuck)
+	start := time.Now()
+	if err := send("/", &stuckReader{wait: stuck}); err == nil || time.Since(start) > 5*time.Second {
+		t.Fatalf("a body that stopped moving was not given up in time: %v after %s", err, time.Since(start))
+	}
+	if err := send("/silent", strings.NewReader("all of it")); err == nil {
+		t.Fatal("a host that never answers was waited on forever")
+	}
+}
+
+type slowReader struct {
+	n     int
+	every time.Duration
+}
+
+func (r *slowReader) Read(b []byte) (int, error) {
+	if r.n == 0 {
+		return 0, io.EOF
+	}
+	time.Sleep(r.every)
+	r.n--
+	b[0] = 'x'
+	return 1, nil
+}
+
+type stuckReader struct{ wait chan struct{} }
+
+func (r *stuckReader) Read(b []byte) (int, error) {
+	<-r.wait
+	return 0, io.EOF
+}
+
+// A push sends the version's own bytes even when the folder changed after it
+// was added, and a push cut short resumes: the retry skips what the host
+// already holds.
+func TestPushSendsTheVersionAndResumes(t *testing.T) {
+	ctx := context.Background()
+	h := &host.Host{Domain: "crop.test", DataDir: t.TempDir(), Engine: offlineNode(t)}
+	if err := h.Start(); err != nil {
+		t.Fatal(err)
+	}
+	var mu sync.Mutex
+	failLast := true
+	var sent int64
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == "POST" && r.URL.Path == "/v0/host/push" {
+			part := strings.SplitN(r.Header.Get("X-Croptop-Part"), "/", 2)
+			mu.Lock()
+			fail := failLast && len(part) == 2 && part[0] == part[1] && part[1] != "1" // the final part of a split push
+			if fail {
+				failLast = false
+			}
+			mu.Unlock()
+			if fail {
+				http.Error(w, "cut short", 500)
+				return
+			}
+			b, _ := io.ReadAll(r.Body)
+			mu.Lock()
+			sent += int64(len(b))
+			mu.Unlock()
+			r.Body = io.NopCloser(bytes.NewReader(b))
+		}
+		h.ServeHTTP(w, r)
+	}))
+	defer srv.Close()
+	batch := pushBatch
+	pushBatch = 64 << 10 // the fixture site splits into several parts
+	t.Cleanup(func() { pushBatch = batch })
+
+	laptop := offlineNode(t)
+	s := &store.Store{Root: t.TempDir()}
+	if err := os.CopyFS(s.SiteDir(fixtureID), os.DirFS("../store/testdata/site")); err != nil {
+		t.Fatal(err)
+	}
+	ipnsName, _ := laptop.Keystore().Generate(fixtureID)
+	site, _ := s.Site(fixtureID)
+	site.IPNS = ipnsName
+	SetHost(site, srv.URL)
+	s.SaveSite(site)
+	p := &Publisher{Store: s, Node: laptop, Render: &render.Renderer{Store: s, Templates: templates.FS, CIDs: laptop}}
+	if err := p.Render.Render(ctx, fixtureID); err != nil {
+		t.Fatal(err)
+	}
+	c, err := laptop.AddDir(ctx, s.PublicDir(fixtureID))
+	if err != nil {
+		t.Fatal(err)
+	}
+	laptop.SignRecord(fixtureID, c, 1)
+	// a render after the version was made must not leak into its upload
+	os.WriteFile(filepath.Join(s.PublicDir(fixtureID), "index.html"), []byte("rendered later"), 0o644)
+
+	if err := p.Push(ctx, site, c, 1); err == nil {
+		t.Fatal("the cut-short push must fail")
+	}
+	mu.Lock()
+	first := sent
+	sent = 0
+	mu.Unlock()
+	if err := p.Push(ctx, site, c, 1); err != nil {
+		t.Fatalf("retry: %v", err) // the host checks the files hash to c: a leaked file fails here
+	}
+	mu.Lock()
+	retry := sent
+	mu.Unlock()
+	// resumed, the retry sends about one part (the one cut short); from scratch, the whole site
+	if first <= retry || retry > pushBatch+(16<<10) {
+		t.Fatalf("the retry sent %d bytes after %d went up the first time: it did not resume", retry, first)
+	}
+	e, err := hostEntry(ctx, srv.URL, ipnsName)
+	if err != nil || e.CID != c || !e.AcceptsManifest {
+		t.Fatalf("host entry %+v, %v", e, err)
+	}
+}
+
+// The two limits are separate: a host busy with the last part of a big version
+// may answer later than an upload may go without sending, and a body that has
+// stopped is not given the time the host is allowed to answer in.
+func TestUploadLimitsAreSeparate(t *testing.T) {
+	stall, reply := stallAfter, replyWithin
+	stallAfter, replyWithin = 200*time.Millisecond, 5*time.Second
+	t.Cleanup(func() { stallAfter, replyWithin = stall, reply })
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if _, err := io.Copy(io.Discard, r.Body); err != nil {
+			return // the upload was given up
+		}
+		time.Sleep(800 * time.Millisecond) // adding the files, checking their hash
+		w.Write([]byte("ok"))
+	}))
+	defer srv.Close()
+	send := func(body io.Reader) error {
+		req, _ := http.NewRequest("POST", srv.URL, body)
+		resp, err := sendWatched(req)
+		if err != nil {
+			return err
+		}
+		io.Copy(io.Discard, resp.Body)
+		return resp.Body.Close()
+	}
+	if err := send(strings.NewReader("all of it")); err != nil {
+		t.Fatalf("an answer that took longer than the stall limit, within the reply limit, was given up: %v", err)
+	}
+	stuck := make(chan struct{})
+	defer close(stuck)
+	start := time.Now()
+	if err := send(&stuckReader{wait: stuck}); err == nil || time.Since(start) > 3*time.Second {
+		t.Fatalf("a body that stopped was waited on for the reply limit: %v after %s", err, time.Since(start))
+	}
+}
+
+// A retry skips the files the host holds at the same size, and when it holds
+// them all it still sends one, so the part that commits the version goes.
+func TestSkipHeldKeepsWhatTheHostLacks(t *testing.T) {
+	files := []pushFile{{"a.html", 30}, {"b.html", 10}, {"c.html", 20}}
+	rels := func(list []pushFile) string {
+		var out []string
+		for _, f := range list {
+			out = append(out, f.rel)
+		}
+		return strings.Join(out, ",")
+	}
+	for _, tc := range []struct {
+		name string
+		have map[string]int64
+		want string
+	}{
+		{"nothing held", map[string]int64{}, "a.html,b.html,c.html"},
+		{"some held", map[string]int64{"a.html": 30, "c.html": 20}, "b.html"},
+		{"held at another size", map[string]int64{"a.html": 31, "b.html": 10}, "a.html,c.html"},
+		{"held but not in the version", map[string]int64{"z.html": 5}, "a.html,b.html,c.html"},
+		{"all held: the smallest goes again", map[string]int64{"a.html": 30, "b.html": 10, "c.html": 20}, "b.html"},
+	} {
+		if got := rels(skipHeld(files, tc.have)); got != tc.want {
+			t.Errorf("%s: sends %s, want %s", tc.name, got, tc.want)
+		}
+	}
+	if got := skipHeld(nil, map[string]int64{"a.html": 1}); len(got) != 0 {
+		t.Errorf("a version with no files sends %v", got)
+	}
+}
+
+// A host that refuses a push because the site moved on says so in a type the
+// caller can tell; any other refusal is a plain error.
+func TestPushNamesAConflict(t *testing.T) {
+	refusing := func(code int) string {
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if r.Method != "POST" {
+				http.NotFound(w, r) // it holds no files of this version yet
+				return
+			}
+			io.Copy(io.Discard, r.Body)
+			http.Error(w, "host holds bafyNEWER, not bafyOLD", code)
+		}))
+		t.Cleanup(srv.Close)
+		return srv.URL
+	}
+	p, s, _ := fakePublisher(t)
+	dir := t.TempDir()
+	os.WriteFile(filepath.Join(dir, "a.html"), []byte("a"), 0o644)
+	push := func(url string) error {
+		site, _ := s.Site(fixtureID)
+		SetHost(site, url)
+		return p.pushDir(context.Background(), site, fixtureID, "bafyNEW", 2, pushSpec{Parent: "bafyOLD", Dir: dir})
+	}
+	var conflict *hostConflict
+	if err := push(refusing(409)); !errors.As(err, &conflict) || !strings.Contains(err.Error(), "host holds bafyNEWER, not bafyOLD") {
+		t.Fatalf("a 409 gave %v", err)
+	}
+	if err := push(refusing(500)); err == nil || errors.As(err, &conflict) {
+		t.Fatalf("a 500 gave %v", err)
+	}
+}
+
+// What a push sends follows its spec: the files it names, the parent it builds
+// on, and for a manifest push the carried paths, in the final part. A carry
+// that is empty still makes a manifest push; no carry does not.
+func TestPushSpecChoosesFilesParentAndManifest(t *testing.T) {
+	type request struct {
+		parent, part, manifest string
+		fields                 []string
+	}
+	var mu sync.Mutex
+	var got []request
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != "POST" {
+			http.NotFound(w, r)
+			return
+		}
+		req := request{parent: r.Header.Get("X-Croptop-Parent"), part: r.Header.Get("X-Croptop-Part")}
+		mr, err := r.MultipartReader()
+		if err != nil {
+			http.Error(w, err.Error(), 400)
+			return
+		}
+		for {
+			part, err := mr.NextPart()
+			if err != nil {
+				break
+			}
+			if part.FormName() == "manifest" {
+				b, _ := io.ReadAll(part)
+				req.manifest = string(b)
+			} else {
+				req.fields = append(req.fields, part.FormName())
+			}
+		}
+		mu.Lock()
+		got = append(got, req)
+		mu.Unlock()
+		w.Write([]byte("{}"))
+	}))
+	defer srv.Close()
+	p, s, _ := fakePublisher(t)
+	site, _ := s.Site(fixtureID)
+	SetHost(site, srv.URL)
+	dir := t.TempDir()
+	for _, f := range []string{"index.html", "other.html", "assets/site.css"} {
+		os.MkdirAll(filepath.Dir(filepath.Join(dir, f)), 0o755)
+		os.WriteFile(filepath.Join(dir, f), []byte(f), 0o644)
+	}
+	for _, spec := range []pushSpec{
+		{Parent: "bafyOLD", Files: []string{"index.html", "assets/site.css"}, Carry: []string{"p1"}, Dir: dir},
+		{Files: []string{"other.html"}, Carry: []string{}, Dir: dir},
+		{Dir: dir},
+	} {
+		if err := p.pushDir(context.Background(), site, fixtureID, "bafyNEW", 2, spec); err != nil {
+			t.Fatal(err)
+		}
+	}
+	want := []request{
+		{"bafyOLD", "1/1", `{"carry":["p1"]}`, []string{"file:assets/site.css", "file:index.html"}},
+		{"", "1/1", `{"carry":[]}`, []string{"file:other.html"}},
+		{"", "1/1", "", []string{"file:assets/site.css", "file:index.html", "file:other.html"}},
+	}
+	if fmt.Sprint(got) != fmt.Sprint(want) {
+		t.Fatalf("the host was sent\n%+v\nwant\n%+v", got, want)
+	}
+}
+
+// hostEntry says apart a host that holds no version of a site from one that
+// cannot be asked, or does not answer sensibly.
+func TestHostEntryNamesAMissingVersion(t *testing.T) {
+	ctx := context.Background()
+	empty := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.HasSuffix(r.URL.Path, "/known") {
+			w.Write([]byte(`{"cid":"","sequence":0}`))
+			return
+		}
+		http.NotFound(w, r)
+	}))
+	defer empty.Close()
+	for _, name := range []string{"unknown", "known"} {
+		if _, err := hostEntry(ctx, empty.URL, name); !errors.Is(err, errNoVersion) || !strings.Contains(err.Error(), "holds no version of "+name) {
+			t.Errorf("%s: %v", name, err)
+		}
+	}
+	broken := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { http.Error(w, "boom", 500) }))
+	defer broken.Close()
+	if _, err := hostEntry(ctx, broken.URL, "k"); err == nil || errors.Is(err, errNoVersion) {
+		t.Errorf("a host that fails: %v", err)
+	}
+	down := httptest.NewServer(http.NotFoundHandler())
+	down.Close()
+	if _, err := hostEntry(ctx, down.URL, "k"); err == nil || errors.Is(err, errNoVersion) {
+		t.Errorf("a host that is down: %v", err)
 	}
 }

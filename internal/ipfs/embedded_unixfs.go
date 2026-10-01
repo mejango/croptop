@@ -365,16 +365,27 @@ type VersionFile struct {
 	CID  string
 }
 
+// localDAG reads the blocks this node holds and nothing else: one that is not
+// here is an error at once. The node's own DAG would ask the network for it,
+// and wait until the context ends even offline. A push has no deadline, so
+// reading a version that is not whole through that DAG would hang it forever.
+func (e *Embedded) localDAG() ipld.DAGService {
+	return merkledag.NewDAGService(blockservice.New(e.bstore, offline.Exchange(e.bstore)))
+}
+
 // Files lists every file of the version root, sorted by path, from this
-// node's blocks.
+// node's blocks alone: a block that is not here is an error, never a wait on
+// the network. A chunked file is sized by its root block, a small one by the
+// link to it.
 func (e *Embedded) Files(ctx context.Context, root string) ([]VersionFile, error) {
-	if e.dag == nil {
+	if e.bstore == nil {
 		return nil, fmt.Errorf("node not started")
 	}
 	rid, err := cid.Decode(root)
 	if err != nil {
 		return nil, err
 	}
+	dag := e.localDAG()
 	var out []VersionFile
 	var walk func(rel string, c cid.Cid, tsize uint64) error
 	walk = func(rel string, c cid.Cid, tsize uint64) error {
@@ -382,7 +393,7 @@ func (e *Embedded) Files(ctx context.Context, root string) ([]VersionFile, error
 			out = append(out, VersionFile{rel, int64(tsize), c.String()})
 			return nil
 		}
-		nd, err := e.dag.Get(ctx, c)
+		nd, err := dag.Get(ctx, c)
 		if err != nil {
 			return fmt.Errorf("%s: %w", rel, err)
 		}
@@ -399,7 +410,7 @@ func (e *Embedded) Files(ctx context.Context, root string) ([]VersionFile, error
 			out = append(out, VersionFile{rel, int64(fsn.FileSize()), c.String()})
 			return nil
 		case ft.TDirectory, ft.THAMTShard:
-			d, err := uio.NewDirectoryFromNode(e.dag, nd)
+			d, err := uio.NewDirectoryFromNode(dag, nd)
 			if err != nil {
 				return err
 			}
@@ -425,9 +436,11 @@ func (e *Embedded) Files(ctx context.Context, root string) ([]VersionFile, error
 
 // OpenFile reads the file at rel in version root from this node's blocks, so
 // an upload sends the version's own bytes even if the files on disk have
-// changed since it was added.
+// changed since it was added. Like Files it reads no other blocks: opening a
+// file whose block is not here fails at once, and so does a read that reaches
+// a chunk that is not here.
 func (e *Embedded) OpenFile(ctx context.Context, root, rel string) (io.ReadSeekCloser, int64, error) {
-	if e.dag == nil {
+	if e.bstore == nil {
 		return nil, 0, fmt.Errorf("node not started")
 	}
 	rid, err := cid.Decode(root)
@@ -438,16 +451,17 @@ func (e *Embedded) OpenFile(ctx context.Context, root, rel string) (io.ReadSeekC
 	if err != nil {
 		return nil, 0, err
 	}
-	f := &folders{dag: e.dag, cache: map[cid.Cid]map[string]*ipld.Link{}}
+	dag := e.localDAG()
+	f := &folders{dag: dag, cache: map[cid.Cid]map[string]*ipld.Link{}}
 	l, err := f.link(ctx, rid, parts)
 	if err != nil {
 		return nil, 0, err
 	}
-	nd, err := e.dag.Get(ctx, l.Cid)
+	nd, err := dag.Get(ctx, l.Cid)
 	if err != nil {
 		return nil, 0, err
 	}
-	r, err := uio.NewDagReader(ctx, nd, e.dag)
+	r, err := uio.NewDagReader(ctx, nd, dag)
 	if err != nil {
 		return nil, 0, err
 	}

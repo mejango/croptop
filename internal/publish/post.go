@@ -162,18 +162,23 @@ func (p *Publisher) Post(ctx context.Context, hostURL string, key []byte, np New
 		return Posted{}, err
 	}
 	p.log("pushing %s at sequence %d", cid, seq)
-	if err := p.pushDir(ctx, site, keyName, changed, cid, seq, entry.CID); err != nil {
+	if err := p.pushDir(ctx, site, keyName, cid, seq, pushSpec{Parent: entry.CID, Dir: changed}); err != nil {
 		return Posted{}, fmt.Errorf("push to %s: %w", hostURL, err)
 	}
 	return Posted{Result: Result{CID: cid, Sequence: seq}, URL: render.BrowserURL(site, post)}, nil
 }
 
 type hostKey struct {
-	CID           string `json:"cid"`
-	Sequence      uint64 `json:"sequence"`
-	Name          string `json:"name"`
-	AcceptsParent bool   `json:"acceptsParent"`
+	CID             string `json:"cid"`
+	Sequence        uint64 `json:"sequence"`
+	Name            string `json:"name"`
+	AcceptsParent   bool   `json:"acceptsParent"`
+	AcceptsManifest bool   `json:"acceptsManifest"`
 }
+
+// errNoVersion is what hostEntry's error wraps when the host holds no version
+// of the site.
+var errNoVersion = errors.New("no version there")
 
 // hostEntry is the version of a site the host holds.
 func hostEntry(ctx context.Context, hostURL, ipnsName string) (*hostKey, error) {
@@ -183,7 +188,7 @@ func hostEntry(ctx context.Context, hostURL, ipnsName string) (*hostKey, error) 
 	}
 	var e hostKey
 	if status == 404 || (status == 200 && json.Unmarshal(b, &e) == nil && e.CID == "") {
-		return nil, fmt.Errorf("%s holds no version of %s; publish the site once from the console, which pushes it there", hostURL, ipnsName)
+		return nil, fmt.Errorf("%s holds no version of %s; publish the site once from the console, which pushes it there (%w)", hostURL, ipnsName, errNoVersion)
 	}
 	if status != 200 || e.CID == "" {
 		return nil, fmt.Errorf("%s: %d %s", hostURL, status, strings.TrimSpace(string(b)))

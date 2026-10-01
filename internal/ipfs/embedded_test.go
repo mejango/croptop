@@ -847,6 +847,125 @@ func TestFilesAndOpenFileReadChunkedAndEmptyFiles(t *testing.T) {
 	}
 }
 
+// Files and OpenFile read the blocks this node holds and nothing else. Through
+// the node's own DAG a block that is not here is waited for on the network
+// until the context ends, even offline, and a push has no deadline: reading a
+// version that is not whole would hang it forever.
+func TestFilesAndOpenFileDoNotWaitForBlocksThisNodeLacks(t *testing.T) {
+	ctx := context.Background()
+	start := func() *Embedded {
+		e := NewEmbedded(t.TempDir())
+		e.Offline = true
+		if err := e.Start(ctx); err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() { e.Stop() })
+		return e
+	}
+	// every call gets a deadline of its own: one that waited it out would leave
+	// the next with a context already over, and that one would look quick
+	quick := func(what string, call func(ctx context.Context) error) {
+		t.Helper()
+		cctx, cancel := context.WithTimeout(ctx, 10*time.Second)
+		defer cancel()
+		begin := time.Now()
+		err := call(cctx)
+		if took := time.Since(begin); err == nil || took > time.Second {
+			t.Errorf("%s: %v after %s, want an error at once", what, err, took)
+		}
+	}
+	a, b := start(), start()
+	big := make([]byte, 3*chunkSize+1234) // its root is a dag-pb node over raw leaves
+	rand.Read(big)
+	root, err := a.AddDir(ctx, writeTree(t, map[string]string{"index.html": "home", "media/clip.bin": string(big)}))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// b has none of the version: not even its root
+	quick("Files without the root", func(c context.Context) error { _, err := b.Files(c, root); return err })
+	quick("OpenFile without the root", func(c context.Context) error {
+		_, _, err := b.OpenFile(c, root, "index.html")
+		return err
+	})
+
+	// given the folders, b still cannot list the version: a chunked file's size
+	// is in its own root block, which is not here, and neither are the bytes of
+	// a small file
+	folders, err := a.DirBlocks(ctx, root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for c, data := range folders {
+		if err := b.PutBlock(ctx, c, data); err != nil {
+			t.Fatal(err)
+		}
+	}
+	quick("Files without a chunked file's root block", func(c context.Context) error { _, err := b.Files(c, root); return err })
+	quick("OpenFile without the file's block", func(c context.Context) error {
+		_, _, err := b.OpenFile(c, root, "index.html")
+		return err
+	})
+
+	// given the root of the chunked file as well, b lists the version and opens
+	// that file, but cannot read past its root
+	all, err := a.Files(ctx, root)
+	if err != nil || len(all) != 2 || all[1].Path != "media/clip.bin" {
+		t.Fatalf("a lists %v, %v", all, err)
+	}
+	head, err := a.Block(ctx, all[1].CID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := b.PutBlock(ctx, all[1].CID, head); err != nil {
+		t.Fatal(err)
+	}
+	lctx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	defer cancel()
+	if files, err := b.Files(lctx, root); err != nil || len(files) != 2 {
+		t.Fatalf("b lists %v from the folders and the chunked file's root block, %v", files, err)
+	}
+	quick("reading a file whose chunks are not here", func(c context.Context) error {
+		r, size, err := b.OpenFile(c, root, "media/clip.bin")
+		if err != nil || size != int64(len(big)) {
+			t.Fatalf("open with the file's root block: %d bytes, %v", size, err)
+		}
+		defer r.Close()
+		_, err = io.ReadAll(r)
+		return err
+	})
+
+	// a folder sharded over several blocks is read the same way: with only its
+	// first block here, listing it and opening a file in it fail at once
+	many := map[string]string{}
+	name := func(i int) string { return fmt.Sprintf("post-%04d-%s.html", i, strings.Repeat("a", 200)) }
+	for i := 0; i < 1500; i++ {
+		many[name(i)] = fmt.Sprint(i)
+	}
+	shards, err := a.AddDir(ctx, writeTree(t, many))
+	if err != nil {
+		t.Fatal(err)
+	}
+	first, err := a.Block(ctx, shards)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if nd, err := merkledag.DecodeProtobuf(first); err != nil {
+		t.Fatal(err)
+	} else if fsn, err := ft.FSNodeFromBytes(nd.Data()); err != nil || fsn.Type() != ft.THAMTShard {
+		t.Fatal("the folder is not sharded; raise the count or the name length")
+	}
+	d := start()
+	if err := d.PutBlock(ctx, shards, first); err != nil {
+		t.Fatal(err)
+	}
+	quick("Files with only a sharded folder's first block", func(c context.Context) error { _, err := d.Files(c, shards); return err })
+	quick("OpenFile with only a sharded folder's first block", func(c context.Context) error {
+		_, _, err := d.OpenFile(c, shards, name(0))
+		return err
+	})
+}
+
 // A record signed first and announced later is what the network then holds.
 func TestAnnounceASignedRecord(t *testing.T) {
 	ctx := context.Background()

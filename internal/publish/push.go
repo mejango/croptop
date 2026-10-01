@@ -14,9 +14,11 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/mejango/croptop/internal/host"
+	"github.com/mejango/croptop/internal/ipfs"
 	"github.com/mejango/croptop/internal/store"
 )
 
@@ -73,27 +75,261 @@ func hostDomain(base string) (string, error) {
 	return strings.ToLower(u.Hostname()), nil
 }
 
-// Hosts behind Cloudflare accept at most 100 MB per request, so a site goes
-// up in batches, and a single file bigger than a batch goes in chunks that
-// the host reassembles.
-const (
-	pushBatch = 16 << 20
-	pushChunk = 64 << 20
-)
+// Hosts behind Cloudflare accept at most 100 MB per request, so a site goes up
+// in batches, and a single file bigger than a batch goes in chunks that the
+// host reassembles. A part of a push holds files up to pushBatch bytes; bigger
+// files go alone in pushChunk pieces. Variables so tests can make sites split.
+var pushBatch, pushChunk int64 = 16 << 20, 64 << 20
 
-// Push uploads the published site's files to its host so the host serves
-// them at once and keeps the IPNS record alive. Files go in batches under
-// the request size hosts accept; each batch carries the same signature and
-// the last one is marked final. The host checks that the files hash to cid.
-func (p *Publisher) Push(ctx context.Context, site *store.Site, cid string, seq uint64) error {
-	return p.pushDir(ctx, site, site.ID, p.Store.PublicDir(site.ID), cid, seq, "")
+// stallAfter is how long an upload may send nothing before it is given up;
+// replyWithin bounds the wait for the host's answer once all of it is sent.
+// A push has no deadline otherwise, so a slow link still finishes.
+var stallAfter, replyWithin = 2 * time.Minute, 5 * time.Minute
+
+// pushSpec says what a push sends. With no Dir the files come from the
+// version's own blocks, so an upload sends exactly that version even if the
+// site is rendered again while it runs.
+type pushSpec struct {
+	Parent string   // the version the host must still hold for the push to apply
+	Files  []string // the version's files to send; nil sends them all
+	Carry  []string // non-nil makes a manifest push: the version is Files plus these paths of Parent
+	Dir    string   // send the files under this directory instead (post --key's staging dir)
 }
 
-// pushDir pushes the files under dir, signed with the keystore key named key.
-// With a parent they are only what changed since that version, which the host
-// must hold: it adds them on top. The version's folder blocks ride along, so
-// the next reader can list it from the host before any IPFS peer has it.
-func (p *Publisher) pushDir(ctx context.Context, site *store.Site, key, dir, cid string, seq uint64, parent string) error {
+// hostConflict is a push the host refused because the site moved on (409).
+type hostConflict struct{ msg string }
+
+func (e *hostConflict) Error() string { return e.msg }
+
+// versionReader reads a version's files from the engine's blocks: the
+// embedded engine does, the kubo one does not.
+type versionReader interface {
+	Files(ctx context.Context, root string) ([]ipfs.VersionFile, error)
+	OpenFile(ctx context.Context, root, rel string) (io.ReadSeekCloser, int64, error)
+}
+
+type pushFile struct {
+	rel  string
+	size int64
+}
+
+// pushFiles lists what a push sends, with sizes, and how to open each file.
+func (p *Publisher) pushFiles(ctx context.Context, cid string, spec pushSpec) ([]pushFile, func(string) (io.ReadCloser, error), error) {
+	want := map[string]bool{}
+	for _, f := range spec.Files {
+		want[f] = true
+	}
+	var files []pushFile
+	if spec.Dir == "" {
+		vr, ok := p.Node.(versionReader)
+		if !ok {
+			return nil, nil, fmt.Errorf("this engine cannot read a version's files; push from a folder")
+		}
+		all, err := vr.Files(ctx, cid)
+		if err != nil {
+			return nil, nil, err
+		}
+		for _, f := range all {
+			if spec.Files == nil || want[f.Path] {
+				files = append(files, pushFile{f.Path, f.Size})
+			}
+		}
+		return files, func(rel string) (io.ReadCloser, error) {
+			r, _, err := vr.OpenFile(ctx, cid, rel)
+			return r, err
+		}, nil
+	}
+	err := filepath.WalkDir(spec.Dir, func(path string, d fs.DirEntry, err error) error {
+		if err != nil || d.IsDir() {
+			return err
+		}
+		info, err := d.Info()
+		if err != nil {
+			return err
+		}
+		rel, _ := filepath.Rel(spec.Dir, path)
+		if rel = filepath.ToSlash(rel); spec.Files == nil || want[rel] {
+			files = append(files, pushFile{rel, info.Size()})
+		}
+		return nil
+	})
+	return files, func(rel string) (io.ReadCloser, error) {
+		return os.Open(filepath.Join(spec.Dir, filepath.FromSlash(rel)))
+	}, err
+}
+
+// heldFiles asks the host which files of version cid it already holds, from
+// an earlier attempt that did not finish. A host that cannot say holds none.
+func heldFiles(ctx context.Context, base, cid string) map[string]int64 {
+	hctx, cancel := context.WithTimeout(ctx, hostTimeout)
+	defer cancel()
+	b, status, err := httpGet(hctx, base+"/v0/host/versions/"+cid+"/files")
+	if err != nil || status != 200 {
+		return nil
+	}
+	var list []struct {
+		Path string `json:"path"`
+		Size int64  `json:"size"`
+	}
+	if json.Unmarshal(b, &list) != nil {
+		return nil
+	}
+	out := make(map[string]int64, len(list))
+	for _, f := range list {
+		out[f.Path] = f.Size
+	}
+	return out
+}
+
+// skipHeld drops the files the host already holds at the same size. It keeps
+// the smallest one, so the final part, which commits the version, still
+// carries a file.
+func skipHeld(files []pushFile, have map[string]int64) []pushFile {
+	var out []pushFile
+	smallest := -1
+	for i, f := range files {
+		if size, ok := have[f.rel]; !ok || size != f.size {
+			out = append(out, f)
+		}
+		if smallest < 0 || f.size < files[smallest].size {
+			smallest = i
+		}
+	}
+	if len(out) == 0 && smallest >= 0 {
+		out = []pushFile{files[smallest]}
+	}
+	return out
+}
+
+// sendWatched sends req and returns its response. It cancels the request if
+// the body stops moving for stallAfter, or if the host has not answered
+// replyWithin after the body was sent. There is no deadline beyond that. A
+// canceled request returns at once, even if its body is stuck in Read.
+func sendWatched(req *http.Request) (*http.Response, error) {
+	ctx, cancel := context.WithCancel(req.Context())
+	// the limits are read once, here: tests change them, and the watchdog
+	// runs on a goroutine of its own
+	w := &watched{last: time.Now(), stall: stallAfter, reply: replyWithin}
+	if req.Body != nil {
+		w.r = req.Body
+		req.Body = w
+	} else {
+		w.done = true
+	}
+	req = req.WithContext(ctx)
+	stop := make(chan struct{})
+	go func() {
+		t := time.NewTicker(w.stall / 10)
+		defer t.Stop()
+		for {
+			select {
+			case <-stop:
+				return
+			case <-t.C:
+				if w.overdue() {
+					cancel()
+					return
+				}
+			}
+		}
+	}()
+	// The transport waits for whatever is writing the body even after the
+	// request is canceled, so a body stuck in Read would keep Do from ever
+	// returning. Do runs on its own: a canceled request returns here at once,
+	// and the transport finishes when the body lets go.
+	type sent struct {
+		resp *http.Response
+		err  error
+	}
+	done := make(chan sent, 1)
+	go func() {
+		resp, err := http.DefaultClient.Do(req)
+		done <- sent{resp, err}
+	}()
+	var s sent
+	select {
+	case s = <-done:
+	case <-ctx.Done():
+		s.err = fmt.Errorf("%s %s: %w", req.Method, req.URL, ctx.Err())
+		go func() { // an answer that comes after this is not wanted
+			if late := <-done; late.resp != nil {
+				late.resp.Body.Close()
+			}
+		}()
+	}
+	close(stop)
+	if s.err != nil {
+		cancel()
+		return nil, s.err
+	}
+	s.resp.Body = &cancelBody{s.resp.Body, cancel}
+	return s.resp, nil
+}
+
+// watched is a request body that records when it last moved.
+type watched struct {
+	r            io.ReadCloser
+	stall, reply time.Duration // stallAfter and replyWithin when the request began
+	mu           sync.Mutex
+	last         time.Time
+	done         bool // all of it was sent; now waiting for the answer
+}
+
+func (w *watched) Read(b []byte) (int, error) {
+	n, err := w.r.Read(b)
+	w.mu.Lock()
+	if n > 0 || err == io.EOF {
+		w.last = time.Now()
+	}
+	if err == io.EOF {
+		w.done = true
+	}
+	w.mu.Unlock()
+	return n, err
+}
+
+func (w *watched) Close() error { return w.r.Close() }
+
+func (w *watched) overdue() bool {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	limit := w.stall
+	if w.done {
+		limit = w.reply
+	}
+	return time.Since(w.last) > limit
+}
+
+// cancelBody ends a watched request's context once its answer is read.
+type cancelBody struct {
+	io.ReadCloser
+	cancel context.CancelFunc
+}
+
+func (b *cancelBody) Close() error {
+	err := b.ReadCloser.Close()
+	b.cancel()
+	return err
+}
+
+// Push sends a whole version to the site's host. With the embedded engine
+// the files come from the version's blocks; with kubo, from the rendered
+// folder as before.
+func (p *Publisher) Push(ctx context.Context, site *store.Site, cid string, seq uint64) error {
+	spec := pushSpec{}
+	if _, ok := p.Node.(versionReader); !ok {
+		spec.Dir = p.Store.PublicDir(site.ID)
+	}
+	return p.pushDir(ctx, site, site.ID, cid, seq, spec)
+}
+
+// pushDir pushes a version's files, signed with the keystore key named key.
+// With spec.Parent the host adds them on top of that version, which it must
+// still hold; with spec.Carry it keeps only them and the carried paths. The
+// version's folder blocks ride along, so the next reader can list it from the
+// host before any IPFS peer has it. A push cut short resumes: the files the
+// host already holds for this version are not sent again.
+func (p *Publisher) pushDir(ctx context.Context, site *store.Site, key, cid string, seq uint64, spec pushSpec) error {
 	base := HostOf(site)
 	domain, err := hostDomain(base)
 	if err != nil {
@@ -116,25 +352,12 @@ func (p *Publisher) pushDir(ctx context.Context, site *store.Site, key, dir, cid
 	}); ok {
 		blocks, _ = bs.DirBlocks(ctx, cid)
 	}
-	type file struct {
-		rel  string
-		size int64
-	}
-	var files []file
-	err = filepath.WalkDir(dir, func(path string, d fs.DirEntry, err error) error {
-		if err != nil || d.IsDir() {
-			return err
-		}
-		info, err := d.Info()
-		if err != nil {
-			return err
-		}
-		rel, _ := filepath.Rel(dir, path)
-		files = append(files, file{filepath.ToSlash(rel), info.Size()})
-		return nil
-	})
+	files, open, err := p.pushFiles(ctx, cid, spec)
 	if err != nil {
 		return err
+	}
+	if have := heldFiles(ctx, base, cid); len(have) > 0 {
+		files = skipHeld(files, have)
 	}
 	signed := func(req *http.Request) {
 		req.Header.Set("X-Croptop-Ipns", site.IPNS)
@@ -145,32 +368,42 @@ func (p *Publisher) pushDir(ctx context.Context, site *store.Site, key, dir, cid
 		if record != "" {
 			req.Header.Set("X-Croptop-Record", record)
 		}
-		if parent != "" {
-			req.Header.Set("X-Croptop-Parent", parent)
+		if spec.Parent != "" {
+			req.Header.Set("X-Croptop-Parent", spec.Parent)
 		}
 	}
-	client := &http.Client{Timeout: 10 * time.Minute}
+	answer := func(resp *http.Response, what string) (string, error) {
+		body, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
+		resp.Body.Close()
+		switch resp.StatusCode {
+		case 200:
+			return string(body), nil
+		case 409:
+			return "", &hostConflict{fmt.Sprintf("%s: %s", base, strings.TrimSpace(string(body)))}
+		}
+		return "", fmt.Errorf("%s: %s: %s", what, resp.Status, strings.TrimSpace(string(body)))
+	}
 	// big files first, in chunks; the host reassembles them
-	var small []file
+	var small []pushFile
 	for _, f := range files {
 		if f.size <= pushBatch {
 			small = append(small, f)
 			continue
 		}
 		chunks := int((f.size + pushChunk - 1) / pushChunk)
-		upload := ""
-		fh, err := os.Open(filepath.Join(dir, filepath.FromSlash(f.rel)))
+		rc, err := open(f.rel)
 		if err != nil {
 			return err
 		}
+		upload := ""
 		for i := 0; i < chunks; i++ {
-			size := int64(pushChunk)
+			size := pushChunk
 			if rest := f.size - int64(i)*pushChunk; rest < size {
 				size = rest
 			}
-			req, err := http.NewRequestWithContext(ctx, "POST", base+"/v0/host/push", io.NewSectionReader(fh, int64(i)*pushChunk, size))
+			req, err := http.NewRequestWithContext(ctx, "POST", base+"/v0/host/push", io.LimitReader(rc, size))
 			if err != nil {
-				fh.Close()
+				rc.Close()
 				return err
 			}
 			req.ContentLength = size
@@ -181,31 +414,29 @@ func (p *Publisher) pushDir(ctx context.Context, site *store.Site, key, dir, cid
 			if upload != "" {
 				req.Header.Set("X-Croptop-Upload", upload)
 			}
-			resp, err := client.Do(req)
+			resp, err := sendWatched(req)
 			if err != nil {
-				fh.Close()
+				rc.Close()
 				return err
 			}
-			body, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
-			resp.Body.Close()
-			if resp.StatusCode != 200 {
-				fh.Close()
-				return fmt.Errorf("%s chunk %d of %d: %s: %s", f.rel, i+1, chunks, resp.Status, strings.TrimSpace(string(body)))
+			body, err := answer(resp, fmt.Sprintf("%s chunk %d of %d", f.rel, i+1, chunks))
+			if err != nil {
+				rc.Close()
+				return err
 			}
 			var out struct{ Upload string }
-			json.Unmarshal(body, &out)
+			json.Unmarshal([]byte(body), &out)
 			if out.Upload != "" {
 				upload = out.Upload
 			}
 		}
-		fh.Close()
+		rc.Close()
 		p.log("pushed %s in %d chunks", f.rel, chunks)
 	}
-	files = small
-	var batches [][]file
-	var cur []file
+	var batches [][]pushFile
+	var cur []pushFile
 	var curSize int64
-	for _, f := range files {
+	for _, f := range small {
 		if len(cur) > 0 && curSize+f.size > pushBatch {
 			batches = append(batches, cur)
 			cur, curSize = nil, 0
@@ -219,6 +450,7 @@ func (p *Publisher) pushDir(ctx context.Context, site *store.Site, key, dir, cid
 	for i, batch := range batches {
 		pr, pw := io.Pipe()
 		mw := multipart.NewWriter(pw)
+		final := i == len(batches)-1
 		go func() {
 			var err error
 			for _, f := range batch {
@@ -227,19 +459,19 @@ func (p *Publisher) pushDir(ctx context.Context, site *store.Site, key, dir, cid
 					err = e
 					break
 				}
-				fh, e := os.Open(filepath.Join(dir, filepath.FromSlash(f.rel)))
+				rc, e := open(f.rel)
 				if e != nil {
 					err = e
 					break
 				}
-				_, e = io.Copy(part, fh)
-				fh.Close()
+				_, e = io.Copy(part, rc)
+				rc.Close()
 				if e != nil {
 					err = e
 					break
 				}
 			}
-			if err == nil && i == len(batches)-1 {
+			if err == nil && final {
 				for c, data := range blocks {
 					var part io.Writer
 					if part, err = mw.CreateFormFile("block:"+c, c); err == nil {
@@ -248,6 +480,10 @@ func (p *Publisher) pushDir(ctx context.Context, site *store.Site, key, dir, cid
 					if err != nil {
 						break
 					}
+				}
+				if err == nil && spec.Carry != nil {
+					m, _ := json.Marshal(map[string][]string{"carry": spec.Carry})
+					err = mw.WriteField("manifest", string(m))
 				}
 			}
 			if err == nil {
@@ -262,14 +498,13 @@ func (p *Publisher) pushDir(ctx context.Context, site *store.Site, key, dir, cid
 		req.Header.Set("Content-Type", mw.FormDataContentType())
 		signed(req)
 		req.Header.Set("X-Croptop-Part", fmt.Sprintf("%d/%d", i+1, len(batches)))
-		resp, err := client.Do(req)
+		resp, err := sendWatched(req)
 		if err != nil {
+			pr.CloseWithError(err)
 			return err
 		}
-		body, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
-		resp.Body.Close()
-		if resp.StatusCode != 200 {
-			return fmt.Errorf("part %d of %d: %s: %s", i+1, len(batches), resp.Status, strings.TrimSpace(string(body)))
+		if _, err := answer(resp, fmt.Sprintf("part %d of %d", i+1, len(batches))); err != nil {
+			return err
 		}
 	}
 	if len(batches) > 1 {
