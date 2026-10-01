@@ -14,6 +14,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -425,6 +426,205 @@ func TestPushOnParent(t *testing.T) {
 	// a second post built on v1 would drop the first one
 	if code, b := push(over, v2, 3, v1); code != 409 || !strings.Contains(b, "holds "+v2) {
 		t.Fatalf("stale parent: %d %s", code, b)
+	}
+}
+
+// A push or pull names its version in X-Croptop-Cid, and the signature only
+// proves that the signer chose the string: any key signs "../x". The host once
+// joined it into its staging path, so "../../../x" wrote outside the data dir
+// and ".." on a final push deleted registry.json along with the rest of host/.
+// A request whose version is not a CID is refused before the disk is touched.
+func TestVersionMustBeACID(t *testing.T) {
+	ctx := context.Background()
+	site := offline(t)
+	eng := offline(t)
+	ipnsName, err := site.Keystore().Generate("s")
+	if err != nil {
+		t.Fatal(err)
+	}
+	planet := []byte(`{"name":"Probe"}`)
+	dir := t.TempDir()
+	os.WriteFile(filepath.Join(dir, "planet.json"), planet, 0o644)
+	root, err := site.AddDir(ctx, dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// the CIDs croptop makes pass, a v1 directory root and a v0 file CID; nothing
+	// that names a path does
+	v0, err := site.FileCIDv0(ctx, filepath.Join(dir, "planet.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, cid := range []string{root, v0} {
+		if !cidRe.MatchString(cid) {
+			t.Errorf("%q is a CID croptop makes, and the host would refuse it", cid)
+		}
+	}
+	for _, cid := range []string{"", ".", "..", "../escape", "bafy/../escape", "bafy..", "bafy/x", `bafy\x`, "bafy%2e%2e", "bafy ", "bafy\n", "bafy", "Qm", "qmabc", "/etc/passwd"} {
+		if cidRe.MatchString(cid) {
+			t.Errorf("%q passes as a CID", cid)
+		}
+	}
+
+	// newHost starts a host whose data dir is alone in its parent, top: anything
+	// that shows up in top besides the data dir has escaped it
+	newHost := func() (h *Host, srv *httptest.Server, top, data string) {
+		top = t.TempDir()
+		data = filepath.Join(top, "data")
+		h = &Host{Domain: "crop.test", DataDir: data, Engine: eng}
+		if err := h.Start(); err != nil {
+			t.Fatal(err)
+		}
+		srv = httptest.NewServer(h)
+		t.Cleanup(srv.Close)
+		return h, srv, top, data
+	}
+	// sign gives req the headers of a publisher's request; the key signs any cid
+	sign := func(req *http.Request, cid string, seq uint64) {
+		now := time.Now().Unix()
+		sig, _ := site.Keystore().Sign("s", PushMessage("crop.test", ipnsName, cid, seq, now))
+		req.Host = "crop.test"
+		for k, v := range map[string]string{"Ipns": ipnsName, "Cid": cid, "Seq": strconv.FormatUint(seq, 10), "Time": strconv.FormatInt(now, 10), "Sig": base64.StdEncoding.EncodeToString(sig)} {
+			req.Header.Set("X-Croptop-"+k, v)
+		}
+	}
+	do := func(req *http.Request) (int, string) {
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		b, _ := readAll(resp)
+		return resp.StatusCode, b
+	}
+	// push sends planet.json as the files of cid, as part "i/n" when part is set
+	push := func(srv *httptest.Server, cid string, seq uint64, part string) (int, string) {
+		var buf bytes.Buffer
+		mw := multipart.NewWriter(&buf)
+		w, _ := mw.CreateFormFile("file:planet.json", "planet.json")
+		w.Write(planet)
+		mw.Close()
+		req, _ := http.NewRequest("POST", srv.URL+"/v0/host/push", &buf)
+		req.Header.Set("Content-Type", mw.FormDataContentType())
+		sign(req, cid, seq)
+		if part != "" {
+			req.Header.Set("X-Croptop-Part", part)
+		}
+		return do(req)
+	}
+	// snapshot maps every path under dir to its size, -1 for a folder
+	snapshot := func(dir string) map[string]int64 {
+		out := map[string]int64{}
+		filepath.WalkDir(dir, func(p string, d os.DirEntry, err error) error {
+			if err != nil {
+				return nil
+			}
+			rel, _ := filepath.Rel(dir, p)
+			out[rel] = -1
+			if info, err := d.Info(); err == nil && !d.IsDir() {
+				out[rel] = info.Size()
+			}
+			return nil
+		})
+		return out
+	}
+	// changes says what was added, removed or resized between two snapshots
+	changes := func(before, after map[string]int64) map[string]string {
+		out := map[string]string{}
+		for p, n := range after {
+			if m, ok := before[p]; !ok {
+				out[p] = "added"
+			} else if m != n {
+				out[p] = "changed"
+			}
+		}
+		for p := range before {
+			if _, ok := after[p]; !ok {
+				out[p] = "removed"
+			}
+		}
+		return out
+	}
+
+	// parts of a push named for a folder in staging's place, in host/'s, and
+	// beside the data dir
+	{
+		_, srv, top, data := newHost()
+		before := snapshot(top)
+		for _, cid := range []string{"../escape", "../../escape", "../../../escape"} {
+			if code, body := push(srv, cid, 1, "1/2"); code != 400 || !strings.Contains(body, "bad cid") {
+				t.Errorf("part of a push for %q: want 400 bad cid, got %d %q", cid, code, body)
+			}
+		}
+		// so is a chunk of a big file
+		creq, _ := http.NewRequest("POST", srv.URL+"/v0/host/push", strings.NewReader("chunk"))
+		creq.Header.Set("Content-Type", "application/octet-stream")
+		sign(creq, "../../../escape", 1)
+		creq.Header.Set("X-Croptop-File", "big.bin")
+		creq.Header.Set("X-Croptop-Chunk", "1/2")
+		if code, body := do(creq); code != 400 || !strings.Contains(body, "bad cid") {
+			t.Errorf("chunk of a push for a version outside staging: want 400 bad cid, got %d %q", code, body)
+		}
+		if _, err := os.Stat(filepath.Join(data, "..", "escape")); err == nil {
+			t.Errorf("a push wrote outside the data dir: %s exists", filepath.Join(data, "..", "escape"))
+		}
+		if d := changes(before, snapshot(top)); len(d) > 0 {
+			t.Errorf("refused pushes left traces on disk: %v", d)
+		}
+	}
+
+	// a final push removes its staging folder, which for ".." is host/ with
+	// registry.json in it, for "." or "" is staging/ with everyone's uploads
+	// under way, and for "../.." is the whole data dir
+	for _, cid := range []string{"..", "../..", ".", ""} {
+		_, srv, top, data := newHost()
+		if code, body := push(srv, root, 1, ""); code != 200 {
+			t.Fatalf("push of a real version: %d %s", code, body)
+		}
+		if code, body := push(srv, "bafyupload", 1, "1/2"); code != 200 { // somebody else's upload under way
+			t.Fatalf("part of a push: %d %s", code, body)
+		}
+		before := snapshot(top)
+		if code, body := push(srv, cid, 2, ""); code != 400 || !strings.Contains(body, "bad cid") {
+			t.Errorf("final push for %q: want 400 bad cid, got %d %q", cid, code, body)
+		}
+		if _, err := os.Stat(filepath.Join(data, "host", "registry.json")); err != nil {
+			t.Errorf("final push for %q deleted registry.json: %v", cid, err)
+		}
+		if d := changes(before, snapshot(top)); len(d) > 0 {
+			t.Errorf("refused final push for %q changed the disk: %v", cid, d)
+		}
+	}
+
+	// pull downloads into the same staging path, from a URL the request names
+	{
+		h, srv, top, _ := newHost()
+		var fetched atomic.Int32
+		files := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			fetched.Add(1)
+			http.FileServer(http.Dir(dir)).ServeHTTP(w, r)
+		}))
+		defer files.Close()
+		before := snapshot(top)
+		for _, cid := range []string{"../../../escape", ".."} {
+			body, _ := json.Marshal(map[string]any{"base": files.URL + "/", "files": []string{"planet.json"}})
+			req, _ := http.NewRequest("POST", srv.URL+"/v0/host/pull", bytes.NewReader(body))
+			req.Header.Set("Content-Type", "application/json")
+			sign(req, cid, 1)
+			if code, b := do(req); code != 400 || !strings.Contains(b, "bad cid") {
+				t.Errorf("pull for %q: want 400 bad cid, got %d %q", cid, code, b)
+			}
+		}
+		// mirror, which pull hands the version to, refuses it for any other caller
+		if err := h.mirror(ctx, ipnsName, "../../../escape", 1, nil, files.URL+"/", []string{"planet.json"}); err == nil {
+			t.Error("mirror took a version that is not a CID")
+		}
+		if n := fetched.Load(); n != 0 {
+			t.Errorf("the host fetched %d files for versions that are not CIDs", n)
+		}
+		if d := changes(before, snapshot(top)); len(d) > 0 {
+			t.Errorf("refused pulls left traces on disk: %v", d)
+		}
 	}
 }
 

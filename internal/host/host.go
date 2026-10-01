@@ -73,6 +73,7 @@ type cached struct {
 }
 
 var nameRe = regexp.MustCompile(`^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$`)
+var cidRe = regexp.MustCompile(`^(bafy|Qm)[a-zA-Z0-9]+$`)
 
 // Reserved names the directory and API need, plus the usual suspects.
 var reserved = map[string]bool{"www": true, "api": true, "v0": true, "ipfs": true, "ipns": true, "push": true, "host": true, "admin": true, "mail": true, "static": true, "assets": true, "docs": true, "app": true, "routing": true}
@@ -622,6 +623,10 @@ func (h *Host) push(w http.ResponseWriter, r *http.Request) {
 	seq, _ := strconv.ParseUint(r.Header.Get("X-Croptop-Seq"), 10, 64)
 	t, _ := strconv.ParseInt(r.Header.Get("X-Croptop-Time"), 10, 64)
 	sig, _ := base64.StdEncoding.DecodeString(r.Header.Get("X-Croptop-Sig"))
+	if !cidRe.MatchString(c) {
+		http.Error(w, "bad cid", 400)
+		return
+	}
 	if !fresh(t) || !ipfs.VerifyIPNS(ipnsName, PushMessage(h.signingHost(r), ipnsName, c, seq, t), sig) {
 		http.Error(w, "bad signature", 403)
 		return
@@ -856,6 +861,10 @@ func (h *Host) pull(w http.ResponseWriter, r *http.Request) {
 	seq, _ := strconv.ParseUint(r.Header.Get("X-Croptop-Seq"), 10, 64)
 	t, _ := strconv.ParseInt(r.Header.Get("X-Croptop-Time"), 10, 64)
 	sig, _ := base64.StdEncoding.DecodeString(r.Header.Get("X-Croptop-Sig"))
+	if !cidRe.MatchString(c) {
+		http.Error(w, "bad cid", 400)
+		return
+	}
 	if !fresh(t) || !ipfs.VerifyIPNS(ipnsName, PushMessage(h.signingHost(r), ipnsName, c, seq, t), sig) {
 		http.Error(w, "bad signature", 403)
 		return
@@ -890,6 +899,9 @@ func (h *Host) pull(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Host) mirror(ctx context.Context, ipnsName, c string, seq uint64, rec []byte, base string, files []string) error {
+	if !cidRe.MatchString(c) {
+		return fmt.Errorf("bad cid %q", c)
+	}
 	stage := filepath.Join(h.DataDir, "host", "staging", c)
 	defer os.RemoveAll(stage)
 	client := &http.Client{Timeout: 20 * time.Minute}
