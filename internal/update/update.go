@@ -2,7 +2,6 @@
 package update
 
 import (
-	"errors"
 	"archive/tar"
 	"archive/zip"
 	"bytes"
@@ -11,6 +10,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"

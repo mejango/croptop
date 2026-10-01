@@ -94,7 +94,7 @@ func (e *Embedded) savePeers() {
 		return
 	}
 	b, _ := json.Marshal(out)
-	// a temp file of its own: Stop and the ten-minute save can overlap
+	// a temp file of its own: Stop and the periodic save can overlap
 	f, err := os.CreateTemp(filepath.Dir(e.peersFile()), "peers-*.json")
 	if err != nil {
 		e.Log("save peers: " + err.Error())
