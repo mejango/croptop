@@ -195,6 +195,12 @@ hole punching. `kubo` downloads and runs kubo v0.43.0 as a child process
 instead. Switch with `croptop --engine kubo`; the choice is remembered.
 Keys are shared between engines, so switching back and forth is safe.
 
+A publish uploads only what changed since the version the site's host holds:
+the changed files plus a list of what to keep, so deleted posts go too. The
+first upload of a site sends everything, in the background, and survives a
+slow link or a sleeping laptop: it stops only when nothing moves for two
+minutes, and the next try resumes where it stopped.
+
 A publish writes the IPNS record to the DHT and the IPNS pubsub topic. The
 embedded engine also sends it to crop.top's routing endpoint (and to
 delegated-ipfs.dev while it lasts), and joins the network through the default

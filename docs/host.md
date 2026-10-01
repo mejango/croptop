@@ -149,15 +149,27 @@ makes `yoursite.crop.top` or
   `X-Croptop-Time`, `X-Croptop-Sig` (over `croptop-push\n<domain>\n<ipns>\n<cid>\n<seq>\n<time>`),
   optional `X-Croptop-Record` (the signed IPNS record, base64); body is the block
   stream `croptop` produces. Refused when the host already has a newer sequence.
+  Every request carries its own `X-Croptop-Time` and signature, and a host
+  refuses one over 10 minutes old, so a long push signs each part as it goes.
   A `block:<cid>` part carries the new root block, which the host keeps.
   With `X-Croptop-Parent: <cid>` the push holds only what changed since that
   version (`croptop post --key`): the host adds the files on top of it, and
   refuses the push (409) unless that version is still the one it holds, so
   two posts never drop each other.
 - `GET /v0/host/names/<name>`, `GET /v0/host/keys/<ipns>`: what the host knows;
-  for a key, the version it holds (`cid`, `sequence`), and `acceptsParent`
-  from hosts that understand `X-Croptop-Parent`. `croptop post --key`
-  refuses a host without it, which would take the post for the whole site.
+  for a key, the version it holds (`cid`, `sequence`), `acceptsParent`
+  from hosts that understand `X-Croptop-Parent`, and `acceptsManifest` from
+  hosts that take manifest pushes. `croptop post --key` refuses a host without
+  `acceptsParent`, which would take the post for the whole site.
+- `POST /v0/host/push` with a `manifest` form field in the final part:
+  `{"carry": [paths]}`, files or whole folders of `X-Croptop-Parent` to keep.
+  The version is exactly the uploaded files plus the carried paths, so a
+  publish can delete. A carried path the parent lacks, overlapping paths, or
+  a manifest without a parent is `400`. The Go host rebuilds the version and
+  checks it hashes to `X-Croptop-Cid`.
+- `GET /v0/host/versions/<cid>/files`: `[{"path", "size"}]`, the files a push
+  of `<cid>` left here without finishing, so its retry sends only the rest.
+- `GET /agents.md` (crop.top): the instructions to hand a bot (docs/agents.md).
 - `GET /v0/host/blocks/<cid>`: one raw block, such as a pushed version's root.
   Clients check it against the CID.
 - `GET|PUT /routing/v1/ipns/<name>`: the IPNS part of the Delegated Routing V1

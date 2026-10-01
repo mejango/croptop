@@ -201,6 +201,24 @@ because someone posted meanwhile; take-in and retry make that invisible except f
 the delay. `build_timestamp` no longer reads as a date: only templates that display
 it notice (the Croptop template uses it for cache busting only).
 
+**Added while planning B (2026-09-30).** jango.eth (658 MB, a 230 KB/s uplink)
+never reached crop.top: every full upload hit the client's flat 10-minute
+limit. So B also:
+- gives up an upload only when it stops moving: 2 min idle, 5 min for the
+  host's answer;
+- resumes an interrupted upload from what the host already holds
+  (`GET /v0/host/versions/<cid>/files`);
+- reads uploads from the version's blocks, so a render during a long upload
+  cannot corrupt it;
+- runs one background upload per site, the newest version winning.
+
+**Added while building B (2026-10-01).**
+- Every push request is signed when it goes. Hosts refuse a signature over 10
+  minutes old, so a push signed once at its start was still capped at 10 minutes.
+- A changes-only upload goes before the announce only while it totals at most
+  16 MiB, about 75 s at 230 KB/s. Larger changes announce first and upload in
+  the background, so a big new video never holds up the app.
+
 ## D. Agent client and MCP
 
 **`post --key` without P2P.** The engine starts offline (loopback only). All reads
