@@ -176,7 +176,7 @@ func (p *Publisher) CatchUp(ctx context.Context, siteID string) error {
 	if err != nil || e.CID == *site.LastPublishedCID || e.Sequence < site.IPNSSequence {
 		return nil // nothing newer there, or our own push is still on its way
 	}
-	return p.takeIn(ctx, site, &ipfs.Record{Value: "/ipfs/" + e.CID, Sequence: e.Sequence})
+	return p.takeIn(ctx, site, e.record())
 }
 
 // takeIn pulls a version another machine published and renders the result,
@@ -239,9 +239,15 @@ func (p *Publisher) latestRecord(ctx context.Context, site *store.Site) (*ipfs.R
 	rec, err := p.Node.NetworkRecord(nctx, site.IPNS)
 	cancel()
 	if herr == nil && (err != nil || e.Sequence >= rec.Sequence) {
-		return &ipfs.Record{Value: "/ipfs/" + e.CID, Sequence: e.Sequence}, nil
+		return e.record(), nil
 	}
 	return rec, err
+}
+
+// record is the version a host holds, in the form the network's records come
+// in, for the places that weigh the two or take a host's version in.
+func (e *hostKey) record() *ipfs.Record {
+	return &ipfs.Record{Value: "/ipfs/" + e.CID, Sequence: e.Sequence}
 }
 
 // saveSite applies change to the site as stored now rather than to a copy
