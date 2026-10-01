@@ -173,7 +173,7 @@ post, `simple.html` a minimal post page. Every render receives:
 | `template_settings` | `template.json` settings definitions |
 | `user_settings` | the site's chosen values, defaults filled in |
 | `custom_code_head`, `custom_code_body_start`, `custom_code_body_end` | owner-provided HTML |
-| `build_timestamp` | Unix seconds, for cache busting |
+| `build_timestamp` | 48-bit content hash of the template's assets, avatar, favicon and template settings, for cache busting. Changes when one of those changes, never with the clock |
 | `style_css_sha256` | hash of `assets/style.css` |
 | `current_item_type` | `index`, `blog`, or `tags` |
 | `tag_key`, `tag_value` | on tag pages |

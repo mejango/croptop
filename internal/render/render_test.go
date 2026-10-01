@@ -11,6 +11,7 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+	"testing/fstest"
 	"time"
 
 	"github.com/mejango/croptop/internal/gateway"
@@ -398,5 +399,87 @@ func TestRendersAreStable(t *testing.T) {
 	}
 	if strings.Contains(string(rss), "-0300") {
 		t.Fatal("rss.xml dates are not in UTC")
+	}
+	if !strings.Contains(string(rss), "+0000") {
+		t.Fatal("rss.xml does not contain dated items in UTC (+0000)")
+	}
+}
+
+// TestBuildStampTracksWhatItBusts ensures buildStamp hashes the template's
+// assets, avatar, favicon and template settings, so the stamp changes when
+// those change and stays stable otherwise. The stamp must fit in [0, 2^48).
+func TestBuildStampTracksWhatItBusts(t *testing.T) {
+	pub := t.TempDir()
+	must := func(err error) {
+		t.Helper()
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+	// Create a simple template filesystem with assets
+	tfs := fstest.MapFS{
+		"assets/style.css":    &fstest.MapFile{Data: []byte("a")},
+		"assets/scripts/x.js": &fstest.MapFile{Data: []byte("b")},
+	}
+	// Create the public dir files
+	must(os.MkdirAll(filepath.Join(pub, "assets"), 0o755))
+	must(os.WriteFile(filepath.Join(pub, "avatar.png"), []byte("c"), 0o644))
+	must(os.WriteFile(filepath.Join(pub, "favicon.ico"), []byte("d"), 0o644))
+	must(os.WriteFile(filepath.Join(pub, "templateSettings.json"), []byte("e"), 0o644))
+
+	base := buildStamp(tfs, pub)
+	// Check range
+	if base <= 0 || base >= 1<<48 {
+		t.Fatalf("out of range: %d (expect [0, 2^48))", base)
+	}
+	// Check stability
+	if buildStamp(tfs, pub) != base {
+		t.Fatal("not stable: buildStamp returned different values for the same inputs")
+	}
+
+	// Test that changes to template assets affect the stamp
+	for _, rel := range []string{"assets/style.css", "assets/scripts/x.js"} {
+		oldTFS := tfs
+		// Modify the asset in tfs
+		newData := append([]byte(nil), oldTFS[rel].Data...)
+		newData = append(newData, []byte("!")...)
+		tfs2 := fstest.MapFS{}
+		for k, v := range oldTFS {
+			tfs2[k] = v
+		}
+		tfs2[rel] = &fstest.MapFile{Data: newData}
+		if buildStamp(tfs2, pub) == base {
+			t.Errorf("stamp ignores template asset %s", rel)
+		}
+		// Restore
+		tfs = oldTFS
+		if buildStamp(tfs, pub) != base {
+			t.Errorf("stamp not restored after template asset %s", rel)
+		}
+	}
+
+	// Test that changes to avatar, favicon, and template settings affect the stamp
+	for _, rel := range []string{"avatar.png", "favicon.ico", "templateSettings.json"} {
+		old, _ := os.ReadFile(filepath.Join(pub, rel))
+		must(os.WriteFile(filepath.Join(pub, rel), append(old, []byte("!")...), 0o644))
+		if buildStamp(tfs, pub) == base {
+			t.Errorf("stamp ignores %s", rel)
+		}
+		must(os.WriteFile(filepath.Join(pub, rel), old, 0o644))
+		if buildStamp(tfs, pub) != base {
+			t.Errorf("stamp not restored after %s", rel)
+		}
+	}
+
+	// Test that unrelated files in pub don't affect the stamp
+	must(os.WriteFile(filepath.Join(pub, "index.html"), []byte("unrelated"), 0o644))
+	if buildStamp(tfs, pub) != base {
+		t.Error("stamp reacts to an unrelated file in pub")
+	}
+
+	// Test that missing avatar (or favicon, or settings) gives a different stamp
+	must(os.Remove(filepath.Join(pub, "avatar.png")))
+	if s := buildStamp(tfs, pub); s == base || s <= 0 {
+		t.Errorf("missing avatar: stamp=%d, want != %d", s, base)
 	}
 }

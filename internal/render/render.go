@@ -288,7 +288,7 @@ func (r *Renderer) baseContext(site *store.Site, posts []*store.Post, meta *Meta
 		"page_description_html": Markdown(site.About),
 		"template_settings":     tmplSettings,
 		"user_settings":         userSettings,
-		"build_timestamp":       buildStamp(pub),
+		"build_timestamp":       buildStamp(tfs, pub),
 		"style_css_sha256":      styleHash,
 	}
 	for _, slot := range []string{"Head", "BodyStart", "BodyEnd"} {
@@ -647,24 +647,32 @@ func copyFile(src, dst string) error {
 // favicon, template settings), so two renders of the same site give the same
 // bytes on any machine. Six bytes keep it under 2^53 for templates that do
 // arithmetic on it.
-func buildStamp(pub string) int64 {
+func buildStamp(tfs fs.FS, pub string) int64 {
 	var paths []string
-	filepath.WalkDir(filepath.Join(pub, "assets"), func(p string, d fs.DirEntry, err error) error {
+	fs.WalkDir(tfs, "assets", func(p string, d fs.DirEntry, err error) error {
 		if err == nil && !d.IsDir() {
 			paths = append(paths, p)
 		}
 		return nil
 	})
 	sort.Strings(paths)
-	paths = append(paths, filepath.Join(pub, "avatar.png"), filepath.Join(pub, "favicon.ico"), filepath.Join(pub, "templateSettings.json"))
 	h := sha256.New()
 	for _, p := range paths {
+		b, err := fs.ReadFile(tfs, p)
+		if err != nil {
+			continue
+		}
+		fmt.Fprintf(h, "%s\x00%d\x00", filepath.ToSlash(p), len(b))
+		h.Write(b)
+	}
+	// Also hash avatar, favicon, and template settings from the public dir
+	for _, f := range []string{"avatar.png", "favicon.ico", "templateSettings.json"} {
+		p := filepath.Join(pub, f)
 		b, err := os.ReadFile(p)
 		if err != nil {
 			continue
 		}
-		rel, _ := filepath.Rel(pub, p)
-		fmt.Fprintf(h, "%s\x00%d\x00", filepath.ToSlash(rel), len(b))
+		fmt.Fprintf(h, "%s\x00%d\x00", f, len(b))
 		h.Write(b)
 	}
 	var n int64
