@@ -12,7 +12,7 @@ struct EditorView: View {
     @State private var title = ""
     @State private var content = ""
     @State private var tags = ""
-    @State private var hero = ""
+    @State private var selectedHero = ""
     @State private var inNav = false
     @State private var pinned = false
     @State private var existing: [String] = []       // attachments already on the post
@@ -27,7 +27,10 @@ struct EditorView: View {
     @State private var largePreview = false
 
     var isNew: Bool { postID == nil }
-    var images: [String] { (existing.filter { !removed.contains($0) } + added.map { $0.lastPathComponent }).filter { ["png", "jpg", "jpeg", "gif", "webp"].contains(($0 as NSString).pathExtension.lowercased()) } }
+    var attachmentNames: [String] { existing.filter { !removed.contains($0) } + added.map { $0.lastPathComponent } }
+    var images: [String] { heroImageNames(attachmentNames) }
+    // Persist the same default shown in the editor before the server sorts uploads.
+    var hero: String { resolvedHeroImage(selectedHero, attachments: attachmentNames) }
 
     var previewAttachments: [PreviewAttachment] {
         existing.filter { !removed.contains($0) }.map { PreviewAttachment(name: $0, url: API.shared.siteFile(siteID, "\(postID ?? "")/\($0)")) }
@@ -103,10 +106,10 @@ struct EditorView: View {
                                     Text("None yet.").font(Theme.body(13)).foregroundColor(Theme.muted)
                                 }
                                 ForEach(existing.filter { !removed.contains($0) }, id: \.self) { name in
-                                    AttachmentRow(name: name, url: API.shared.siteFile(siteID, "\(postID ?? "")/\(name)"), isHero: hero == name, canHero: images.contains(name)) { hero = name } remove: { removed.insert(name); if hero == name { hero = "" } }
+                                    AttachmentRow(name: name, url: API.shared.siteFile(siteID, "\(postID ?? "")/\(name)"), isHero: hero == name, canHero: images.contains(name)) { selectedHero = name } remove: { removed.insert(name); if selectedHero == name { selectedHero = "" } }
                                 }
                                 ForEach(added, id: \.self) { u in
-                                    AttachmentRow(name: u.lastPathComponent, url: u, isHero: hero == u.lastPathComponent, canHero: images.contains(u.lastPathComponent)) { hero = u.lastPathComponent } remove: { added.removeAll { $0 == u }; if hero == u.lastPathComponent { hero = "" } }
+                                    AttachmentRow(name: u.lastPathComponent, url: u, isHero: hero == u.lastPathComponent, canHero: images.contains(u.lastPathComponent)) { selectedHero = u.lastPathComponent } remove: { added.removeAll { $0 == u }; if selectedHero == u.lastPathComponent { selectedHero = "" } }
                                 }
                             }
                             Button("Add files…") {
@@ -163,7 +166,7 @@ struct EditorView: View {
             let name = u.lastPathComponent
             let esc = name.replacingOccurrences(of: "\"", with: "&quot;")
             switch mediaKind(name) {
-            case "image": inline.append("<img alt=\"\(esc)\" src=\"\(esc)\">"); if hero.isEmpty { hero = name }
+            case "image": inline.append("<img alt=\"\(esc)\" src=\"\(esc)\">")
             case "video": inline.append("<video controls playsinline src=\"\(esc)\"></video>")
             case "audio": inline.append("<audio controls src=\"\(esc)\"></audio>")
             default: inline.append("<a href=\"\(esc)\">\(name)</a>")
@@ -177,7 +180,7 @@ struct EditorView: View {
         loaded = true
         guard let p = try? await API.shared.post(site: siteID, id: id) else { return }
         title = p.title; content = p.content; tags = p.tagList.joined(separator: ", ")
-        hero = p.heroImage ?? ""; inNav = p.isIncludedInNavigation ?? false; pinned = p.pinned != nil
+        selectedHero = p.heroImage ?? ""; inNav = p.isIncludedInNavigation ?? false; pinned = p.pinned != nil
         existing = p.attachments
     }
 
@@ -260,14 +263,5 @@ struct AttachmentRow: View {
             Spacer(minLength: 0)
         }
         .sheet(isPresented: $showingPreview) { AttachmentPreview(attachment: PreviewAttachment(name: name, url: url)) }
-    }
-}
-
-func mediaKind(_ name: String) -> String {
-    switch (name as NSString).pathExtension.lowercased() {
-    case "png", "jpg", "jpeg", "gif", "webp", "avif", "heic": return "image"
-    case "mp4", "mov", "webm", "m4v": return "video"
-    case "mp3", "m4a", "wav", "ogg", "aac", "flac": return "audio"
-    default: return "file"
     }
 }
