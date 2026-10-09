@@ -23,7 +23,7 @@ jobs:
         with:
           go-version: "1.27"
       - name: Operation recovery, pairing and desktop connection race checks
-        run: go test -race ./internal/mobile ./internal/server
+        run: go test -race ./internal/mobile ./internal/server ./scripts/mobile-smoke/bootstrap
       - name: Isolated pilot packaging and signing cleanup guards
         run: python3 -m unittest discover -s installer -p 'test_pilot_macos.py' -v
       - name: Patched Linux decoder and real HEIC geometry
@@ -41,6 +41,8 @@ jobs:
           node-version: "24"
       - name: Browser signing and encrypted pairing conformance
         run: node --test web/mobile/protocol.test.mjs web/mobile/pairing.test.mjs web/mobile/sw-cache.test.mjs
+      - name: Live smoke safety and commit-dispatch recovery guards
+        run: node --test scripts/mobile-smoke/browser.test.mjs
       - name: Install the verified mobile browser engines
         env:
           PLAYWRIGHT_BROWSERS_PATH: ${{ runner.temp }}/croptop-playwright-browsers
