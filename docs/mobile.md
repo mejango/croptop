@@ -2,7 +2,7 @@
 
 The mobile website, iPhone companion with Share extension, and Android companion with share receiver use one keyless publishing service. After a one-time connection to an existing site, a phone can select a screenshot, preview it, add optional text, and publish while the desktop is asleep. Native sharing can save an image before connection is set up.
 
-This is scoped-pilot documentation, not a native app-store release. The isolated Railway service and dedicated Cloudflare composer are deployed; live connection/publication acceptance is tracked below. The original desktop checkout remains untouched; this build lives in the isolated `app-mobile` source snapshot. The signed publication format and the desktop publishing path are retained.
+The scoped phone-posting pilot is live. The isolated Railway service, dedicated Cloudflare composer and notarized Mac setup update are available; native app-store releases remain separate. The original desktop checkout remains untouched; this build lives in the isolated `app-mobile` source snapshot. The signed publication format and desktop publishing path are retained.
 
 ## Release boundaries
 
@@ -81,16 +81,19 @@ npx --yes wrangler@4.145.0 deploy --dry-run --config wrangler.mobile.toml
 | Railway service | `croptop-mobile-pilot` (`a3e07070-2013-441a-b1a6-a9eccd42eea9`) |
 | Backend command | `croptop mobile --listen 0.0.0.0:8090 --data /data` |
 | Backend readiness | `/v0/mobile/health` |
+| Notarized Mac setup update | [Phone pilot build1160](https://github.com/mejango/croptop/releases/tag/phone-pilot-20261009-1160) |
 
 Railway uses explicitly configured service settings for this pilot. Exclude the original `railway.toml` from the mobile deployment archive: its public-host health path must not override the dedicated configuration. The Docker image's default command is still the public host command, so the explicit start-command override is required. `railway.mobile.toml` is a reference for platforms accepting a custom config-as-code file, not proof that Railway selected it.
 
 Record the exact source revision, container deployment and Worker version before enabling. If validation fails, set `MOBILE_ENABLED="false"` on the **dedicated** Worker and redeploy that configuration while retaining its hostname and trusted code; never delete/reassign the key-holding origin or fall through to author content. Preserve the private backend volume and publication receipts. Roll back only the dedicated service to a known-good immutable build; do not restore stale journals over newer commits. Reconcile uncertain operations before re-enabling. Never change the stable crop.top host, stable desktop appcast, existing site storage policies or production site heads as a rollback step.
 
-The backend is deployed from `df717b583177bd3640a53cf6068791c11a0c2efe`: Railway deployment `ba90d61b-aa5c-4b5b-9331-a85370add58f`, image `sha256:f67cce10420bdb231b400303a320d75d0a663bd77037a5adbceb9e1377a04219`. The enabled Worker version is `8e200864-c917-4c39-a176-62672dc6f880` (enable configuration commit `99de24c`). Live checks confirm health200, direct API403, no host/IPFS gateway, actual 2CPU/2GiB limits and private0700 data directories. Existing hosting deployment and stable appcast are unchanged. Record successful public connection/publication/recovery acceptance before handing out the pilot.
+The backend is deployed from `df717b583177bd3640a53cf6068791c11a0c2efe`: Railway deployment `ba90d61b-aa5c-4b5b-9331-a85370add58f`, image `sha256:f67cce10420bdb231b400303a320d75d0a663bd77037a5adbceb9e1377a04219`. Final Worker version `1e89ddf9-3979-4883-ac81-704d84619cd1` includes the open-tab pairing fix from `9a1c9d3`. Live checks confirm health200, direct API403, no host/IPFS gateway, actual 2CPU/2GiB limits and private0700 data directories. A controlled mobile-only restart retained both published receipts, paired-phone authentication and the same volume/image. Existing hosting deployment and stable appcast are unchanged.
+
+Mac build1160 (`0.13.20-phone.1`, numeric bundle version `0.13.20`) is pinned to `2a01f9dc4d64101b17f36d5c931f6bc7aad29786`; its Developer ID signatures, app/DMG notarization, stapling, Gatekeeper and packaged default-origin probe pass. Public DMG SHA256: `458cf6a9849aaa9a57fba59f3f3cbf15399263aa1304b2ddfd0e4212c51c1504`. Release408109465 is a separate prerelease, never latest; it includes the matching source archive, provenance and checksums. The pilot branch also contains later hosted-page and verification-only changes. Stable remains `v0.13.19`; no stable appcast was uploaded or edited.
 
 ## Connect an existing site
 
-Run the desktop publisher from this build with `--mobile-origin` pointing to the configured service. Open the site's **Connect phone** action in the web console or Mac app. The page checks hosting consent and publishes current compatibility metadata through the normal conflict-checked publisher. A stale local copy must be synchronized, not force-published.
+On a Mac, quit the existing Croptop app, install the notarized pilot above, then reopen the site and choose **Connect phone**. The pilot already includes the correct trusted service origin; no shell flags or advance site-URL registration are required. For a separately built CLI, use `--mobile-origin` pointing to the configured service. The page checks hosting consent and publishes current compatibility metadata through the normal conflict-checked publisher. A stale local copy must be synchronized, not force-published. An already-hosted identical content CID is ready even when an unchanged local republish increments only the local sequence.
 
 Scan/open the short-lived link on the phone (native companions can accept the link), compare the displayed confirmation code on both devices, and confirm. This is a one-time desktop step; later posting does not require that desktop to stay awake. Local PKCS8 Ed25519 PEM import remains available. Import alone does not silently enable service use or change a site's hosting policy.
 
@@ -121,7 +124,7 @@ Never treat a lost response as a failed publication or automatically generate a 
 | Go | All packages pass `go test ./...` and `go vet ./...`; mobile and local-server suites pass with `-race` |
 | Real host | Stopped-desktop publication, retained old files, lost receipt, newer head, service restart and exactly-once recovery pass |
 | Draft privacy | Prepared blocks absent from public node before signed commit; normal and crash cleanup plus exclusive-owner tests pass |
-| Browser | 14 tests pass: Chromium/WebKit flows plus signing, pairing and exact offline-shell integrity fixtures |
+| Browser | 16 tests pass: Chromium/WebKit flows, open-tab pairing and draft preservation, signing, pairing and exact offline-shell integrity fixtures |
 | Worker | 64 tests pass, including dedicated-origin isolation, trusted proxy, required edge limits and fail-closed configuration; bundles verify without enabling the pilot |
 | iOS | 22 simulator XCTest tests pass; app and Share extension compile; locally ad-hoc signed simulator app launches with shared storage |
 | macOS | 78 tests pass; native app builds with Connect phone action |
@@ -139,4 +142,12 @@ Artifacts in this workspace:
 - Browser screenshots: `/private/tmp/croptop-mobile-web-check/`; iOS launch: `/tmp/croptop-ios-first-launch-signed.png`.
 - Local media-test Docker image: `croptop-mobile-media-test:local`.
 
-Independent reviews covered service/origin security, browser recovery, native storage/signing and the production media path. Findings were fixed and regression-tested. Local tests and simulator success do not replace physical iPhone/Android sharing, Safari/Chrome screenshot-fidelity and lifecycle acceptance, or signed native distribution. HDR tone mapping remains unsupported. Live Chromium and WebKit show clean360px layouts and11/11 offline-shell assets matching integrity hashes; Chromium offline reload passes. WebKit's automation offline mode fails with an engine error, so iPhone airplane-mode behavior is explicitly unverified. The backend and composer are live; synthetic connection/publication recovery is being verified. No app-store release is implied.
+Independent reviews covered service/origin security, browser recovery, native storage/signing and the production media path. Findings were fixed and regression-tested. Local tests and simulator success do not replace physical iPhone/Android sharing, Safari/Chrome screenshot-fidelity and lifecycle acceptance, or signed native distribution. HDR tone mapping remains unsupported. Live Chromium and WebKit show clean360px layouts and11/11 offline-shell assets matching integrity hashes; Chromium offline reload passes. WebKit's automation offline mode fails with an engine error, so iPhone airplane-mode behavior is explicitly unverified. No app-store release is implied.
+
+### Live acceptance — 2026-10-09
+
+- QR: actual image decoded; wrong code rejected; one encrypted transfer confirmed on both devices; nonexportable phone key reauthenticated after the desktop stopped and after the backend restarted. No PEM import or plaintext key in outbound requests; the dedicated QR site stayed empty.
+- WebKit: operation `407651CE-F3AE-4E79-84D6-073024D3F0CB` published and reopened after restart at sequence2, exactly one article, public image matching the reviewed normalized SHA256.
+- Chromium: operation `F77247E8-52B5-4F12-B2FE-AAB2928E86FA` recovered after the accepted commit response was deliberately withheld, then after backend restart, always exactly one article at sequence2.
+- Existing stylesheet, font and site script on both synthetic sites remain byte-identical. Public receipts work with all synthetic desktop publishers stopped.
+- Live harness safety/recovery guards pass eleven tests, including actual dispatch evidence, expired proposals, hidden receipt startup and prevention of an accidental signing click. Synthetic sites and private test profiles are separate from every user site/library.
