@@ -524,22 +524,60 @@ async function claim(request, url, env) {
   return entryResponse(e);
 }
 
+// A request may carry thousands of independent files and directory blocks.
+// Bound concurrent R2 work rather than paying every object round trip in
+// series, leaving connection and memory headroom for the Worker runtime.
+const STAGING_CONCURRENCY = 4;
+
 // Persist the multipart files and verified directory blocks before the caller
-// validates its manifest or moves the site's head.
+// validates its manifest or moves the site's head. Duplicate fields that
+// address the same normalized object retain their original order and resume
+// semantics; only independent objects can be processed concurrently.
 async function stageMultipart(env, cid, form) {
   let n = 0;
+  const groups = new Map();
+  const add = (key, kind, rel, value) => {
+    if (!groups.has(key)) groups.set(key, { key, kind, rel, values: [] });
+    groups.get(key).values.push(value);
+  };
   for (const [field, value] of form.entries()) {
     if (typeof value === "string") continue;
     // the version's folder blocks, so the next reader can list it before any IPFS peer has it
-    if (field.startsWith("block:")) { await putBlock(env, field.slice(6), value); continue; }
+    if (field.startsWith("block:")) { add("blocks/" + field.slice(6), "block", field.slice(6), value); continue; }
     // the path rides in the field name ("file:<path>"): file names lose their directories in some parsers
     if (!field.startsWith("file:")) continue;
     const rel = field.slice(5).replace(/^\/+/, "");
     if (!rel || rel.includes("..")) continue;
-    const have = await env.SITES.head(`sites/${cid}/${rel}`);
-    if (!have || have.size !== value.size) await env.SITES.put(`sites/${cid}/${rel}`, value.stream(), { httpMetadata: { contentType: contentType(rel) } });
+    add(`sites/${cid}/${rel}`, "file", rel, value);
     n++;
   }
+  const pending = groups.values();
+  let failed = false, failure;
+  await Promise.all(Array.from({ length: Math.min(STAGING_CONCURRENCY, groups.size) }, async () => {
+    while (!failed) {
+      const { value: group, done } = pending.next();
+      if (done) return;
+      try {
+        for (const value of group.values) {
+          if (failed) return;
+          if (group.kind === "block") {
+            // Conversion and hashing happen inside the bounded slot, not
+            // eagerly for every block in the multipart body.
+            await putBlock(env, group.rel, value);
+          } else {
+            const have = await env.SITES.head(group.key);
+            if (!have || have.size !== value.size) await env.SITES.put(group.key, value.stream(), { httpMetadata: { contentType: contentType(group.rel) } });
+          }
+        }
+      } catch (err) {
+        if (!failed) { failed = true; failure = err; }
+      }
+    }
+  }));
+  // In-flight writes have drained. A failure never leaves detached staging
+  // work or reaches the caller's manifest/head commit; completed objects stay
+  // available for the existing resumable upload protocol.
+  if (failed) throw failure;
   return n;
 }
 

@@ -78,6 +78,14 @@ function stagingHarness() {
   return { env, ipns, push, waits };
 }
 
+function stagingGate() {
+  let open;
+  const promise = new Promise((resolve) => { open = resolve; });
+  return { promise, open };
+}
+
+const stagingTurn = () => new Promise((resolve) => setImmediate(resolve));
+
 test("staging preserves normalized duplicates, resumed files, and verified blocks", async () => {
   const h = stagingHarness(), cid = "bafystagingsemantics";
   await h.env.SITES.put(`owners/${cid}`, h.ipns);
@@ -119,6 +127,322 @@ test("staging preserves normalized duplicates, resumed files, and verified block
   assert.equal(await h.env.SITES.get("blocks/not-a-cid"), null);
   assert.equal((await (await h.env.SITES.get(`heads/${h.ipns}`)).json()).cid, cid);
   assert.equal(h.waits.length, 0, "all staging completed in the request, not background tasks");
+});
+
+test("many independent files and blocks stage four at a time and finish before commit", { timeout: 10000 }, async () => {
+  const h = stagingHarness(), cid = "bafyboundedstaging";
+  const entries = [], blocks = new Set();
+  const fileCount = 256, blockCount = 256;
+  for (let i = 0; i < fileCount; i++) entries.push([`file:post-${i}/index.html`, `page ${i}`]);
+  for (let i = 0; i < blockCount; i++) {
+    const value = "existing folder block " + i, c = blockCID(value);
+    await h.env.SITES.put("blocks/" + c, value);
+    blocks.add("blocks/" + c);
+    entries.push(["block:" + c, value]);
+  }
+  const first = stagingGate(), release = stagingGate();
+  const head = h.env.SITES.head, put = h.env.SITES.put;
+  let active = 0, peak = 0, started = 0, completed = 0, filesPersisted = 0, committed = false;
+  h.env.SITES.head = async (key) => {
+    if (!key.startsWith(`sites/${cid}/`) && !blocks.has(key)) return head(key);
+    started++;
+    peak = Math.max(peak, ++active);
+    first.open();
+    try {
+      await release.promise;
+      return await head(key);
+    } finally {
+      active--;
+      completed++;
+    }
+  };
+  h.env.SITES.put = async (key, body, options) => {
+    if (key === `heads/${h.ipns}`) {
+      assert.equal(active, 0, "no existence check remains in flight at commit");
+      assert.equal(completed, fileCount + blockCount, "all supplied blocks are checked before commit");
+      assert.equal(filesPersisted, fileCount, "all files are persisted before commit");
+      committed = true;
+    }
+    const result = await put(key, body, options);
+    if (key.startsWith(`sites/${cid}/`)) filesPersisted++;
+    return result;
+  };
+  const pending = h.push(cid, 1, entries);
+  try {
+    await first.promise;
+    await stagingTurn();
+    assert.equal(started, 4, "exactly four independent objects enter the blocked first wave");
+    assert.equal(active, 4);
+    assert.equal(committed, false);
+    release.open();
+    const response = await pending;
+    assert.equal(response.status, 200, await response.clone().text());
+    assert.equal((await response.json()).files, fileCount);
+    assert.equal(peak, 4, "concurrency stays bounded across every later wave");
+    assert.equal(completed, fileCount + blockCount);
+    assert.equal(committed, true);
+    assert.equal(h.waits.length, 0);
+  } finally {
+    release.open();
+    await pending;
+  }
+});
+
+test("normalized duplicate object waits for its previous write while other objects proceed", { timeout: 10000 }, async () => {
+  const h = stagingHarness(), cid = "bafyorderedstaging";
+  const reached = stagingGate(), release = stagingGate(), independent = stagingGate();
+  const head = h.env.SITES.head, put = h.env.SITES.put;
+  const ordered = `sites/${cid}/ordered.txt`;
+  let orderedHeads = 0, independentWrites = 0, held = false;
+  h.env.SITES.head = async (key) => {
+    if (key === ordered) orderedHeads++;
+    return head(key);
+  };
+  h.env.SITES.put = async (key, body, options) => {
+    if (key === ordered && !held) {
+      held = true;
+      reached.open();
+      await release.promise;
+    }
+    const result = await put(key, body, options);
+    if (key.startsWith(`sites/${cid}/other-`)) { independentWrites++; independent.open(); }
+    return result;
+  };
+  const pending = h.push(cid, 1, [
+    ["file:/ordered.txt", "a"], ["file:ordered.txt", "the later complete value"],
+    ...Array.from({ length: 12 }, (_, i) => [`file:other-${i}.txt`, "independent"]),
+  ]);
+  try {
+    await reached.promise;
+    await independent.promise;
+    assert.equal(orderedHeads, 1, "the alias is not inspected before the first value is persisted");
+    assert.ok(independentWrites > 0, "independent keys can advance past a blocked object");
+    assert.equal(await h.env.SITES.get(`heads/${h.ipns}`), null);
+    release.open();
+    const response = await pending;
+    assert.equal(response.status, 200, await response.clone().text());
+    assert.equal(orderedHeads, 2);
+    assert.equal(await (await h.env.SITES.get(ordered)).text(), "the later complete value");
+    assert.equal((await response.json()).files, 14);
+  } finally {
+    release.open();
+    await pending;
+  }
+});
+
+test("6,482 files and 680 existing blocks retain exact counts with bounded storage work", { timeout: 30000 }, async () => {
+  const h = stagingHarness(), cid = "bafyrealisticstagingcount";
+  const fileCount = 6482, blockCount = 680, entries = [], blockKeys = new Set();
+  for (let i = 0; i < fileCount; i++) entries.push([`file:post-${i}/index.html`, `tiny page ${i}`]);
+  for (let i = 0; i < blockCount; i++) {
+    const value = `realistic existing folder ${i}`, c = blockCID(value);
+    await h.env.SITES.put("blocks/" + c, value);
+    blockKeys.add("blocks/" + c);
+    entries.push(["block:" + c, value]);
+  }
+  const head = h.env.SITES.head, put = h.env.SITES.put;
+  let active = 0, peak = 0, checks = 0, filesPersisted = 0, blockWrites = 0, headWrites = 0;
+  const storageWork = async (operation) => {
+    peak = Math.max(peak, ++active);
+    try { await stagingTurn(); return await operation(); } finally { active--; }
+  };
+  h.env.SITES.head = async (key) => {
+    if (!key.startsWith(`sites/${cid}/`) && !blockKeys.has(key)) return head(key);
+    const result = await storageWork(() => head(key));
+    checks++;
+    return result;
+  };
+  h.env.SITES.put = async (key, body, options) => {
+    if (key === `heads/${h.ipns}`) {
+      assert.equal(active, 0);
+      assert.equal(checks, fileCount + blockCount);
+      assert.equal(filesPersisted, fileCount);
+      headWrites++;
+    }
+    if (key.startsWith(`sites/${cid}/`) || blockKeys.has(key)) {
+      const result = await storageWork(() => put(key, body, options));
+      if (blockKeys.has(key)) blockWrites++; else filesPersisted++;
+      return result;
+    }
+    return put(key, body, options);
+  };
+  // A large Go publication uses sequential multipart requests; every folder
+  // block accompanies the final one. Keep that shape without allocating the
+  // live site's media bytes or a huge synthetic Node FormData parse.
+  const batchSize = 256, batches = Math.ceil(fileCount / batchSize);
+  let acknowledgedFiles = 0;
+  for (let i = 0; i < batches; i++) {
+    const files = entries.slice(i * batchSize, Math.min((i + 1) * batchSize, fileCount));
+    const body = i === batches - 1 ? [...files, ...entries.slice(fileCount)] : files;
+    const response = await h.push(cid, 1, body, { part: `${i + 1}/${batches}` });
+    assert.equal(response.status, 200, await response.clone().text());
+    const reported = (await response.json()).files;
+    assert.equal(reported, files.length);
+    acknowledgedFiles += reported;
+    assert.equal(headWrites, i === batches - 1 ? 1 : 0, "only the final multipart request commits");
+  }
+  assert.equal(acknowledgedFiles, fileCount);
+  assert.equal(peak, 4);
+  assert.equal(active, 0);
+  assert.equal(checks, fileCount + blockCount);
+  assert.equal(filesPersisted, fileCount);
+  assert.equal(blockWrites, 0, "previously stored blocks are not rewritten");
+  assert.equal(headWrites, 1);
+  let cursor, storedFiles = 0;
+  do {
+    const page = await h.env.SITES.list({ prefix: `sites/${cid}/`, cursor });
+    storedFiles += page.objects.length;
+    cursor = page.truncated ? page.cursor : undefined;
+  } while (cursor);
+  assert.equal(storedFiles, fileCount);
+  assert.equal(await (await h.env.SITES.get(`sites/${cid}/post-${fileCount - 1}/index.html`)).text(), `tiny page ${fileCount - 1}`);
+  assert.equal(h.waits.length, 0);
+});
+
+test("synthetic stored-block latency measurement preserves the four-operation bound", { timeout: 10000 }, async () => {
+  const h = stagingHarness(), cid = "bafysyntheticstaginglatency";
+  const entries = [["file:index.html", "small change"]], keys = new Set();
+  for (let i = 0; i < 128; i++) {
+    const value = "existing block " + i, c = blockCID(value);
+    await h.env.SITES.put("blocks/" + c, value);
+    keys.add("blocks/" + c);
+    entries.push(["block:" + c, value]);
+  }
+  const head = h.env.SITES.head;
+  let headCalls = 0, active = 0, maxConcurrentHeads = 0;
+  h.env.SITES.head = async (key) => {
+    if (!keys.has(key) && key !== `sites/${cid}/index.html`) return head(key);
+    headCalls++;
+    maxConcurrentHeads = Math.max(maxConcurrentHeads, ++active);
+    try {
+      await new Promise((resolve) => setTimeout(resolve, 5));
+      return await head(key);
+    } finally {
+      active--;
+    }
+  };
+  const start = performance.now();
+  const response = await h.push(cid, 1, entries);
+  const elapsedMs = Math.round(performance.now() - start);
+  console.log("synthetic staging latency", JSON.stringify({ status: response.status, existingBlocks: 128, changedFiles: 1, simulatedHeadDelayMs: 5, headCalls, maxConcurrentHeads, elapsedMs }));
+  assert.equal(response.status, 200, await response.clone().text());
+  assert.equal(headCalls, 129);
+  assert.equal(maxConcurrentHeads, 4);
+  assert.equal(active, 0);
+  // Wall time is diagnostic only: scheduling and machine load vary. The
+  // deterministic bound and completion assertions, not timing, gate CI.
+});
+
+test("staging failure stops admission, drains active objects without commit, and resumes safely", { timeout: 10000 }, async () => {
+  const h = stagingHarness(), cid = "bafyfailedstaging";
+  const reached = stagingGate(), fail = stagingGate(), drain = stagingGate(), failed = stagingGate();
+  const head = h.env.SITES.head, put = h.env.SITES.put;
+  const firstKey = `sites/${cid}/0.txt`, duplicateKey = `sites/${cid}/1.txt`;
+  const entries = [
+    ["file:0.txt", "zero"], ["file:/1.txt", "one"], ["file:1.txt", "one expanded"],
+    ...Array.from({ length: 6 }, (_, i) => [`file:${i + 2}.txt`, `value ${i + 2}`]),
+  ];
+  const starts = [], writes = [];
+  let active = 0, settled = false, headMoves = 0;
+  h.env.SITES.head = async (key) => {
+    if (!key.startsWith(`sites/${cid}/`)) return head(key);
+    starts.push(key);
+    active++;
+    reached.open();
+    try {
+      if (key === firstKey) {
+        await fail.promise;
+        failed.open();
+        throw new Error("injected staging read failure");
+      }
+      await drain.promise;
+      return await head(key);
+    } finally {
+      active--;
+    }
+  };
+  h.env.SITES.put = async (key, body, options) => {
+    if (key === `heads/${h.ipns}`) headMoves++;
+    const result = await put(key, body, options);
+    if (key.startsWith(`sites/${cid}/`)) writes.push(key);
+    return result;
+  };
+  const pending = h.push(cid, 1, entries).then((response) => { settled = true; return response; });
+  try {
+    await reached.promise;
+    await stagingTurn();
+    assert.equal(starts.length, 4);
+    fail.open();
+    await failed.promise;
+    await stagingTurn();
+    assert.equal(active, 3);
+    assert.equal(settled, false, "failure response waits for already admitted storage work");
+    assert.equal(starts.length, 4, "failure does not admit a fifth object");
+    drain.open();
+    const response = await pending;
+    assert.equal(response.status, 500);
+    assert.match(await response.text(), /injected staging read failure/);
+    assert.equal(active, 0);
+    assert.equal(headMoves, 0);
+    assert.equal(starts.length, 4, "no later object or duplicate value starts during drain");
+    assert.equal(starts.filter((key) => key === duplicateKey).length, 1);
+    assert.equal(writes.length, 3, "already admitted complete objects are retained for resume");
+    assert.equal(await h.env.SITES.get(`heads/${h.ipns}`), null);
+    assert.equal(await h.env.SITES.get(`carry/${cid}.json`), null);
+    assert.equal(await h.env.REGISTRY.get("key:" + h.ipns), null);
+    assert.equal(h.waits.length, 0);
+
+    // Recover on the same signed version. Persisted same-size objects are not
+    // written again; the later larger alias advances only after its predecessor.
+    h.env.SITES.head = head;
+    const before = writes.length;
+    const resumed = await h.push(cid, 1, entries);
+    assert.equal(resumed.status, 200, await resumed.clone().text());
+    assert.equal((await resumed.json()).files, entries.length);
+    const resumedWrites = writes.slice(before);
+    assert.equal(resumedWrites.includes(`sites/${cid}/2.txt`), false);
+    assert.equal(resumedWrites.includes(`sites/${cid}/3.txt`), false);
+    assert.equal(resumedWrites.filter((key) => key === duplicateKey).length, 1);
+    assert.equal(await (await h.env.SITES.get(duplicateKey)).text(), "one expanded");
+    assert.equal(headMoves, 1);
+  } finally {
+    fail.open();
+    drain.open();
+    await pending;
+    h.env.SITES.head = head;
+  }
+});
+
+test("parallel staging cannot move a parent head changed while files were in flight", { timeout: 10000 }, async () => {
+  const h = stagingHarness(), parent = "bafystagingparent", cid = "bafystagingcandidate", other = "bafystagingother";
+  await h.env.SITES.put(`heads/${h.ipns}`, JSON.stringify({ cid: parent, sequence: 1 }));
+  await h.env.REGISTRY.put("key:" + h.ipns, JSON.stringify({ ipns: h.ipns, cid: parent, sequence: 1 }));
+  const reached = stagingGate(), release = stagingGate();
+  const head = h.env.SITES.head;
+  let active = 0;
+  h.env.SITES.head = async (key) => {
+    if (!key.startsWith(`sites/${cid}/`)) return head(key);
+    active++;
+    reached.open();
+    try { await release.promise; return await head(key); } finally { active--; }
+  };
+  const pending = h.push(cid, 20, Array.from({ length: 8 }, (_, i) => [`file:${i}.txt`, "staged"]), { parent, manifest: { carry: [] } });
+  try {
+    await reached.promise;
+    await stagingTurn();
+    assert.equal(active, 4);
+    await h.env.SITES.put(`heads/${h.ipns}`, JSON.stringify({ cid: other, sequence: 2 }));
+    release.open();
+    const response = await pending;
+    assert.equal(response.status, 409, await response.clone().text());
+    assert.deepEqual(await (await h.env.SITES.get(`heads/${h.ipns}`)).json(), { cid: other, sequence: 2 });
+    assert.equal(active, 0);
+    assert.equal((await h.env.SITES.list({ prefix: `sites/${cid}/` })).objects.length, 8, "refused version remains resumable without replacing the newer head");
+    assert.equal(await h.env.REGISTRY.get("pushed:" + cid), null);
+  } finally {
+    release.open();
+    await pending;
+  }
 });
 
 test("a push on a parent carries the rest of the site and refuses a stale parent", async () => {
