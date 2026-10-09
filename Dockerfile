@@ -26,6 +26,8 @@ RUN cmake -S libheif-1.23.6 -B compiled \
     -DBUILD_TESTING=OFF -DBUILD_DOCUMENTATION=OFF \
     && cmake --build compiled --parallel 2 \
     && cmake --install compiled
+COPY internal/mobile/media_heif/convert.c /build/croptop-heif.c
+RUN cc -O2 -Wall -Wextra -Werror /build/croptop-heif.c -o /croptop-heif $(pkg-config --cflags --libs libheif libpng)
 
 # Narrow color transform: only lcms2 and libpng, no auto-discovered codecs.
 FROM alpine:3.23 AS color-build
@@ -38,6 +40,8 @@ RUN apk add --no-cache ca-certificates libstdc++ libde265 libpng lcms2
 COPY --from=color-build /croptop-color /usr/local/bin/croptop-color
 COPY internal/mobile/media_lcms/NOTICE /usr/share/licenses/croptop-color/NOTICE
 COPY --from=heif-build /usr/local/bin/heif-dec /usr/local/bin/heif-dec
+COPY --from=heif-build /croptop-heif /usr/local/bin/croptop-heif
+COPY internal/mobile/media_heif/NOTICE /usr/share/licenses/croptop-heif/NOTICE
 COPY --from=heif-build /usr/local/lib/libheif.so* /usr/local/lib/
 RUN heif-dec --version
 COPY --from=build /croptop /usr/local/bin/croptop

@@ -104,7 +104,17 @@ func NormalizeImage(ctx context.Context, inputPath, outputDir string) (Media, er
 	if animatedRaster(data, typ) {
 		return Media{}, errors.New("choose one still image; animated images are not supported")
 	}
-	profile, err := imageColorProfile(data, typ)
+	var primaryHEIF bool
+	if typ == "heif" {
+		primaryHEIF, err = hasAppleSDRGainMap(data)
+		if err != nil {
+			return Media{}, err
+		}
+	}
+	var profile []byte
+	if !primaryHEIF {
+		profile, err = imageColorProfile(data, typ)
+	}
 	if err != nil {
 		return Media{}, err
 	}
@@ -115,7 +125,7 @@ func NormalizeImage(ctx context.Context, inputPath, outputDir string) (Media, er
 		if err := checkHEIFDimensions(data); err != nil {
 			return Media{}, err
 		}
-		converted, cleanup, err := convertHEIF(ctx, data, outputDir)
+		converted, cleanup, err := convertHEIF(ctx, data, outputDir, primaryHEIF)
 		if err != nil {
 			return Media{}, err
 		}
@@ -597,8 +607,14 @@ func findHEIFConverter() (string, error) {
 	return "", ErrHEIFUnavailable
 }
 
-func convertHEIF(ctx context.Context, data []byte, outputDir string) (string, func(), error) {
-	converter, err := findHEIFConverter()
+func convertHEIF(ctx context.Context, data []byte, outputDir string, primaryOnly bool) (string, func(), error) {
+	var converter string
+	var err error
+	if primaryOnly {
+		converter, err = findHEIFPrimaryConverter()
+	} else {
+		converter, err = findHEIFConverter()
+	}
 	if err != nil {
 		return "", nil, err
 	}
@@ -618,7 +634,9 @@ func convertHEIF(ctx context.Context, data []byte, outputDir string) (string, fu
 		return "", nil, err
 	}
 	args := []string{in, out}
-	if filepath.Base(converter) == "sips" {
+	if primaryOnly {
+		args = append(args, strconv.Itoa(MaxImagePixels), strconv.Itoa(maxICCProfileBytes))
+	} else if filepath.Base(converter) == "sips" {
 		args = []string{"--setProperty", "format", "png", in, "--out", out}
 	} else if filepath.Base(converter) == "heif-dec" {
 		// The pinned production decoder supports explicit bounded parallelism.
