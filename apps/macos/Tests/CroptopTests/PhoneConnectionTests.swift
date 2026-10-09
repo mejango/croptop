@@ -71,10 +71,17 @@ final class PhoneConnectionTests: XCTestCase {
         return (model, client, pasteboard)
     }
 
-    @MainActor private func render(_ model: PhoneConnectionModel) throws -> NSBitmapImageRep {
+    @MainActor private func render(_ model: PhoneConnectionModel, embedded: Bool = false) throws -> NSBitmapImageRep {
         _ = NSApplication.shared
         AppFonts.register()
-        let view = NSHostingView(rootView: PhoneConnectionSheet(model: model).environmentObject(AppModel()))
+        let content: AnyView
+        if embedded {
+            content = AnyView(ScrollView {
+                PhoneConnectionView(model: model, presentation: .settings, onClose: {}, onCleanup: {})
+                    .padding(Theme.content)
+            })
+        } else { content = AnyView(PhoneConnectionSheet(model: model)) }
+        let view = NSHostingView(rootView: content.environmentObject(AppModel()))
         view.frame = NSRect(x: 0, y: 0, width: 560, height: 660)
         view.layoutSubtreeIfNeeded()
         let bitmap = try XCTUnwrap(view.bitmapImageRepForCachingDisplay(in: view.bounds))
@@ -450,7 +457,7 @@ final class PhoneConnectionTests: XCTestCase {
         let closing = Task { await model.close() }
         try await waitUntil { continuation != nil }
         XCTAssertEqual(model.phase, .stopping)
-        XCTAssertTrue(AppUpdater.blocksRelaunch(screen: .site(model.site.id), sheet: .connectPhone(model.site), publishing: []))
+        XCTAssertTrue(AppUpdater.blocksRelaunch(screen: .settings(model.site.id), sheet: nil, publishing: [], phonePreparationCleanups: 1))
         continuation?.resume(returning: client.result(siteID: model.site.id, id: client.prepared[0].1, state: "cancelled"))
         let closed = await closing.value
         XCTAssertTrue(closed)
@@ -591,6 +598,88 @@ final class PhoneConnectionTests: XCTestCase {
         }
     }
 
+    @MainActor func testMobileEmbedsConnectionWithoutSheetChrome() async throws {
+        XCTAssertEqual(SiteSettingsView.sections.filter { $0 == "Mobile" }.count, 1)
+        for phase in ["hosted", "scan", "confirm"] {
+            let (model, client, _) = fixture(storage: SiteStorage.hosted.rawValue)
+            if phase != "hosted" { await model.begin()?.value }
+            if phase == "confirm" { await model.refresh() }
+            let bitmap = try render(model, embedded: true)
+            let textRequest = VNRecognizeTextRequest()
+            textRequest.recognitionLevel = .accurate
+            textRequest.recognitionLanguages = ["en-US"]
+            let qrRequest = VNDetectBarcodesRequest()
+            qrRequest.symbologies = [.qr]
+            try VNImageRequestHandler(cgImage: XCTUnwrap(bitmap.cgImage)).perform([textRequest, qrRequest])
+            let observations = textRequest.results ?? []
+            let text = observations.compactMap { $0.topCandidates(1).first?.string }.joined(separator: " ")
+            XCTAssertFalse(text.contains("Connect phone"), text)
+            XCTAssertFalse(text.contains(model.site.name), "Settings already names the site; do not repeat modal chrome")
+            XCTAssertFalse(text.contains("Waiting for your phone"), text)
+            if phase == "hosted" {
+                XCTAssertTrue(text.contains("Post from your phone"), text)
+                XCTAssertFalse(text.contains("Allow crop.top"), "Saved hosting permission is still reused")
+                XCTAssertTrue(model.canStart)
+            } else {
+                XCTAssertTrue(text.contains(phase == "scan" ? "Scan with your phone" : "Confirm your phone"), text)
+                let qr = try XCTUnwrap(qrRequest.results?.first)
+                XCTAssertEqual(qr.payloadStringValue, client.pair.url)
+                let expiry = try XCTUnwrap(observations.first { $0.topCandidates(1).first?.string.hasPrefix("Expires at ") == true })
+                XCTAssertLessThan(expiry.boundingBox.maxY, qr.boundingBox.minY)
+                if phase == "confirm" {
+                    XCTAssertTrue(text.contains("Eight-digit code shown on your phone"), text)
+                    XCTAssertTrue(text.contains("Give this phone publishing access"), text)
+                    XCTAssertFalse(model.canConfirm)
+                }
+            }
+            XCTAssertTrue(client.confirmed.isEmpty)
+            _ = await model.close()
+        }
+    }
+
+    @MainActor func testLeavingMobileClearsSecretsAndHoldsGateUntilCancellationFinishes() async throws {
+        _ = NSApplication.shared
+        let (connection, client, _) = fixture(storage: SiteStorage.hosted.rawValue)
+        await connection.begin()?.value
+        await connection.refresh()
+        connection.code = "12345678"
+        let app = AppModel()
+        let visibility = PhonePaneVisibility()
+        var cleaned = 0
+        var acknowledgement: CheckedContinuation<PhonePreparation, Error>?
+        client.preparationBody = { _, _ in
+            try await withCheckedThrowingContinuation { acknowledgement = $0 }
+        }
+        let host = NSHostingView(rootView: PhonePaneHarness(visibility: visibility, connection: connection) {
+            cleaned += 1
+        }.environmentObject(app))
+        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 720, height: 640),
+                              styleMask: [.borderless], backing: .buffered, defer: false)
+        window.isReleasedWhenClosed = false
+        window.contentView = host
+        host.layoutSubtreeIfNeeded()
+        defer { acknowledgement?.resume(throwing: CancellationError()); window.contentView = nil; window.close() }
+        try await waitUntil { app.phonePreparationCleanups == 1 }
+        visibility.visible = false
+        host.layoutSubtreeIfNeeded()
+        try await waitUntil { acknowledgement != nil }
+        XCTAssertEqual(connection.phase, .stopping)
+        XCTAssertNil(connection.pairing)
+        XCTAssertEqual(connection.code, "")
+        XCTAssertEqual(app.phonePreparationCleanups, 1)
+        XCTAssertTrue(AppUpdater.blocksRelaunch(screen: .site(connection.site.id), sheet: nil, publishing: [],
+                                              phonePreparationCleanups: app.phonePreparationCleanups))
+        XCTAssertEqual(cleaned, 0)
+        let preparationID = try XCTUnwrap(client.prepared.first?.1)
+        acknowledgement?.resume(returning: client.result(siteID: connection.site.id, id: preparationID, state: "cancelled"))
+        acknowledgement = nil
+        try await waitUntil { app.phonePreparationCleanups == 0 }
+        XCTAssertEqual(connection.phase, .closed)
+        XCTAssertEqual(cleaned, 1)
+        XCTAssertEqual(client.cancelled.count, 1)
+        XCTAssertEqual(client.cancelled.first?.1, preparationID)
+    }
+
     @MainActor func testNativeSheetSnapshotsWhenRequested() async throws {
         guard let directory = ProcessInfo.processInfo.environment["CROPTOP_PHONE_SNAPSHOT_DIR"] else { return }
         _ = NSApplication.shared
@@ -614,7 +703,26 @@ final class PhoneConnectionTests: XCTestCase {
             let bitmap = try render(model)
             let data = try XCTUnwrap(bitmap.representation(using: .png, properties: [:]))
             try data.write(to: URL(fileURLWithPath: directory).appendingPathComponent(phase + ".png"))
+            let embedded = try render(model, embedded: true)
+            let embeddedData = try XCTUnwrap(embedded.representation(using: .png, properties: [:]))
+            try embeddedData.write(to: URL(fileURLWithPath: directory).appendingPathComponent("mobile-" + phase + ".png"))
             _ = await model.close()
+        }
+    }
+}
+
+@MainActor private final class PhonePaneVisibility: ObservableObject {
+    @Published var visible = true
+}
+
+private struct PhonePaneHarness: View {
+    @ObservedObject var visibility: PhonePaneVisibility
+    let connection: PhoneConnectionModel
+    let onCleanup: () async -> Void
+
+    var body: some View {
+        if visibility.visible {
+            PhoneConnectionView(model: connection, presentation: .settings, onClose: {}, onCleanup: onCleanup)
         }
     }
 }

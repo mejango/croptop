@@ -12,17 +12,42 @@ struct PhoneConnectionSheet: View {
 }
 
 struct PhoneConnectionView: View {
+    enum Presentation { case sheet, settings }
     @EnvironmentObject private var app: AppModel
     @Environment(\.dismiss) private var dismiss
     @StateObject private var connection: PhoneConnectionModel
     @State private var closing = false
     @State private var cleanupStarted = false
     @State private var gateHeld = false
+    private let presentation: Presentation
+    private let onClose: (() -> Void)?
+    private let onCleanup: (() async -> Void)?
 
-    init(site: Site) { _connection = StateObject(wrappedValue: PhoneConnectionModel(site: site)) }
-    init(model: PhoneConnectionModel) { _connection = StateObject(wrappedValue: model) }
+    init(model: PhoneConnectionModel, presentation: Presentation = .sheet,
+         onClose: (() -> Void)? = nil, onCleanup: (() async -> Void)? = nil) {
+        _connection = StateObject(wrappedValue: model)
+        self.presentation = presentation
+        self.onClose = onClose
+        self.onCleanup = onCleanup
+    }
 
     var body: some View {
+        Group {
+            if presentation == .sheet { sheet }
+            else { connectionContent }
+        }
+        .foregroundColor(Theme.ink).background(Theme.paper)
+        .interactiveDismissDisabled()
+        .onAppear {
+            // Hold before disappearance, so navigation can never briefly resume
+            // Sparkle ahead of this connection's cleanup notification.
+            if !gateHeld { app.phonePreparationCleanups += 1; gateHeld = true }
+        }
+        .task { await connection.monitor() }
+        .onDisappear(perform: cleanup)
+    }
+
+    private var sheet: some View {
         VStack(alignment: .leading, spacing: 20) {
             HStack(alignment: .top) {
                 VStack(alignment: .leading, spacing: 6) {
@@ -37,29 +62,22 @@ struct PhoneConnectionView: View {
                     .keyboardShortcut(.cancelAction).disabled(closing)
             }
             Divider()
-            ScrollView {
-                VStack(alignment: .leading, spacing: 18) {
-                    content
-                    if let error = connection.error {
-                        Text(error).font(Theme.formHelp).foregroundColor(Theme.ink)
-                            .fixedSize(horizontal: false, vertical: true)
-                            .accessibilityLabel("Connection problem: " + error)
-                    }
-                }.frame(maxWidth: .infinity, alignment: .leading).padding(1)
-            }.frame(maxHeight: .infinity)
-            if closing { Text("Stopping this connection…").font(Theme.formHelp) }
+            ScrollView { connectionContent.padding(1) }.frame(maxHeight: .infinity)
         }
         .padding(Theme.content)
         .frame(width: 560, height: 660)
-        .foregroundColor(Theme.ink).background(Theme.paper)
-        .interactiveDismissDisabled()
-        .onAppear {
-            // Hold before disappearance, so a queued sheet=nil update can
-            // never briefly resume Sparkle ahead of its cleanup notification.
-            if !gateHeld { app.phonePreparationCleanups += 1; gateHeld = true }
-        }
-        .task { await connection.monitor() }
-        .onDisappear(perform: cleanup)
+    }
+
+    private var connectionContent: some View {
+        VStack(alignment: .leading, spacing: 18) {
+            content
+            if let error = connection.error {
+                Text(error).font(Theme.formHelp).foregroundColor(Theme.ink)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .accessibilityLabel("Connection problem: " + error)
+            }
+            if closing { Text("Stopping this connection…").font(Theme.formHelp) }
+        }.frame(maxWidth: .infinity, alignment: .leading)
     }
 
     @ViewBuilder private var content: some View {
@@ -79,14 +97,18 @@ struct PhoneConnectionView: View {
                 }
                 .font(Theme.formHelp).foregroundColor(Theme.muted)
                 .accessibilityElement(children: .combine)
-                Text("You can close this window to stop preparation. Hosting permission and any publication already sent are not undone.")
+                Text(presentation == .settings
+                     ? "You can leave Mobile to stop preparation. Hosting permission and any publication already sent are not undone."
+                     : "You can close this window to stop preparation. Hosting permission and any publication already sent are not undone.")
                     .font(Theme.formHelp).foregroundColor(Theme.muted)
             }
         case .scan, .confirm:
             pairing
         case .sent:
             Label("Key sent securely", systemImage: "lock.shield").font(Theme.heading(20))
-            Text("Finish connecting on your phone. Keep this window open while your phone receives the key.").font(Theme.formText)
+            Text(presentation == .settings
+                 ? "Finish connecting on your phone. Keep Mobile open while your phone receives the key."
+                 : "Finish connecting on your phone. Keep this window open while your phone receives the key.").font(Theme.formText)
             LoadingTicker(accessibilityLabel: "Waiting for your phone to receive the key")
         case .delivered:
             Label("Key delivered", systemImage: "checkmark.circle").font(Theme.heading(20))
@@ -97,6 +119,9 @@ struct PhoneConnectionView: View {
         case .stopping:
             Text("Stopping preparation").font(Theme.heading(20))
             Text("Waiting for this Mac’s publisher to stop. Hosting permission, uploaded content and any key already sent are not revoked.").font(Theme.formText)
+            if presentation == .settings {
+                Button("Close", action: close).buttonStyle(BorderedButton()).disabled(closing || connection.busy)
+            }
         }
     }
 
@@ -164,7 +189,7 @@ struct PhoneConnectionView: View {
         closing = true
         Task {
             if await connection.close() {
-                dismiss()
+                if let onClose { onClose() } else { dismiss() }
             } else { closing = false }
         }
     }
@@ -172,7 +197,7 @@ struct PhoneConnectionView: View {
     private func cleanup() {
         guard !cleanupStarted else { return }
         cleanupStarted = true
-        // Menu commands can replace a sheet without pressing its Close button.
+        // A tab, site or menu change can remove this view without its Done button.
         // Keep the updater/quit gate aware of that now-hidden cancellation.
         if !gateHeld { app.phonePreparationCleanups += 1; gateHeld = true }
         Task {
@@ -182,7 +207,7 @@ struct PhoneConnectionView: View {
                 do { try await Task.sleep(nanoseconds: 5_000_000_000) }
                 catch { return }
             }
-            await app.load()
+            if let onCleanup { await onCleanup() } else { await app.load() }
         }
     }
 }

@@ -155,8 +155,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             alert.runModal()
             return .terminateCancel
         }
-        let phoneSheet: Bool = { if case .connectPhone = model.sheet { return true }; return false }()
-        if phoneSheet || model.phonePreparationCleanups > 0 {
+        if model.phonePreparationCleanups > 0 {
             alert.messageText = "Finish connecting your phone before quitting?"
             alert.informativeText = "Quitting may interrupt preparation. Hosting permission, published content and any key already sent are not revoked."
             alert.addButton(withTitle: "Keep Croptop open")

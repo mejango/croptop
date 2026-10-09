@@ -28,11 +28,29 @@ final class CustomDomainSetupTests: XCTestCase {
     func testConfigurationUsesValidatedValuesOnly() throws {
         let config = try XCTUnwrap(CustomDomainConfiguration(domain: " WWW.Example.COM ", ipns: ipns))
         XCTAssertEqual(config.hostname, "www.example.com")
-        XCTAssertEqual(config.publishingHost, "https://www.example.com")
         XCTAssertEqual(config.dnsLink, "dnslink=/ipns/" + ipns)
         XCTAssertTrue(config.serverCommand.contains("--domain www.example.com"))
         XCTAssertTrue(config.serverCommand.contains("--root " + ipns))
         XCTAssertTrue(config.caddyfile.hasPrefix("www.example.com {\n"))
+    }
+
+    func testDomainSetupUsesCropTopPublishingWithoutOverridingTheHost() throws {
+        let config = try XCTUnwrap(CustomDomainConfiguration(domain: "example.com", ipns: ipns))
+        XCTAssertTrue(config.publishingInstructions.contains("Storage settings, enable Use crop.top"))
+        XCTAssertTrue(config.publishingInstructions.contains("Save and publish"))
+        XCTAssertTrue(config.publishingInstructions.contains("IPNS address"))
+        XCTAssertTrue(config.publishingInstructions.contains("over IPFS"))
+        XCTAssertTrue(config.setupInstructions.contains(config.publishingInstructions))
+        XCTAssertFalse(config.setupInstructions.contains("Publish here"))
+        XCTAssertFalse(config.setupInstructions.contains("send the site files to this host"))
+    }
+
+    func testExistingDirectPublishHostInstructionsPreserveItsData() throws {
+        let config = try XCTUnwrap(CustomDomainConfiguration(domain: "example.com", ipns: ipns))
+        XCTAssertTrue(config.existingHostInstructions.contains("separate data directory"))
+        XCTAssertTrue(config.existingHostInstructions.contains("last directly uploaded version"))
+        XCTAssertTrue(config.existingHostInstructions.contains("Keep the existing directory as a backup"))
+        XCTAssertTrue(config.setupInstructions.contains(config.existingHostInstructions))
     }
 
     func testInvalidIPNSCannotReachCopiedShellOrDNSValues() {

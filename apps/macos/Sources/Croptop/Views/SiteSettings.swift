@@ -52,7 +52,6 @@ struct SiteSettingsView: View {
     @State private var domain = ""
     @State private var customDomain = ""
     @State private var gateway = "crop.top"
-    @State private var host = "https://crop.top"
     @State private var storage = SiteStorage.p2p
     @State private var storageChoiceChanged = false
     @State private var freeName = ""
@@ -76,6 +75,7 @@ struct SiteSettingsView: View {
     @State private var ensNotice: String?
     @State private var error: String?
     @State private var notice: String?
+    @State private var phoneRefreshFailed = false
     @State private var confirmDelete = false
 
     init(siteID: String, section: String = "Site") {
@@ -83,7 +83,7 @@ struct SiteSettingsView: View {
         _section = State(initialValue: section)
     }
 
-    private let sections = ["Site", "Domain", "Storage", "Money", "Contributors", "Advanced"]
+    static let sections = ["Site", "Domain", "Storage", "Mobile", "Money", "Contributors", "Advanced"]
     private var knownENS: String? { model.following.first { $0.ipns == original?.ipns && $0.name.hasSuffix(".eth") }?.name }
 
     var body: some View {
@@ -100,7 +100,7 @@ struct SiteSettingsView: View {
                 }
             }.padding(.bottom, 12)
             ScrollView(.horizontal, showsIndicators: false) { HStack(spacing: 24) {
-                ForEach(sections, id: \.self) { item in
+                ForEach(Self.sections, id: \.self) { item in
                     Button { if section != item { notice = nil }; section = item } label: {
                         Text(item).font(Theme.tab).foregroundColor(section == item ? Theme.ink : Theme.muted)
                             .padding(.vertical, 10)
@@ -111,7 +111,13 @@ struct SiteSettingsView: View {
             }
             }
             if let error {
-                HStack { Text(error).font(Theme.body(14)); if original == nil { Button("Retry") { Task { await load() } }.buttonStyle(BorderedButton()) } }
+                HStack {
+                    Text(error).font(Theme.body(14))
+                    if original == nil { Button("Retry") { Task { await load() } }.buttonStyle(BorderedButton()) }
+                    else if phoneRefreshFailed {
+                        Button("Retry") { Task { await refreshSavedPhoneSite() } }.buttonStyle(BorderedButton())
+                    }
+                }
                     .padding(12).overlay(Rectangle().stroke(Theme.ink, lineWidth: Theme.border))
             }
             if let notice { Text(notice).font(Theme.body(14)) }
@@ -124,6 +130,9 @@ struct SiteSettingsView: View {
                         switch section {
                         case "Domain": domainFields
                         case "Storage": storageFields
+                        case "Mobile": MobileSettingsView(siteID: siteID, onSavedSite: mergeSavedPhoneSite,
+                                                          onDone: { section = "Site" }, onCleanup: refreshSavedPhoneSite)
+                            .disabled(busy || model.publishing.contains(siteID))
                         case "Money": paymentFields
                         case "Advanced": advancedFields
                         case "Contributors": ContributorsView(siteID: siteID)
@@ -145,6 +154,7 @@ struct SiteSettingsView: View {
         }
         .alert("Remove this site from this computer?", isPresented: $confirmDelete) {
             Button("Remove site", role: .destructive) { Task { await removeSite() } }
+                .disabled(siteOperationInProgress)
             Button("Cancel", role: .cancel) {}
         } message: { Text("This removes its local posts and publishing key. Keep a backup first. Published copies may remain online.") }
     }
@@ -168,7 +178,7 @@ struct SiteSettingsView: View {
             if section == "Contributors" {
                 Button { model.publish(siteID) } label: {
                     Label("Publish", systemImage: "arrow.up.right")
-                }.disabled(model.publishing.contains(siteID))
+                }.disabled(siteOperationInProgress)
                 Button { model.screen = .site(siteID) } label: {
                     Label("Done", systemImage: "checkmark")
                 }
@@ -177,14 +187,52 @@ struct SiteSettingsView: View {
                     IconActionButton("Cancel", systemImage: "xmark") { model.screen = .site(siteID) }
                         .disabled(busy)
                     IconActionButton(busy && !claiming ? "Saving…" : "Save settings", systemImage: "checkmark") { save(publish: false) }
-                        .disabled(busy || name.trimmingCharacters(in: .whitespaces).isEmpty).keyboardShortcut("s")
+                        .disabled(saveDisabled).keyboardShortcut("s")
                 }
                 Button { save(publish: true) } label: {
                     Text("Save & publish")
                 }.buttonStyle(BorderedButton(kind: .hot))
-                    .disabled(busy || name.trimmingCharacters(in: .whitespaces).isEmpty)
+                    .disabled(saveDisabled)
             }
         }.buttonStyle(TextActionButtonStyle()).fixedSize(horizontal: true, vertical: false)
+    }
+
+    private var saveDisabled: Bool {
+        siteOperationInProgress || phoneRefreshFailed
+            || name.trimmingCharacters(in: .whitespaces).isEmpty
+    }
+
+    private var siteOperationInProgress: Bool {
+        busy || model.publishing.contains(siteID) || model.phonePreparationCleanups > 0
+    }
+
+    private func mergeSavedPhoneSite(_ saved: Site) {
+        guard let previous = original, saved.id == siteID else { return }
+        let merged = MobileSettingsSavedSiteMerge(saved: saved, previous: previous, storage: storage,
+                                                  storageChoiceChanged: storageChoiceChanged, gateway: gateway)
+        storage = merged.storage
+        storageChoiceChanged = merged.storageChoiceChanged
+        gateway = merged.gateway
+        if freeName == (previous.croptopName ?? "") {
+            freeName = SiteStorage.isCroptopHost(saved.croptopHost) ? (saved.croptopName ?? "") : ""
+        }
+        original = saved
+        if phoneRefreshFailed { error = nil; phoneRefreshFailed = false }
+        // Every other field remains a local draft. Calling load() here would
+        // silently discard edits made in Site/Domain/Advanced before Mobile.
+    }
+
+    private func refreshSavedPhoneSite() async {
+        do {
+            let saved = try await API.shared.site(siteID)
+            guard saved.id == siteID else { throw APIError(message: "The saved site changed.") }
+            mergeSavedPhoneSite(saved)
+        }
+        catch {
+            phoneRefreshFailed = true
+            self.error = "Could not refresh the saved hosting settings. Your edits are kept. Retry before saving."
+        }
+        await model.load()
     }
 
     private var siteFields: some View {
@@ -206,14 +254,14 @@ struct SiteSettingsView: View {
                     .font(Theme.formHelp).textSelection(.enabled)
                     .fixedSize(horizontal: false, vertical: true)
             }
-            if storage == .hosted && original?.storage == .hosted && !host.isEmpty {
+            if usesCroptop && original.map({ $0.storage.usesCroptop(original: $0) }) == true {
                 Labeled(title: "Free site name") {
                     HStack(spacing: 8) {
                         TextField("yourname", text: $freeName).field().disabled(claiming)
                             .onChange(of: freeName) { _ in claimNotice = nil; claimError = nil }
-                        Button(claiming ? "Claiming…" : "Claim") { Task { await claim() } }.buttonStyle(BorderedButton()).disabled(busy || freeName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                        Button(claiming ? "Claiming…" : "Claim") { Task { await claim() } }.buttonStyle(BorderedButton()).disabled(saveDisabled || freeName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
                     }.frame(maxWidth: 440, alignment: .leading)
-                    Text((URL(string: host)?.host ?? "crop.top") + "/" + (freeName.isEmpty ? "yourname" : freeName)).font(Theme.body(14)).textSelection(.enabled)
+                    Text("crop.top/" + (freeName.isEmpty ? "yourname" : freeName)).font(Theme.body(14)).textSelection(.enabled)
                     if claiming {
                         LoadingTicker(accessibilityLabel: "Reserving your address")
                     }
@@ -226,7 +274,7 @@ struct SiteSettingsView: View {
                 }
             } else {
                 Labeled(title: "Free site name") {
-                    if storage == .hosted {
+                    if usesCroptop {
                         Text("Save your storage choice to claim a name.")
                             .font(Theme.formHelp).foregroundColor(Theme.muted)
                     } else {
@@ -281,7 +329,7 @@ struct SiteSettingsView: View {
                     .padding(.top, 8)
                 }.font(Theme.formText)
             }
-            CustomDomainSetup(domain: $customDomain, host: $host, storage: $storage, ipns: original?.ipns ?? "")
+            CustomDomainSetup(domain: $customDomain, ipns: original?.ipns ?? "")
             Labeled(title: "Website gateway", help: "The service used for links to your published site.") {
                 Picker("Website gateway", selection: Binding(get: {
                     storage.effectiveGateway(gateway)
@@ -305,36 +353,23 @@ struct SiteSettingsView: View {
                     .font(Theme.formHelp).foregroundColor(Theme.muted)
                     .fixedSize(horizontal: false, vertical: true)
             }
-            VStack(alignment: .leading, spacing: 8) {
-                Toggle(hostingPresentation.label, isOn: Binding(get: {
-                    storage == .hosted
-                }, set: { storage = $0 ? .hosted : .p2p; storageChoiceChanged = true }))
-                    .toggleStyle(.checkbox).font(Theme.formLabel)
-                    .disabled(busy)
-                Text(hostingPresentation.description)
+            SiteHostingToggle(isOn: Binding(get: { usesCroptop }, set: { enabled in
+                guard let original else { return }
+                let choice = SiteStorage.choosingCroptop(enabled, original: original)
+                storage = choice.storage; storageChoiceChanged = choice.changed
+            }), changed: storageChoiceChanged, busy: siteOperationInProgress,
+                canSave: !saveDisabled,
+                save: { save(publish: true) })
+            if let original, !SiteStorage.isCroptopHost(original.croptopHost) {
+                Text("This site has a custom publishing host. Turn on crop.top and save to switch hosts. Any free site name must be claimed again on crop.top.")
                     .font(Theme.formHelp).foregroundColor(Theme.muted)
                     .fixedSize(horizontal: false, vertical: true)
-                    .padding(.leading, 20)
             }
-            DisclosureGroup("Publishing host") {
-                VStack(alignment: .leading, spacing: 6) {
-                    TextField("https://crop.top", text: $host).field(compact: true)
-                        .frame(maxWidth: 440, alignment: .leading).disabled(claiming)
-                        .accessibilityLabel("Publishing host")
-                    Text("With hosting enabled, another Croptop host receives your content instead of crop.top. Leave empty to use crop.top. This address is remembered when you switch back to P2P.")
-                        .font(Theme.formHelp).foregroundColor(Theme.muted)
-                        .fixedSize(horizontal: false, vertical: true)
-                }.padding(.top, 12)
-            }.font(Theme.formText)
         }
     }
 
-    private var hostingPresentation: (label: String, description: String) {
-        let address = host.trimmingCharacters(in: .whitespacesAndNewlines)
-        if !address.isEmpty, URL(string: address)?.host?.lowercased() != "crop.top" {
-            return ("Use a reliable host", "With hosting enabled, " + address + " receives and serves your site’s content instead of crop.top, including when this computer is offline. Save and publish to send your content there.")
-        }
-        return ("Use crop.top", "Add crop.top as a reliable, fast peer and let it serve your site’s content, including when this computer is offline. Save and publish to send your content there.")
+    private var usesCroptop: Bool {
+        original.map { storage.usesCroptop(original: $0, explicitlyChanged: storageChoiceChanged) } ?? false
     }
 
     private var appearanceFields: some View {
@@ -549,7 +584,7 @@ struct SiteSettingsView: View {
                 VStack(alignment: .leading, spacing: 10) {
                     Text("Remove this site’s local posts and publishing key from this computer.").font(Theme.formHelp).foregroundColor(Theme.muted)
                     Button { confirmDelete = true } label: { Text("Remove site…").foregroundColor(.red) }
-                        .buttonStyle(BorderedButton()).disabled(busy)
+                        .buttonStyle(BorderedButton()).disabled(siteOperationInProgress)
                 }
             }.padding(16).frame(maxWidth: 440, alignment: .leading)
                 .overlay(Rectangle().strokeBorder(Color.red, lineWidth: 1))
@@ -581,9 +616,7 @@ struct SiteSettingsView: View {
             storage = s.storage
             storageChoiceChanged = false
             customDomain = s.croptopCustomDomain ?? ""
-            host = s.croptopHost?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-            if host.isEmpty { host = "https://crop.top" }
-            freeName = s.croptopName ?? ""
+            freeName = SiteStorage.isCroptopHost(s.croptopHost) ? (s.croptopName ?? "") : ""
             headCode = s.customCodeHead ?? ""; bodyCode = s.customCodeBodyEnd ?? ""; privateSearch = s.doNotIndex ?? false
             // A previously disabled site may retain a saved domain; keep its opt-out.
             analyticsDomain = s.plausibleEnabled == true ? (s.plausibleDomain ?? "") : ""
@@ -613,7 +646,7 @@ struct SiteSettingsView: View {
         } catch { /* A temporary node outage must not discard unsaved edits. */ }
     }
     private func save(publish: Bool) {
-        guard let original else { return }
+        guard let original, !saveDisabled else { return }
         busy = true; error = nil; notice = nil
         Task {
             defer { busy = false }
@@ -628,12 +661,8 @@ struct SiteSettingsView: View {
                 }
                 let trimmedDomain = domain.trimmingCharacters(in: .whitespacesAndNewlines)
                 guard !trimmedDomain.contains("://") && !trimmedDomain.contains("/") else { throw APIError(message: "Enter the name only, such as yoursite.eth.") }
-                host = host.trimmingCharacters(in: .whitespacesAndNewlines)
-                if host.isEmpty { host = "https://crop.top" }
-                if !host.isEmpty {
-                    guard let u = URL(string: host), ["http", "https"].contains(u.scheme), u.host != nil else { throw APIError(message: "Enter a full host address, such as https://crop.top.") }
-                }
-                var changes: [String: Any] = ["name": name, "about": about, "domain": trimmedDomain, "gateway": gateway, "host": host]
+                var changes: [String: Any] = ["name": name, "about": about, "domain": trimmedDomain, "gateway": gateway]
+                if let host = SiteStorage.hostSettingChange(original: original, explicitlyChanged: storageChoiceChanged) { changes["host"] = host }
                 if let choice = storage.settingChange(original: original, explicitlyChanged: storageChoiceChanged) { changes["storage"] = choice }
                 let normalizedCustomDomain: String
                 if customDomain.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
@@ -662,6 +691,9 @@ struct SiteSettingsView: View {
                 guard saved.croptopStorage == storage.rawValue else {
                     throw APIError(message: "The connected background service needs updating to save your storage choice. Your storage choice has not been saved.")
                 }
+                if changes["host"] != nil && !SiteStorage.isCroptopHost(saved.croptopHost) {
+                    throw APIError(message: "Your crop.top hosting choice was not saved. Please update the background service and try again.")
+                }
                 if changes["customDomain"] != nil {
                     guard (saved.croptopCustomDomain ?? "") == normalizedCustomDomain else {
                         throw APIError(message: "The connected background service needs updating to save your custom domain. Your domain has not been saved.")
@@ -683,16 +715,16 @@ struct SiteSettingsView: View {
         }
     }
     private func claim() async {
-        guard !busy, storage == .hosted, original?.storage == .hosted else { return }
+        guard !saveDisabled, usesCroptop, original.map({ $0.storage.usesCroptop(original: $0) }) == true else { return }
         busy = true; claiming = true; claimError = nil; claimNotice = nil
         let requestedName = freeName.trimmingCharacters(in: .whitespacesAndNewlines)
-        let requestedHost = host
+        let requestedHost = SiteStorage.publishingHost
         defer { busy = false; claiming = false }
         do {
             try await API.shared.saveSite(siteID, values: ["host": requestedHost])
             let site = try await API.shared.claimName(siteID, name: requestedName)
             let claimed = site.croptopName ?? requestedName
-            claimNotice = "Claimed " + (URL(string: requestedHost)?.host ?? "crop.top") + "/" + claimed + ". Publish to put your site there."
+            claimNotice = "Claimed crop.top/" + claimed + ". Publish to put your site there."
             await model.load()
         } catch { claimError = error.localizedDescription }
     }
@@ -703,6 +735,7 @@ struct SiteSettingsView: View {
         catch { self.error = error.localizedDescription }
     }
     private func removeSite() async {
+        guard !siteOperationInProgress else { return }
         do { try await API.shared.deleteSite(siteID); await model.load(); model.screen = .feed }
         catch { self.error = error.localizedDescription }
     }

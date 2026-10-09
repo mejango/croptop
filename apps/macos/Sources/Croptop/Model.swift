@@ -14,13 +14,11 @@ enum Screen: Hashable {
 
 enum Sheet: Identifiable {
     case newSite, follow, curate
-    case connectPhone(Site)
     var id: String {
         switch self {
         case .newSite: return "new-site"
         case .follow: return "follow"
         case .curate: return "curate"
-        case .connectPhone(let site): return "phone:" + site.id
         }
     }
 }

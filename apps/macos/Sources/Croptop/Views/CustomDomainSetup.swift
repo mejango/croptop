@@ -30,13 +30,18 @@ struct CustomDomainConfiguration {
         return hostname
     }
 
-    var publishingHost: String { "https://" + hostname }
     var dnsLink: String { "dnslink=/ipns/" + ipns }
     var serverCommand: String {
         "croptop host --domain \(hostname) \\\n  --root \(ipns) \\\n  --listen 127.0.0.1:8090 --data /var/lib/croptop"
     }
     var caddyfile: String {
         "\(hostname) {\n    reverse_proxy 127.0.0.1:8090\n}"
+    }
+    var publishingInstructions: String {
+        "In Croptop’s Storage settings, enable Use crop.top, then Save and publish. Your custom-domain server resolves this site’s IPNS address and fetches its content over IPFS. Network updates may take time to appear."
+    }
+    var existingHostInstructions: String {
+        "If this server previously received direct publishes, use a separate data directory for this gateway. Its old publishing registry would otherwise keep serving the last directly uploaded version. Keep the existing directory as a backup."
     }
 
     var setupInstructions: String {
@@ -52,20 +57,20 @@ struct CustomDomainConfiguration {
         Caddyfile:
         \(caddyfile)
 
+        \(existingHostInstructions)
+
         2. DNS and HTTPS
         Point the A record for \(hostname) to the server's public IPv4 address. In Namecheap, use @ for the root domain or the subdomain prefix (such as www) in the Host field. After DNS points to the server, start Caddy to enable HTTPS.
         A DNSLink TXT record is optional: the command above already connects this site.
 
         3. Publishing
-        In Croptop's Domain settings, choose Publish here for \(publishingHost), then Save & publish. Future publishes automatically send the site files to this host.
+        \(publishingInstructions)
         """
     }
 }
 
 struct CustomDomainSetup: View {
     @Binding var domain: String
-    @Binding var host: String
-    @Binding var storage: SiteStorage
     let ipns: String
     @State private var copied: String?
 
@@ -114,6 +119,7 @@ struct CustomDomainSetup: View {
                         Text("Install the Croptop CLI and Caddy on a server with a public IP address. Allow incoming connections on ports 80 and 443, and give Croptop write access to /var/lib/croptop.")
                         codeBlock("Croptop command", text: configuration.serverCommand)
                         codeBlock("Caddyfile", text: configuration.caddyfile)
+                        Text(configuration.existingHostInstructions)
                         Text("Keep Croptop running as a service. After connecting your domain in the next step, start Caddy to enable HTTPS.")
                         Link("Caddy setup guide", destination: URL(string: "https://caddyserver.com/docs/automatic-https")!)
                             .foregroundColor(Theme.ink)
@@ -144,19 +150,9 @@ struct CustomDomainSetup: View {
     }
 
     private var publishStep: some View {
-        SetupStep(number: 3, title: "Start publishing here") {
-            Text("When your host is ready, choose Publish here to enable hosting for this address, then Save & publish. Future publishes will send your site files here automatically.")
+        SetupStep(number: 3, title: "Publish through crop.top") {
             if let configuration {
-                let selected = storage == .hosted && host.trimmingCharacters(in: .whitespacesAndNewlines) == configuration.publishingHost
-                Button("Publish here") { host = configuration.publishingHost; storage = .hosted }
-                .buttonStyle(TextActionButtonStyle())
-                .disabled(selected)
-                if selected {
-                    Label("Publishing to " + configuration.publishingHost, systemImage: "checkmark")
-                        .textSelection(.enabled)
-                } else {
-                    Text(configuration.publishingHost).foregroundColor(Theme.muted).textSelection(.enabled)
-                }
+                Text(configuration.publishingInstructions)
             }
         }
     }

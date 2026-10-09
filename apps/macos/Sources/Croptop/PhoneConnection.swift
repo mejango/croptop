@@ -395,7 +395,7 @@ struct PhoneConnectionError: Error {
         case "hosting_update_required": return "The hosting service needs an update before it can safely connect this site. Try again after the service is updated."
         case "publication_outcome_unknown": return "Hosting has not confirmed this publication yet. Keep this Mac awake and wait before trying again. Avoid publishing from another device in the meantime."
         case "publication_conflict", "preparation_in_progress": return "Another publication or connection is in progress for this site. Let it finish, then try again."
-        case "site_changed", "identity_changed", "invalid_response": return "The connection details did not match this site. Close this window and try again."
+        case "site_changed", "identity_changed", "invalid_response": return "The connection details did not match this site. Leave Mobile and reopen it to try again."
         default:
             if problem.status == 404 { return "This publisher needs the latest Croptop update before it can connect a phone here." }
             return "Could not prepare this connection. Your site may still be uploading. Keep this Mac awake and try again."
