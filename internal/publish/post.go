@@ -66,14 +66,40 @@ func (p *Publisher) Post(ctx context.Context, hostURL string, key []byte, np New
 	if err != nil {
 		return Posted{}, err
 	}
-
-	entry, err := hostEntry(ctx, hostURL, ipnsName)
+	prepared, err := p.preparePost(ctx, eng, hostURL, ipnsName, np)
 	if err != nil {
 		return Posted{}, err
 	}
+	defer os.RemoveAll(prepared.workDir)
+	if _, err := eng.SignRecord(keyName, prepared.CID, prepared.Sequence); err != nil {
+		return Posted{}, err
+	}
+	p.log("pushing %s at sequence %d", prepared.CID, prepared.Sequence)
+	// The site's policy lives in the rebuilt staging store on a key-only
+	// machine, not in the publisher's otherwise empty persistent store.
+	staged := &Publisher{Store: prepared.store, Node: p.Node, Log: p.Log}
+	if err := staged.pushDir(ctx, prepared.site, keyName, prepared.CID, prepared.Sequence, pushSpec{Parent: prepared.parent, Dir: prepared.changed}); err != nil {
+		return Posted{}, fmt.Errorf("push to %s: %w", hostURL, err)
+	}
+	return prepared.Posted, nil
+}
+
+// preparedPost separates rendering an update from authorizing and pushing it.
+type preparedPost struct {
+	Posted
+	site                     *store.Site
+	store                    *store.Store
+	parent, changed, workDir string
+}
+
+func (p *Publisher) preparePost(ctx context.Context, eng postEngine, hostURL, ipnsName string, np NewPost) (_ preparedPost, resultErr error) {
+	entry, err := hostEntry(ctx, hostURL, ipnsName)
+	if err != nil {
+		return preparedPost{}, err
+	}
 	if !entry.AcceptsParent {
 		// an older host would take the post for the whole site and lose the rest
-		return Posted{}, fmt.Errorf("%s cannot add a post to a site yet; it needs updating", hostURL)
+		return preparedPost{}, fmt.Errorf("%s cannot add a post to a site yet; it needs updating", hostURL)
 	}
 	seq := entry.Sequence + 1
 	nctx, cancel := context.WithTimeout(ctx, networkTimeout)
@@ -81,62 +107,66 @@ func (p *Publisher) Post(ctx context.Context, hostURL string, key []byte, np New
 	cancel()
 	if netErr == nil {
 		if rec.Sequence > entry.Sequence && rec.Value != "/ipfs/"+entry.CID {
-			return Posted{}, fmt.Errorf("the network has a newer version of this site (sequence %d) than %s (sequence %d); publish it from the machine that made it, then post again", rec.Sequence, hostURL, entry.Sequence)
+			return preparedPost{}, fmt.Errorf("the network has a newer version of this site (sequence %d) than %s (sequence %d); publish it from the machine that made it, then post again", rec.Sequence, hostURL, entry.Sequence)
 		}
 		seq = max(seq, rec.Sequence+1)
 	}
 
 	tmp, err := os.MkdirTemp(p.Store.Root, "post-*")
 	if err != nil {
-		return Posted{}, err
+		return preparedPost{}, err
 	}
-	defer os.RemoveAll(tmp)
+	defer func() {
+		if resultErr != nil {
+			os.RemoveAll(tmp)
+		}
+	}()
 	published := filepath.Join(tmp, "published")
 	p.log("reading %s", entry.CID)
 	links, err := p.readVersion(ctx, eng, hostURL, entry.CID, published)
 	if err != nil {
-		return Posted{}, err
+		return preparedPost{}, err
 	}
 	var head store.Site
 	if b, err := os.ReadFile(filepath.Join(published, "planet.json")); err != nil || json.Unmarshal(b, &head) != nil || head.ID == "" {
-		return Posted{}, fmt.Errorf("%s is not a Croptop site (no planet.json with an id)", entry.CID)
+		return preparedPost{}, fmt.Errorf("%s is not a Croptop site (no planet.json with an id)", entry.CID)
 	}
 	if head.IPNS != ipnsName {
-		return Posted{}, fmt.Errorf("that version is the site %s, not %s", head.IPNS, ipnsName)
+		return preparedPost{}, fmt.Errorf("that version is the site %s, not %s", head.IPNS, ipnsName)
 	}
 	if !head.HostingEnabled() {
-		return Posted{}, ErrHostingDisabled
+		return preparedPost{}, ErrHostingDisabled
 	}
 	st := &store.Store{Root: filepath.Join(tmp, "store")}
 	if err := rebuildSource(st, head.ID, published); err != nil {
-		return Posted{}, err
+		return preparedPost{}, err
 	}
 	site, err := st.Site(head.ID)
 	if err != nil {
-		return Posted{}, err
+		return preparedPost{}, err
 	}
 	if NameOf(site) == "" && entry.Name != "" { // sites published before planet.json carried it
 		setRaw(site, NameKey, entry.Name)
 	}
 	SetHost(site, hostURL)
 	if err := st.SaveSite(site); err != nil {
-		return Posted{}, err
+		return preparedPost{}, err
 	}
 	if err := navigationPages(st, site.ID, published); err != nil {
-		return Posted{}, err
+		return preparedPost{}, err
 	}
 	post, err := addPost(st, site.ID, np)
 	if err != nil {
-		return Posted{}, err
+		return preparedPost{}, err
 	}
 	r := &render.Renderer{Store: st, Templates: p.Render.Templates, TemplateFor: p.Render.TemplateFor, CIDs: p.Render.CIDs, FFmpeg: p.Render.FFmpeg, Log: p.Render.Log, Only: post.ID}
 	if err := r.Render(ctx, site.ID); err != nil {
-		return Posted{}, fmt.Errorf("render: %w", err)
+		return preparedPost{}, fmt.Errorf("render: %w", err)
 	}
 
 	changed := filepath.Join(tmp, "changed")
 	if err := os.MkdirAll(changed, 0o755); err != nil {
-		return Posted{}, err
+		return preparedPost{}, err
 	}
 	names := []string{post.ID, "planet.json", "rss.xml"}
 	for t := range post.Tags {
@@ -150,24 +180,14 @@ func (p *Publisher) Post(ctx context.Context, hostURL string, key []byte, np New
 			continue // a template without tag pages
 		}
 		if err := os.Rename(src, filepath.Join(changed, n)); err != nil {
-			return Posted{}, err
+			return preparedPost{}, err
 		}
 	}
 	cid, err := eng.AddOver(ctx, entry.CID, changed)
 	if err != nil {
-		return Posted{}, err
+		return preparedPost{}, err
 	}
-	if _, err := eng.SignRecord(keyName, cid, seq); err != nil {
-		return Posted{}, err
-	}
-	p.log("pushing %s at sequence %d", cid, seq)
-	// The site's policy lives in the rebuilt staging store on a key-only
-	// machine, not in the publisher's otherwise empty persistent store.
-	staged := &Publisher{Store: st, Node: p.Node, Log: p.Log}
-	if err := staged.pushDir(ctx, site, keyName, cid, seq, pushSpec{Parent: entry.CID, Dir: changed}); err != nil {
-		return Posted{}, fmt.Errorf("push to %s: %w", hostURL, err)
-	}
-	return Posted{Result: Result{CID: cid, Sequence: seq}, URL: render.BrowserURL(site, post)}, nil
+	return preparedPost{Posted: Posted{Result: Result{CID: cid, Sequence: seq}, URL: render.BrowserURL(site, post)}, site: site, store: st, parent: entry.CID, changed: changed, workDir: tmp}, nil
 }
 
 type hostKey struct {
