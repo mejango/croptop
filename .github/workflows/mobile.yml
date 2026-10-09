@@ -22,8 +22,8 @@ jobs:
       - uses: actions/setup-go@v5
         with:
           go-version: "1.27"
-      - name: Operation recovery, pairing and desktop connection race checks
-        run: go test -race ./internal/mobile ./internal/server ./scripts/mobile-smoke/bootstrap
+      - name: Publication, cancellation, recovery and desktop connection race checks
+        run: go test -race -p 1 ./internal/ctxlock ./internal/render ./internal/publish ./internal/mobile ./internal/server ./scripts/mobile-smoke/bootstrap
       - name: Isolated pilot packaging and signing cleanup guards
         run: python3 -m unittest discover -s installer -p 'test_pilot_macos.py' -v
       - name: Patched Linux decoder and real HEIC geometry
@@ -53,7 +53,7 @@ jobs:
         env:
           PLAYWRIGHT_MODULE: ${{ runner.temp }}/croptop-playwright/node_modules/playwright/index.mjs
           PLAYWRIGHT_BROWSERS_PATH: ${{ runner.temp }}/croptop-playwright-browsers
-        run: node --test web/mobile/browser.test.mjs
+        run: node --test web/mobile/browser.test.mjs web/mobile-connect.test.mjs
       - name: Worker security boundary and existing host regressions
         working-directory: worker
         run: node --experimental-loader ./text-loader.mjs --test test/*.test.mjs
@@ -65,6 +65,15 @@ jobs:
           npx --yes wrangler@4.145.0 deploy --dry-run --outdir "$RUNNER_TEMP/croptop-worker-production"
           npx --yes wrangler@4.145.0 deploy --dry-run --config wrangler.test.toml --outdir "$RUNNER_TEMP/croptop-worker-staging"
           npx --yes wrangler@4.145.0 deploy --dry-run --config wrangler.mobile.toml --outdir "$RUNNER_TEMP/croptop-worker-mobile"
+
+  macos:
+    runs-on: macos-15
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - name: Native phone setup, cancellation and updater safety
+        working-directory: apps/macos
+        run: swift test
 
   ios:
     runs-on: macos-15

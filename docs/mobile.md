@@ -105,11 +105,21 @@ The tag workflow staged artifacts before promotion. A published-only GitHub look
 
 ## Connect an existing site
 
-On a Mac, choose **Croptop → Check for Updates…**, install 0.13.20 or later, then open the site and choose **Connect phone** (the phone button beside Settings). A signed [Mac download](https://github.com/mejango/croptop/releases/tag/v0.13.20) is available if needed. The app and normal CLI already use the correct trusted service origin; no shell flags or advance site-URL registration are required. Custom deployments may explicitly override `--mobile-origin`. The page checks hosting consent and publishes current compatibility metadata through the normal conflict-checked publisher. A stale local copy must be synchronized, not force-published. An already-hosted identical content CID is ready even when an unchanged local republish increments only the local sequence.
+On a Mac, choose **Croptop → Check for Updates…**, then open the site and choose **Connect phone** (the phone button beside Settings). Stable 0.13.20/build1161 currently opens the local browser setup; the native setup and readiness fix described below is being prepared for the next normal update. A signed [Mac download](https://github.com/mejango/croptop/releases/tag/v0.13.20) is available if needed. The app and normal CLI already use the correct trusted service origin; no shell flags or advance site-URL registration are required. Custom deployments may explicitly override `--mobile-origin`.
 
 Scan/open the short-lived link on the phone (native companions can accept the link), compare the displayed confirmation code on both devices, and confirm. This is a one-time desktop step; later posting does not require that desktop to stay awake. Local PKCS8 Ed25519 PEM import remains available. Import alone does not silently enable service use or change a site's hosting policy.
 
 If the site uses an unsupported template or another publishing host, connection fails explicitly. Do not migrate the site or opt it into hosting automatically. To stop, disable phone publishing in the connected client; disconnecting locally removes that client's key/session only. Already published posts remain public.
+
+### In-app setup and hosted-readiness fix (not yet released)
+
+The next Mac update replaces the browser redirect with a native sheet containing hosting/publication consent, preparation stages, a locally generated private QR/link, the phone's eight-digit confirmation code, expiry and retry. It captures the selected site and keeps the updater from relaunching while setup or its cancellation is active. The CLI's local browser setup remains available and uses the same preparation API.
+
+Preparation first checks the already-published site. A verified compatible hosted site connects without rendering or publishing saved desktop edits. If initial hosting or compatibility metadata needs publication, explicit permission is required; the Mac checkbox says that the current desktop site will be published if necessary. The browser fallback asks separately before that publication. A temporary service error is not treated as permission to publish.
+
+Required bootstrap publication renders and uploads synchronously to the host, retains the ordinary conflict checks, uses a parent-checked manifest even for full uploads, and verifies the signed hosted head before session enrollment. The desktop does not wait for a foreground DHT announcement. An unchanged hosted CID remains valid even if the local sequence is higher. A previously published site whose hosted head is absent must be published through the ordinary publisher first: the existing host protocol cannot safely compare-and-set an absent historical head. Never force/reset its sequence to bypass this check.
+
+Preparation has a five-minute overall context, bounded network stages and cancellation-aware operation gates. Polling/cancellation stay responsive while publication runs. Cancellation waits for the worker to acknowledge stopping; local rendering checks cancellation between operations, not by interrupting an in-flight filesystem/codec call. Hosting permission, a publication already committed, and a key already sent are not undone. Retrying uses verified current state rather than assuming a failed response means nothing happened. These changes do not require a hosted service or composer deployment.
 
 ## Verification and device acceptance
 
