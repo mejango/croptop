@@ -1,0 +1,17 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Connect shop - Croptop</title><link rel="stylesheet" href="/style.css"><link rel="stylesheet" href="/shop.css">
+<script defer src="/shop-assets/ethers.umd.min.js"></script><script defer src="/shop-assets/scripts/chains.js"></script><script defer src="/shop-assets/scripts/tx.js"></script><script defer src="/shop-connect.js"></script></head>
+<body class="shop-page"><main><header class="shop-header"><span class="shop-logo"><img src="/shop-logo.png" width="108" height="108" alt="Croptop"></span><h1>Connect shop</h1></header>
+<p class="shop-advanced">Allow Croptop to add posts to your shop and set the minimum post price.</p>
+<p id="message" role="status" aria-live="polite">Loading…</p>
+<section id="setup" hidden><p id="shop-target" class="help"></p><p id="permission-status"></p>
+<form id="connect-details" class="sheet">
+<div class="shop-field"><div class="shop-field-heading"><label for="connect-price">Price</label><p id="connect-price-help" class="help">Set the minimum price for posts added in this shop category.</p></div>
+<div class="shop-price"><span id="price-unit"></span><input id="connect-price" type="text" inputmode="decimal" aria-describedby="connect-price-help" required></div></div>
+<div id="posting-rules" class="help"></div>
+<button id="review-setup" class="btn" type="submit">Review setup</button></form>
+<section id="setup-review" hidden><h2>Review</h2><p id="step-description"></p><p id="setup-cost" class="help"></p><button id="approve-setup" class="btn" type="button">Approve in wallet</button></section>
+<section id="setup-progress" hidden><h2>Progress</h2><p id="transaction-status"></p><label for="setup-hash">Transaction hash</label><input id="setup-hash" type="text" placeholder="0x…" autocomplete="off"><div class="row"><button id="check-setup" class="btn" type="button">Check transaction</button><button id="retry-setup" class="btn" type="button" hidden>Review saved transaction</button></div></section>
+<button id="finish-setup" class="btn" type="button" hidden>Connect shop</button>
+<p><a id="settings-link">Back to settings</a></p></section>
+<noscript>Enable JavaScript to connect a shop.</noscript></main></body></html>

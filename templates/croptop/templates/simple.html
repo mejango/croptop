@@ -1,0 +1,43 @@
+{% extends 'base.html' %}
+{% block top %}{% endblock %}
+{% block main %}
+<div id="body-dom" >
+  <div class="body-content centered-content content-top-offset">
+    <div id="post-header" class="post-header body-header mobile-padding negative-space">
+      <div id="post-title">
+        <span id="post-date">{{ article.created|mdyydot }}</span>
+        <span id="post-name">{{ article.title }}</span>
+      </div>
+      {% if article.externalLink != nil %}
+      <div id="post-subtitle" class="negative-space">
+          <span id="post-link"><a href="{{ article.externalLink }}" target="_blank">{{ article.externalLink }}</a></span>
+      </div>
+      {% endif %}
+    </div>
+
+    {% if article.hasVideo %}
+    <video id="post-cover-video" controls playsinline>
+      <source src="{{ article.videoFilename }}">
+    </video>
+    {% endif %}
+
+    {% if article.hasAudio %}
+    <div id="post-cover-audio-container" class="mobile-padding">
+      <audio id="post-cover-audio" controls>
+        <source src="{{ article.audioFilename }}">
+      </audio>
+    </div>
+    {% endif %}
+
+    <div id="post-content" class="mobile-padding">
+    {% if content_html.count > 0 %}
+      {{ content_html }}
+    {% else %}
+      {% if article.heroImageFilename %}
+      <img src="{{ article.heroImageFilename }}">
+      {% endif %}
+    {% endif %}
+    </div>
+  </div>
+</div>
+{% endblock %}

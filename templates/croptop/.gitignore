@@ -1,0 +1,7 @@
+.idea
+.DS_Store
+dev/out/
+dev/.venv/
+dev/settings.local.json
+.playwright-mcp/
+__pycache__/

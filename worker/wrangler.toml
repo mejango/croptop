@@ -1,0 +1,29 @@
+name = "croptop-host"
+main = "src/index.js"
+compatibility_date = "2026-09-01"
+
+# the text imports (scripts and docs) are served from the bare domain
+rules = [{ type = "Text", globs = ["**/*.sh", "**/*.ps1", "**/*.md"] }]
+
+# crop.top: the bare domain and every subdomain
+routes = [
+  { pattern = "crop.top/*", zone_name = "crop.top" },
+  { pattern = "*.crop.top/*", zone_name = "crop.top" },
+]
+
+[vars]
+DOMAIN = "crop.top"
+ROOT = "croptop.eth"           # what the bare domain shows beside claimed names
+UPSTREAMS = "eth.sucks,eth.shop,https://croptop-host-production.up.railway.app"
+NODE = "https://croptop-host-production.up.railway.app"   # every push is replicated here
+
+[[r2_buckets]]
+binding = "SITES"
+bucket_name = "croptop-sites"
+
+[[kv_namespaces]]
+binding = "REGISTRY"
+id = "a938230508a54c0eab93246de54c20a2"
+
+[triggers]
+crons = ["*/30 * * * *"]       # re-publish every pushed IPNS record

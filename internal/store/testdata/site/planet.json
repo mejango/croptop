@@ -1,0 +1,50 @@
+{
+  "about" : "Grow your payments, on your terms",
+  "acceptsDonation" : false,
+  "aggregation" : [
+
+  ],
+  "archived" : false,
+  "created" : 783657837.704158,
+  "customCodeBodyEndEnabled" : false,
+  "customCodeBodyStartEnabled" : false,
+  "customCodeHeadEnabled" : false,
+  "dWebServicesEnabled" : false,
+  "discordLink" : "",
+  "doNotIndex" : false,
+  "domain" : "cocopay.eth.shop",
+  "farcasterEnabled" : false,
+  "filebaseAPIToken" : "",
+  "filebaseEnabled" : false,
+  "filebasePinName" : "",
+  "githubUsername" : "",
+  "id" : "FF5F456D-904F-4EE6-8BB5-AD175C65319A",
+  "ipns" : "k51qzi5uqu5dhxiwvl4xx3sco13y50yoo28rbhe3sneirnj2qatinx75qpsqtb",
+  "juiceboxEnabled" : false,
+  "lastPublished" : 784216063.036531,
+  "lastPublishedCID" : "bafybeigdfeslmj3qh7cwiehrd5l4cfq6qhgctcxxlk6ou3y3ywq5wfqil4",
+  "mastodonUsername" : "",
+  "name" : "CocoPay 🥥",
+  "pinnableAPIEndpoint" : "",
+  "pinnableEnabled" : false,
+  "plausibleAPIKey" : "",
+  "plausibleAPIServer" : "plausible.io",
+  "plausibleDomain" : "",
+  "plausibleEnabled" : false,
+  "podcastCategories" : {
+
+  },
+  "podcastExplicit" : false,
+  "podcastLanguage" : "en",
+  "prewarmNewPost" : true,
+  "reuseOriginalID" : false,
+  "saveRoundAvatar" : false,
+  "tags" : {
+    "logo" : "logo",
+    "mockups" : "mockups"
+  },
+  "telegramUsername" : "",
+  "templateName" : "Croptop",
+  "twitterUsername" : "",
+  "updated" : 784216060.786327
+}

@@ -1,0 +1,51 @@
+<!-- start: deps (vendored; versions listed in README) -->
+
+<!-- bs58 browserify bundle (version unlabeled) -->
+<meta name="croptop-prefix" content="{{ assets_prefix }}">{% if article_id %}<meta name="croptop-post" content="{{ article_id }}">{% endif %}
+<script type="text/javascript" src="{{ assets_prefix }}assets/bs58.bundle.js?t={{ build_timestamp }}"></script>
+<!-- markdown-it 13.0.1: https://cdnjs.cloudflare.com/ajax/libs/markdown-it/13.0.1/markdown-it.min.js -->
+<script type="text/javascript" src="{{ assets_prefix }}assets/markdown-it.min.js?t={{ build_timestamp }}"></script>
+<!-- markdown-it-task-lists 2.1.1: https://unpkg.com/markdown-it-task-lists@2.1.1/dist/markdown-it-task-lists.js -->
+<script type="text/javascript" src="{{ assets_prefix }}assets/markdown-it-task-lists.js?t={{ build_timestamp }}"></script>
+<!-- markdown-it-anchor (version unlabeled) -->
+<script type="text/javascript" src="{{ assets_prefix }}assets/markdownItAnchor.umd.js?t={{ build_timestamp }}"></script>
+<!-- markdown-it-footnote (version unlabeled) -->
+<script type="text/javascript" src="{{ assets_prefix }}assets/markdown-it-footnote.min.js?t={{ build_timestamp }}"></script>
+
+<!-- end: deps -->
+
+<!-- start: ethers 6.13.7 -->
+
+<script type="text/javascript" src="{{ assets_prefix }}assets/ethers.umd.min.js?t={{ build_timestamp }}"></script>
+
+<!-- end: ethers -->
+
+<!-- start: utils -->
+
+<script type="text/javascript" src="{{ assets_prefix }}assets/scripts/chains.js?t={{ build_timestamp }}"></script>
+<script type="text/javascript" src="{{ assets_prefix }}assets/scripts/abis.js?t={{ build_timestamp }}"></script>
+<script type="text/javascript" src="{{ assets_prefix }}assets/scripts/utils.js?t={{ build_timestamp }}"></script>
+
+<!-- end: utils -->
+
+<!-- start: tx -->
+
+<script type="text/javascript" src="{{ assets_prefix }}assets/scripts/tx.js?t={{ build_timestamp }}"></script>
+
+<!-- end: tx -->
+
+<!-- start: croptop_publisher -->
+
+<script type="text/javascript" src="{{ assets_prefix }}assets/scripts/txs/croptop_publisher.js?t={{ build_timestamp }}"></script>
+
+<!-- end: croptop_publisher -->
+
+<!-- start: croptop_deployer -->
+
+<script type="text/javascript" src="{{ assets_prefix }}assets/scripts/txs/croptop_deployer.js?t={{ build_timestamp }}"></script>
+
+<!-- end: croptop_deployer -->
+<!-- widget runtime: window.croptop, see README -->
+<script type="text/javascript" src="{{ assets_prefix }}assets/scripts/croptop.js?t={{ build_timestamp }}"></script>
+
+<script src="{{ assets_prefix }}assets/scripts/audio-player.js?t={{ build_timestamp }}" defer></script>

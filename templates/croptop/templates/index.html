@@ -1,0 +1,1169 @@
+{% extends 'base.html' %}
+{% block head %}
+{% include 'modules/head.html' %}
+{% include 'modules/planet_seo.html' %}
+{% endblock %}
+
+{% block dom_ready %}
+window.onpopstate = function(event) {
+  if (event.state) {
+    const postModal = document.getElementById("post-modal");
+    postModal.style.display = "none";
+  }
+};
+{% endblock %}
+
+{% block main %}
+<div id="body-dom">
+  <div id="body-header">
+    <div id="tags-container">
+      <div id="tags">
+        <div id="default-tag" class="tag"><span class="tag-text">all</span></div>
+        {% for tag in planet.tags %}
+        <div id="custom-tag-{{ tag }}" class="tag custom-tag"><span class="tag-text">{{ tag }}</span><span class="remove">×</span></div>
+        {% endfor %}
+      </div>
+    </div>
+    <div id="post-mode-button" class="post-mode-button" role="group" aria-label="Post view">
+      <button type="button" id="single-post-mode-button" class="post-mode-button-icon" aria-label="Single" aria-pressed="false" title="Single"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><path d="M3 3h18v18H3z"/></svg></button>
+      <button type="button" id="grid-post-mode-button" class="post-mode-button-icon post-mode-button-active" aria-label="Tiles" aria-pressed="true" title="Tiles"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><path d="M3 3h7v7H3zM14 3h7v7h-7zM3 14h7v7H3zM14 14h7v7h-7z"/></svg></button>
+      <button type="button" id="more-post-mode-button" class="post-mode-button-icon" aria-label="More" aria-pressed="false" title="More"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><circle cx="5" cy="5" r="1.5" fill="currentColor" stroke="none"/><circle cx="12" cy="5" r="1.5" fill="currentColor" stroke="none"/><circle cx="19" cy="5" r="1.5" fill="currentColor" stroke="none"/><circle cx="5" cy="12" r="1.5" fill="currentColor" stroke="none"/><circle cx="12" cy="12" r="1.5" fill="currentColor" stroke="none"/><circle cx="19" cy="12" r="1.5" fill="currentColor" stroke="none"/><circle cx="5" cy="19" r="1.5" fill="currentColor" stroke="none"/><circle cx="12" cy="19" r="1.5" fill="currentColor" stroke="none"/><circle cx="19" cy="19" r="1.5" fill="currentColor" stroke="none"/></svg></button>
+      <button type="button" id="list-post-mode-button" class="post-mode-button-icon" aria-label="List" aria-pressed="false" title="List"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><path d="M3 5h18M3 12h18M3 19h18"/></svg></button>
+    </div>
+  </div>
+  <div class="body-content">
+    <div id="post-frames-container"></div>
+    <div id="post-list-container"></div>
+    <div id="posts-loading-animation" class="body-loading-animation loading-animation"></div>
+  </div>
+</div>
+{% include './fork-modal.html' %}
+<div id="post-modal" class="modal negative-space">
+  <div class="modal-content body-content centered-content content-top-offset negative-space">
+    <button type="button" aria-label="Close" class="square-button exit-button mobile-padding negative-space"><span class="exit-button-text negative-space">×</span></button>
+    {% include './post-page.html' %}
+  </div>
+</div>
+<script>
+  // Configuration constants.
+  const IndexCONFIG = {
+    horizontalMargin: 20,
+    verticalMargin: 20,
+    postFrameWidthClasses: ["post-frame-w1"], //, "post-frame-w3", "post-frame-w3"];
+    noScrollEffectEdgeDistance: 80,
+    toggleNavVisibilityScrollThreshold: 50,
+    pagingMargingBottom: 100,
+    timeTillIdle: 2000,
+    defaultPageSize: 200,
+    scrollFast: 3,
+    threshold: 0.95
+  };
+
+  // DOM element cache for better performance.
+  const IndexDOM = {
+    postModal: document.getElementById("post-modal"),
+    postFramesContainer: document.getElementById("post-frames-container"),
+    postListContainer: document.getElementById("post-list-container"),
+    postsLoadingAnimation: document.getElementById("posts-loading-animation"),
+    postFormStateChainInput: document.getElementById("post-form-state-chain-input"),
+    postFormStateCollectionAddressInput: document.getElementById("post-form-state-collection-address-input"),
+    postModeButton: document.getElementById("post-mode-button"),
+    singlePostModeButton: document.getElementById("single-post-mode-button"),
+    gridPostModeButton: document.getElementById("grid-post-mode-button"),
+    morePostModeButton: document.getElementById("more-post-mode-button"),
+    listPostModeButton: document.getElementById("list-post-mode-button"),
+    tagsContainer: document.getElementById("tags-container"),
+    defaultTag: document.getElementById("default-tag"),
+    topDomShrinkWrapper: document.getElementById("top-dom-shrink-wrapper"),
+    headerContainer: document.getElementById("header-container"),
+    topDom: document.getElementById("top-dom"),
+    bodyDom: document.getElementById("body-dom"),
+  };
+
+  // Layout variables.
+  let posts = [];
+  let currentRow = 1;
+  let greatestRightInRow = 0;
+  let rows = [];
+  let lastScrollTop = 0;
+
+  // State variables.
+  let nextPageOffset = 0;
+  let canLoadNewPosts = true;
+  let hasDecoratedTags = false;
+  let activeTags = [];
+  let projectTags =  {};
+  let postsGeneration = 0;
+  // The owner picks the opening view in the app; anything unknown is tiles.
+  let postMode = ["single", "frames", "more", "list"].includes("{{ user_settings['postViewMode'] }}") ? "{{ user_settings['postViewMode'] }}" : "frames";
+
+  // Note: showNav and hideNav functions are defined in top-dom.html
+
+  const loadPostsState = async (encodedIPFSUris) => {
+    // Load tiers.
+    const chain = IndexDOM.postFormStateChainInput.value;
+    const collectionAddress = IndexDOM.postFormStateCollectionAddressInput.value;
+
+    const tiers = await tx_view_tiers(collectionAddress, encodedIPFSUris, resolveChainId(chain));
+
+    for (let i in tiers) {
+      const tier = tiers[i];
+      if (tier.id == 0) continue;
+
+      // Set a chain object.
+      if (!tiersCache[chain]) tiersCache[chain] = {};
+
+      // Cache the value.
+      if (!tiersCache[chain][collectionAddress]) tiersCache[chain][collectionAddress] = {};
+      tiersCache[chain][collectionAddress][encodedIPFSUris[i]] = tier;
+    }
+  }
+
+  // Fill a frame's or row's "N left" / "sold out" label from the cached tier.
+  const decoratePostState = (el, stateSelector, collectionAddress, encodedIPFSUri) => {
+    const chain = IndexDOM.postFormStateChainInput.value;
+    const tier = tiersCache[chain]?.[collectionAddress]?.[encodedIPFSUri];
+    if (!tier) return;
+
+    const state = el.querySelector(stateSelector);
+    const remainingSupply = parseInt(tier.remainingSupply.toString());
+    const totalSupply = parseInt(tier.initialSupply.toString());
+
+    if (totalSupply > 0 && remainingSupply == 0) {
+      state.textContent = 'sold out';
+      state.classList.add("alert");
+    } else {
+      state.textContent = `${remainingSupply > 10000000 ? "infinite" : remainingSupply} left`;
+    }
+  }
+
+  const decoratePostFrame = async (postFrame, post, postId, date, name, link, tags, content, coverImageSrc, coverVideoSrc, coverAudioSrc, coverAutogenerated) => {
+    const collectionAddress = IndexDOM.postFormStateCollectionAddressInput.value;
+
+    // Set a default name if needed.
+    if (name === undefined || name === null || name === "") name = "untitled";
+
+    // Get references to frame elements that need decorating.
+    const subtitle = postFrame.querySelector(".post-frame-subtitle");
+    const title = postFrame.querySelector(".post-frame-title");
+
+    // Set the frame and img's ID.
+    postFrame.id = 'frame-' + postId;
+    if (post.heroImageWidth && post.heroImageHeight) {
+      postFrame.setAttribute("data-mediaWidth", post.heroImageWidth);
+      postFrame.setAttribute("data-mediaHeight", post.heroImageHeight);
+    }
+
+    if (post.pinned && post.pinned > 0) {
+      const icon = document.createElement("div");
+      icon.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><path d="m9 3 6 0-1 6 4 4v2h-5v7h-2v-7H6v-2l4-4z"/></svg>';
+      icon.setAttribute('aria-label', 'Pinned post');
+      icon.classList.add("post-frame-pinned-icon");
+      postFrame.appendChild(icon);
+    }
+
+    const verb = content.length > 150 ? "read" : "see";
+
+    // Set the content.
+    title.innerHTML = name;
+    subtitle.innerHTML = `${date}${ (post.pinned && post.pinned > 0 ) ? '<span class="space">•</span>pinned' : "" }<span class="space">•</span><span class="post-frame-state">click to ${verb}</span>${ Object.keys(tags).length ? '<span class="space">•</span>' : "" }${Object.values(tags).map(tag => `<div class="tag">${tag}</div>`).join(" ")}`;
+
+    if (post.originalSiteName) {
+      const author = document.createElement("span");
+      author.className = "post-author";
+      author.textContent = post.originalSiteName + " · ";
+      subtitle.prepend(author);
+    }
+
+    if (name == "✃") title.classList.add("bigger-font");
+
+    if (coverVideoSrc) {
+      const frameVideo = document.createElement("video");
+      const frameVideoCurrentTime = document.createElement("span");
+      const frameVideoDuration = document.createElement("span");
+      const frameVideoAnimation = document.createElement("span");
+      frameVideo.classList.add("post-frame-video");
+      frameVideoAnimation.id = 'frame-video-' + postId;
+      frameVideo.style.display = "block";
+      frameVideo.autoplay = false;
+      frameVideo.loop = true;
+      frameVideo.poster = "{{ assets_prefix }}" + postId + "/_videoThumbnail.png";
+      frameVideo.playsInline = true;
+      frameVideo.preload = "auto";
+      frameVideo.muted = true;  // So hover to play works. See https://developer.chrome.com/blog/autoplay/
+      // TODO: If user has interacted with the page, unmute.
+      frameVideo.controls = false;
+      // Mark videos with playback info.
+      subtitle.appendChild(document.createTextNode(" • "));
+      subtitle.appendChild(frameVideoAnimation);
+      subtitle.appendChild(frameVideoCurrentTime);
+      subtitle.appendChild(frameVideoDuration);
+      frameVideo.src = coverVideoSrc;
+      prepareAudioAnimation(frameVideoAnimation.id);
+      postFrame.appendChild(frameVideo);
+
+      const overlay = document.createElement("div");
+      overlay.innerHTML = "[▶]";
+      overlay.classList.add("overlay-play-icon");
+      postFrame.appendChild(overlay);
+
+      frameVideo.addEventListener('loadedmetadata', () => {
+        frameVideoDuration.textContent = formatPlayclock(frameVideo.duration);
+        frameVideoCurrentTime.textContent = ` ${formatPlayclock(frameVideo.currentTime)} / `;
+      });
+      frameVideo.addEventListener('timeupdate', () => {
+          frameVideoCurrentTime.textContent = ` ${formatPlayclock(frameVideo.currentTime)} / `;
+      });
+      let hideInfoAnimation;
+      frameVideo.addEventListener("mouseover", () => {
+        if (!frameVideo.paused) return;
+        frameVideo.play();
+        startAudioAnimation(frameVideoAnimation.id);
+      });
+      frameVideo.addEventListener("mousemove", () => {
+        postFrame.classList.remove("idle");
+        clearTimeout(hideInfoAnimation);
+        hideInfoAnimation = setTimeout(() => {
+          postFrame.classList.add("idle");
+        }, IndexCONFIG.timeTillIdle);
+      });
+      frameVideo.addEventListener("mouseout", () => {
+        clearTimeout(hideInfoAnimation);
+        frameVideo.pause();
+        stopAudioAnimation(frameVideoAnimation.id);
+      });
+    } else if (coverAudioSrc) {
+      const frameAudioContainer = document.createElement("div");
+      const frameAudio = document.createElement("audio");
+      const frameAudioSource = document.createElement("source");
+      const frameAudioCurrentTime = document.createElement("span");
+      const frameAudioDuration = document.createElement("span");
+      const frameAudioAnimation = document.createElement("span");
+      frameAudioContainer.classList.add("post-frame-audio-container");
+      frameAudioCurrentTime.classList.add("post-frame-audio-play-clock");
+      frameAudioDuration.classList.add("post-frame-audio-play-clock");
+      frameAudioAnimation.id = 'frame-audio-' + postId;
+      frameAudio.autoplay = false;
+      frameAudio.loop = true;
+      frameAudio.muted = false;
+      frameAudio.controls = false;
+      subtitle.innerHTML = `${subtitle.innerHTML}`;
+      frameAudioSource.src = coverAudioSrc;
+      frameAudioSource.loading = "lazy";
+      frameAudio.appendChild(frameAudioSource);
+      frameAudioContainer.appendChild(frameAudio);
+      frameAudioContainer.appendChild(frameAudioAnimation);
+      frameAudioContainer.appendChild(frameAudioCurrentTime);
+      frameAudioContainer.appendChild(frameAudioDuration);
+      postFrame.appendChild(frameAudioContainer);
+      prepareAudioAnimation(frameAudioAnimation.id);
+      frameAudio.addEventListener('loadedmetadata', () => {
+        frameAudioDuration.textContent = formatPlayclock(frameAudio.duration);
+        frameAudioCurrentTime.textContent = ` ${formatPlayclock(frameAudio.currentTime)} / `;
+      });
+      frameAudio.addEventListener('timeupdate', () => {
+          frameAudioCurrentTime.textContent = ` ${formatPlayclock(frameAudio.currentTime)} / `;
+      });
+      frameAudioContainer.addEventListener("mouseover", () => {
+        if (!frameAudio.paused) return;
+        frameAudio.play();
+        startAudioAnimation(frameAudioAnimation.id);
+      });
+      frameAudioContainer.addEventListener("mouseout", () => {
+        frameAudio.pause();
+        stopAudioAnimation(frameAudioAnimation.id);
+      });
+
+      const overlay = document.createElement("div");
+      overlay.innerHTML = "[▶]";
+      overlay.classList.add("overlay-play-icon");
+      postFrame.appendChild(overlay);
+
+    } else if (coverImageSrc && !coverAutogenerated) {
+      const frameImage = document.createElement("img");
+      frameImage.classList.add("post-frame-image");
+      frameImage.style.display = "block";
+      frameImage.src = coverImageSrc;
+      frameImage.loading = "lazy";
+      postFrame.appendChild(frameImage);
+    } else if (window.croptop && croptop.hasPreview(post)) {
+      const frameWidget = document.createElement("div");
+      frameWidget.classList.add("post-frame-widget");
+      postFrame.appendChild(frameWidget);
+      croptop.preview(frameWidget, postId, post, "frame");
+    } else {
+      const frameText = document.createElement("div");
+      frameText.classList.add("post-frame-text");
+      frameText.innerHTML = content.slice(0, 200).replace(/\n/g, "<br>");
+      postFrame.appendChild(frameText);
+    }
+
+    const encodedIPFSUriPromise = encodeIPFSUriFrom("{{ assets_prefix }}", postId);
+    let encodedIPFSUri = "0x" + "0".repeat(64);
+    encodedIPFSUriPromise.then(uri => { encodedIPFSUri = uri; });
+
+    // Summon a modal when the frame is clicked.
+    postFrame.addEventListener("click", async (e) => {
+      e.preventDefault();
+
+      // Show the modal.
+      IndexDOM.postModal.style.display = "block";
+
+      toggleNavVisibility();
+
+      // Make the modal look right.
+      await decoratePostModal(post, postId, await encodedIPFSUriPromise, name, date, link, renderMarkdown(content), coverImageSrc, coverVideoSrc, coverAudioSrc, coverAutogenerated);
+
+      // Make the body not scrollable.
+      document.body.style.overflow = "hidden";
+    });
+
+    decoratePostState(postFrame, ".post-frame-state", collectionAddress, encodedIPFSUri);
+  }
+
+  const decoratePostRow = async (postRow, post, postId, date, name, link, tags, content, thumbnailImageSrc, thumbnailVideoSrc, thumbnailAudioSrc, thumbnailAutogenerated) => {
+    const collectionAddress = IndexDOM.postFormStateCollectionAddressInput.value;
+
+    // Set a default name if needed.
+    if (name === undefined || name === null || name === "") name = "untitled";
+
+    // Get references to frame elements that need decorating.
+    const subtitle = postRow.querySelector(".post-row-subtitle");
+    const title = postRow.querySelector(".post-row-title");
+    const thumbnail = postRow.querySelector(".post-row-thumbnail");
+
+    const verb = content.length > 150 ? "read" : "see";
+
+    // Set the frame and img's ID.
+    postRow.id = 'row-' + postId;
+
+    // Set the content.
+    title.innerHTML = name;
+    subtitle.innerHTML = `${date} • <span class="post-row-state">click to ${verb}</span> ${ Object.keys(tags).length ? "•" : "" }${Object.values(tags).map(tag => `<div class="tag">${tag}</div>`).join(" ")}`;
+
+    if (post.originalSiteName) {
+      const author = document.createElement("span");
+      author.className = "post-author";
+      author.textContent = post.originalSiteName + " · ";
+      subtitle.prepend(author);
+    }
+
+    if (name == "✃") title.classList.add("bigger-font");
+
+    if (thumbnailVideoSrc) {
+      const thumbnailVideo = document.createElement("video");
+      const thumbnailVideoCurrentTime = document.createElement("span");
+      const thumbnailVideoDuration = document.createElement("span");
+      const thumbnailVideoAnimation = document.createElement("span");
+      thumbnailVideo.classList.add("row-thumbnail-video");
+      thumbnailVideoAnimation.id = 'thumbnail-video-' + postId;
+      thumbnailVideo.style.display = "block"
+      thumbnailVideo.autoplay = false;
+      thumbnailVideo.loop = true;
+      thumbnailVideo.muted = false;
+      thumbnailVideo.controls = false;
+      // Mark videos with playback info.
+      subtitle.appendChild(document.createTextNode(" • "));
+      subtitle.appendChild(thumbnailVideoAnimation);
+      subtitle.appendChild(thumbnailVideoCurrentTime);
+      subtitle.appendChild(thumbnailVideoDuration);
+      prepareAudioAnimation(thumbnailVideoAnimation.id);
+      thumbnailVideo.src = thumbnailVideoSrc;
+      thumbnailVideo.loading = "lazy";
+      thumbnail.appendChild(thumbnailVideo);
+      thumbnailVideo.addEventListener('loadedmetadata', () => {
+        thumbnailVideoDuration.textContent = formatPlayclock(thumbnailVideo.duration);
+        thumbnailVideoCurrentTime.textContent = ` ${formatPlayclock(thumbnailVideo.currentTime)} / `;
+      });
+      thumbnailVideo.addEventListener('timeupdate', () => {
+          thumbnailVideoCurrentTime.textContent = ` ${formatPlayclock(thumbnailVideo.currentTime)} / `;
+      });
+      postRow.addEventListener("mouseover", () => {
+        if (!thumbnailVideo.paused) return;
+        thumbnailVideo.play();
+        startAudioAnimation(thumbnailVideoAnimation.id);
+      });
+      postRow.addEventListener("mouseout", () => {
+        thumbnailVideo.pause();
+        stopAudioAnimation(thumbnailVideoAnimation.id);
+      });
+    } else if (thumbnailAudioSrc) {
+      const rowAudioContainer = document.createElement("div");
+      const rowAudio = document.createElement("audio");
+      const rowAudioSource = document.createElement("source");
+      const rowAudioCurrentTime = document.createElement("span");
+      const rowAudioDuration = document.createElement("span");
+      const rowAudioAnimation = document.createElement("span");
+      rowAudioContainer.classList.add("post-row-audio-container");
+      rowAudioCurrentTime.classList.add("post-row-audio-play-clock");
+      rowAudioDuration.classList.add("post-row-audio-play-clock");
+      rowAudioAnimation.id = 'row-audio-' + postId;
+      rowAudio.autoplay = false;
+      rowAudio.loop = true;
+      rowAudio.muted = false;
+      rowAudio.controls = false;
+      subtitle.innerHTML = `${subtitle.innerHTML} • [▶]`
+      rowAudioSource.src = thumbnailAudioSrc;
+      rowAudioSource.loading = "lazy";
+      rowAudio.addEventListener('loadedmetadata', () => {
+        rowAudioDuration.textContent = formatPlayclock(rowAudio.duration);
+        rowAudioCurrentTime.textContent = ` ${formatPlayclock(rowAudio.currentTime)} / `;
+      });
+      rowAudio.addEventListener('timeupdate', () => {
+          rowAudioCurrentTime.textContent = ` ${formatPlayclock(rowAudio.currentTime)} / `;
+      });
+      rowAudio.appendChild(rowAudioSource);
+      rowAudioContainer.appendChild(rowAudio);
+      rowAudioContainer.appendChild(rowAudioAnimation);
+      rowAudioContainer.appendChild(rowAudioCurrentTime);
+      rowAudioContainer.appendChild(rowAudioDuration);
+      thumbnail.appendChild(rowAudioContainer);
+      prepareAudioAnimation(rowAudioAnimation.id);
+      postRow.addEventListener("mouseover", () => {
+        if (!rowAudio.paused) return;
+        rowAudio.play();
+        startAudioAnimation(rowAudioAnimation.id);
+      });
+      postRow.addEventListener("mouseout", () => {
+        rowAudio.pause();
+        stopAudioAnimation(rowAudioAnimation.id);
+      });
+    } else if (thumbnailImageSrc && !thumbnailAutogenerated) {
+      const thumbnailImage = document.createElement("img");
+      thumbnailImage.classList.add("row-thumbnail-image");
+      thumbnailImage.style.display = "block"
+      thumbnailImage.src = thumbnailImageSrc;
+      thumbnailImage.loading = "lazy";
+      thumbnail.appendChild(thumbnailImage);
+    } else if (window.croptop && croptop.hasPreview(post)) {
+      const thumbnailWidget = document.createElement("div");
+      thumbnailWidget.classList.add("post-row-thumbnail-widget");
+      thumbnail.appendChild(thumbnailWidget);
+      croptop.preview(thumbnailWidget, postId, post, "row");
+    } else {
+      const thumbnailTextContainer = document.createElement("div");
+      const thumbnailText = document.createElement("div");
+      thumbnailTextContainer.classList.add("post-row-thumbnail-text-container");
+      thumbnailText.classList.add("post-row-thumbnail-text");
+      thumbnailText.innerHTML = content.slice(0, 100).replace(/\n/g, "<br>");
+      thumbnailTextContainer.appendChild(thumbnailText)
+      thumbnail.appendChild(thumbnailTextContainer);
+    }
+
+    const encodedIPFSUriPromise = encodeIPFSUriFrom("{{ assets_prefix }}", postId);
+    let encodedIPFSUri = "0x" + "0".repeat(64);
+    encodedIPFSUriPromise.then(uri => { encodedIPFSUri = uri; });
+
+    // Summon a modal when the frame is clicked.
+    postRow.addEventListener("click", async (e) => {
+      e.preventDefault();
+
+      // Show the modal.
+      IndexDOM.postModal.style.display = "block";
+
+      toggleNavVisibility();
+
+      // Make the modal look right.
+      await decoratePostModal(post, postId, await encodedIPFSUriPromise, name, date, link, renderMarkdown(content), thumbnailImageSrc, thumbnailVideoSrc, thumbnailAudioSrc, thumbnailAutogenerated);
+
+      // Make the body not scrollable.
+      document.body.style.overflow = "hidden";
+    });
+
+    decoratePostState(postRow, ".post-row-state", collectionAddress, encodedIPFSUri);
+  }
+
+  /// Load the frame contents.
+  const loadMedia = async (container) => {
+    const media = container.querySelector('img:first-of-type') || container.querySelector('video:first-of-type');
+    if (!media) return;
+    const mediaWidth = container.getAttribute("data-mediaWidth");
+    const mediaHeight = container.getAttribute("data-mediaHeight");
+    if (mediaWidth && mediaHeight) {
+      media.style.width = "100%";
+      media.style.aspectRatio = `${mediaWidth}/${mediaHeight}`;
+    }
+    return new Promise((resolve) => {
+      // Resolve if the image if done.
+      if (media.complete) return resolve();
+
+      if (mediaWidth && mediaHeight) return resolve();
+
+      const checkForDimensions = () => {
+        // Resolve if the img has dimensions.
+        if ((media.width || media.videoWidth) && (media.height || media.videoHeight)) return setTimeout(resolve, 500);
+        // Otherwise wait until the image has dimensions.
+        else
+          return requestAnimationFrame(checkForDimensions);
+      }
+
+      checkForDimensions();
+    });
+  }
+
+  /// Get the top.
+  const getTopTarget = (postFrame, row) => {
+    if (row == 1) {
+      return IndexDOM.postFramesContainer.offsetTop;
+    }
+
+    let previousRow = rows[row - 2];
+    let candidatePostFrame;
+
+    for (let j = 0; j < previousRow.postFrameReferences.length; j++) {
+      let postFrameToCheck = previousRow.postFrameReferences[j];
+
+      if (
+        postFrame.left < postFrameToCheck.right + IndexCONFIG.horizontalMargin &&
+        postFrame.right + IndexCONFIG.horizontalMargin > postFrameToCheck.left &&
+        (candidatePostFrame == null || postFrameToCheck.bottom > candidatePostFrame.bottom)
+      ) candidatePostFrame = postFrameToCheck;
+      else if (j == previousRow.postFrameReferences.length - 1 && postFrame.left >= postFrameToCheck.right + IndexCONFIG.horizontalMargin) {
+        return candidatePostFrame ? candidatePostFrame.bottom : getTopTarget(postFrame, row - 1);
+      }
+    }
+
+    if (!candidatePostFrame) {
+      console.log({ postFrame, row, previousRow });
+    }
+
+    return candidatePostFrame.bottom;
+  }
+
+  const framePost = () => {
+    const frame = document.createElement("div");
+    const infoContainer = document.createElement("div");
+    const info = document.createElement("div");
+    const title = document.createElement("div");
+    const subtitle = document.createElement("div");
+
+    frame.classList.add("post-frame");
+    infoContainer.classList.add("post-frame-info-container");
+    info.classList.add("post-frame-info");
+    subtitle.classList.add("post-frame-subtitle");
+    title.classList.add("post-frame-title");
+
+    // Get random width.
+    const widthClass = IndexCONFIG.postFrameWidthClasses[Math.floor(Math.random() * IndexCONFIG.postFrameWidthClasses.length)];
+    frame.classList.add(widthClass);
+
+    info.appendChild(title);
+    info.appendChild(subtitle);
+    infoContainer.appendChild(info);
+    frame.appendChild(infoContainer);
+    IndexDOM.postFramesContainer.appendChild(frame);
+
+    return frame;
+  }
+
+  const listPost = () => {
+    const rowContainer = document.createElement("div");
+    const row = document.createElement("div");
+    const info = document.createElement("div");
+    const title = document.createElement("div");
+    const subtitle = document.createElement("div");
+    const thumbnail = document.createElement("div");
+
+    rowContainer.classList.add("post-row-container");
+    row.classList.add("post-row");
+    info.classList.add("post-row-info");
+    title.classList.add("post-row-title");
+    subtitle.classList.add("post-row-subtitle");
+    thumbnail.classList.add("post-row-thumbnail");
+
+    info.appendChild(title);
+    info.appendChild(subtitle);
+    row.appendChild(thumbnail);
+    row.appendChild(info);
+    rowContainer.appendChild(row);
+    IndexDOM.postListContainer.appendChild(rowContainer);
+
+    return row;
+  }
+
+  const positionAndShowPostFrame = async (postFrame) => {
+    if (postMode !== "frames") {
+      postFrame.style.marginTop = "";
+      postFrame.classList.add("post-frame-fade-in");
+      return;
+    }
+    if (!IndexDOM.postFramesContainer.classList.contains("post-frames-relayout")) await loadMedia(postFrame);
+    if (postMode !== "frames") {
+      postFrame.style.marginTop = "";
+      postFrame.classList.add("post-frame-fade-in");
+      return;
+    }
+
+    const rect = postFrame.getBoundingClientRect();
+    if (rect.left < greatestRightInRow) currentRow++;
+
+    greatestRightInRow = rect.right;
+
+    const heightDiff = rect.top - getTopTarget(rect, currentRow);
+    const newFrame = { left: rect.left, right: rect.right, bottom: rect.bottom - heightDiff + IndexCONFIG.verticalMargin };
+
+    if (currentRow > rows.length) rows.push({ postFrameReferences: [newFrame] });
+    else rows[rows.length - 1].postFrameReferences.push(newFrame);
+
+    const scrollTop = window.pageYOffset || document.documentElement.scrollTop;
+    const marginTop = window.getComputedStyle(postFrame).display == "block" ? 0 : heightDiff + scrollTop - IndexCONFIG.verticalMargin;
+    postFrame.classList.add("post-frame-fade-in");
+    if (IndexDOM.postFramesContainer.classList.contains("post-frames-relayout")) {
+      postFrame.style.marginTop = marginTop ? -marginTop + "px" : "";
+      return;
+    }
+
+    return new Promise((resolve) => {
+      if (marginTop) {
+        const handleEvent = (event) => {
+          if (event.propertyName === "margin-top") {
+            postFrame.removeEventListener("transitionend", handleEvent);
+            resolve();
+          }
+        };
+        postFrame.addEventListener("transitionend", handleEvent);
+        postFrame.style.marginTop = -marginTop + "px";
+        setTimeout(() => {
+          postFrame.removeEventListener("transitionend", handleEvent);
+          resolve();
+        }, 300);
+      } else resolve();
+    });
+  }
+
+  const decoratePostModal = async (post, postId, encodedIPFSUri, name, date, link, content, imageSrc, videoSrc, audioSrc, coverAutogenerated) => {
+    // Get references to modal elements that need decorating.
+    const postFormErrorMessage= document.getElementById("post-form-error-message");
+    const recordPostForm = document.getElementById("record-post-form");
+    const collectPostForm = document.getElementById("collect-post-form");
+    const postImage = document.getElementById("post-cover-image");
+    const postVideo = document.getElementById("post-cover-video");
+    const postAudio = document.getElementById("post-cover-audio");
+    const postContent = document.getElementById("post-content");
+
+    requestAnimationFrame(() => {
+      // The nav is already hidden here, so the header is at its collapsed height (banner included).
+      const paddingTop = IndexDOM.topDom.offsetHeight;
+      IndexDOM.postModal.style.paddingTop = paddingTop + 'px';
+      IndexDOM.postModal.style.scrollPaddingTop = parseFloat(window.getComputedStyle(IndexDOM.postModal).getPropertyValue('scroll-padding-top')) + paddingTop + "px";
+    });
+
+    // Track the modal in browse history.
+    history.pushState({ modalOpened: true, postId }, "", "?id=" + postId);
+
+
+    // Close the modal only when clicking the exit button.
+    // Property assignment so each modal open doesn't stack another handler.
+    const exitButton = IndexDOM.postModal.querySelector('.exit-button');
+    exitButton.onclick = (e) => {
+      // Make the body scrollable.
+      document.body.style.overflow = "auto";
+
+      // If there's a video, pause it.
+      if (videoSrc) postVideo.pause();
+      // If there's audio, pause it.
+      if (audioSrc) postAudio.pause();
+
+      // Hide the RECORD form.
+      recordPostForm.style.display = "none";
+      // Hide the COLLECT form.
+      collectPostForm.style.display = "none";
+      // Hide the error message.
+      postFormErrorMessage.style.display = "none";
+      // Hide the content
+      postImage.style.display = "none"
+      postVideo.style.display = "none"
+      postContent.style.display = "none"
+
+      // Hide the modal.
+      IndexDOM.postModal.style.display = "none";
+
+      toggleNavVisibility();
+
+      // Reset the view stack browsing state.
+      history.pushState({}, "", window.location.pathname);
+    };
+
+    // Show the post page.
+    await decoratePostPage(postId, name, date, link, content, imageSrc, videoSrc, audioSrc, encodedIPFSUri, coverAutogenerated);
+
+    await decorateAttachments(post);
+    await decorateAggregation(post);
+  }
+
+  // A random attachment used to stand in for a cover; scripts and data files are not pictures.
+  const pickImageAttachment = (attachments) => {
+    const images = (attachments || []).filter((a) => /\.(png|jpe?g|gif|webp|svg|avif)$/i.test(a));
+    return images.length ? images[Math.floor(Math.random() * images.length)] : null;
+  };
+
+  const showPostFrames = async (newPosts, position = true) => {
+    const newPostFrames = newPosts.map((post) => {
+      // if post.hasVideo, use _videoThumbnail.png
+      // else use a random attachment
+      const coverImageName = post.hasVideo ? '_videoThumbnail.png' : post.hasAudio ? '_audioThumbnail.png' : post.heroImageFilename ? post.heroImageFilename : pickImageAttachment(post.attachments);
+      const coverImageSrc = coverImageName && './' + post.id + '/' + coverImageName;
+      const coverVideoSrc = post.hasVideo ? './' + post.id + '/' + post.videoFilename : null;
+      const coverAudioSrc = post.hasAudio ? './' + post.id + '/' + post.audioFilename : null;
+      const coverAutogenerated = coverImageName == "_cover.png";
+      const frame = framePost();
+      decoratePostFrame(frame, post, post.id, formatTimestamp(post.created), post.title, post.externalLink, post.tags, post.content, coverImageSrc, coverVideoSrc, coverAudioSrc, coverAutogenerated);
+      return frame;
+    });
+
+    if (position) {
+      for (const postFrame of newPostFrames) await positionAndShowPostFrame(postFrame);
+    }
+  }
+
+  const showPostList = async (newPosts) => {
+    const newPostRows = newPosts.map((post) => {
+      // if post.hasVideo, use _videoThumbnail.png
+      // else use a random attachment
+      const thumbnailImageName = post.hasVideo ? '_videoThumbnail.png' : pickImageAttachment(post.attachments);
+      const thumbnailImageSrc = thumbnailImageName && './' + post.id + '/' + thumbnailImageName;
+      const thumbnailVideoSrc = post.hasVideo ? './' + post.id + '/' + post.videoFilename : null;
+      const thumbnailAudioSrc = post.hasAudio ? './' + post.id + '/' + post.audioFilename : null;
+      const thumbnailAutogenerated = thumbnailImageName == "_cover.png";
+      const row = listPost();
+      decoratePostRow(row, post, post.id, formatTimestamp(post.created), post.title, post.externalLink, post.tags, post.content, thumbnailImageSrc, thumbnailVideoSrc, thumbnailAudioSrc, thumbnailAutogenerated);
+      return row;
+    });
+  }
+
+  const showPosts = async (posts) => {
+    postMode === "list" ? await showPostList(posts) : await showPostFrames(posts);
+    videoMobileScroll();
+  }
+
+  const videoMobileScroll = () => {
+    if (window.screen.availWidth <= 600) {
+      // Select all video elements on the page
+      const videos = document.querySelectorAll('video');
+
+      videos.forEach(video => {
+          video.muted = true; // Mute the video to avoid autoplay restrictions
+          video.loop = true; // Enable video looping
+
+          // Initially, hide the controls
+          video.controls = false;
+
+          // Show controls when hovering over the video
+          video.addEventListener('mouseover', function () {
+              video.controls = true;
+          });
+
+          // Hide controls when the mouse leaves the video
+          video.addEventListener('mouseout', function () {
+              video.controls = false;
+          });
+      });
+
+      // Function to play/pause videos based on visibility
+      const videoObserver = new IntersectionObserver(entries => {
+          entries.forEach(entry => {
+              const video = entry.target;
+              if (entry.isIntersecting) {
+                  // Video is in the viewport, start playing
+                  video.play().catch(error => {
+                      console.error("Video failed to play automatically:", error);
+                  });
+              } else {
+                  // Video is out of the viewport, pause playing
+                  video.pause();
+              }
+          });
+      }, {
+          threshold: IndexCONFIG.threshold // Adjust this threshold if needed
+      });
+
+      // Observe each video
+      videos.forEach(video => {
+          videoObserver.observe(video);
+      });
+    }
+  }
+
+  const loadPosts = async (pageSize) => {
+    if (!canLoadNewPosts) return;
+    canLoadNewPosts = false;
+    const generation = postsGeneration;
+    let more = true;
+    startLoadingAnimation('posts-loading-animation');
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 15000);
+    try {
+      const now = Math.floor(Date.now() / 1000), t = now - (now % 10);
+      const response = await fetch(`{{ assets_prefix }}planet.json?t=${t}`, { signal: controller.signal });
+      if (!response.ok) throw new Error(`Posts unavailable (${response.status})`);
+      const data = await response.json();
+      if (generation !== postsGeneration) return;
+      if (!hasDecoratedTags) {
+        projectTags = data.tags || {};
+        decorateTags();
+        setupBodyPadding();
+        hasDecoratedTags = true;
+      }
+      {% if tag_key %}
+        const articles = (data.articles || []).filter(article => article.tags && '{{ tag_key }}' in article.tags);
+      {% else %}
+        const articles = data.articles || [];
+      {% endif %}
+      const filteredPosts = !activeTags.length ? articles : articles.filter(article => activeTags.every(tag => article.tags?.[tag]));
+      const newPosts = filteredPosts.slice(nextPageOffset, nextPageOffset + pageSize);
+      more = nextPageOffset + newPosts.length < filteredPosts.length;
+      if (!newPosts.length) return;
+      posts = posts.concat(newPosts);
+      nextPageOffset += newPosts.length;
+      // The feed is ready independently of optional collection/RPC data.
+      stopLoadingAnimation('posts-loading-animation');
+      await showPosts(newPosts);
+      const chain = IndexDOM.postFormStateChainInput.value;
+      const collection = IndexDOM.postFormStateCollectionAddressInput.value;
+      if (collection && !/^0x0{40}$/i.test(collection)) {
+        (async () => {
+          const uris = await Promise.all(newPosts.map(post => encodeIPFSUriFrom("{{ assets_prefix }}", post.id)));
+          if (generation !== postsGeneration) return;
+          let stateTimeout;
+          try {
+            await Promise.race([loadPostsState(uris), new Promise((_, reject) => { stateTimeout = setTimeout(() => reject(new Error('Collection lookup timed out')), 12000); })]);
+          } finally { clearTimeout(stateTimeout); }
+          if (generation !== postsGeneration || chain !== IndexDOM.postFormStateChainInput.value || collection !== IndexDOM.postFormStateCollectionAddressInput.value) return;
+          newPosts.forEach((post, i) => {
+            const frame = document.getElementById('frame-' + post.id), row = document.getElementById('row-' + post.id);
+            if (frame) decoratePostState(frame, '.post-frame-state', collection, uris[i]);
+            if (row) decoratePostState(row, '.post-row-state', collection, uris[i]);
+          });
+        })().catch(error => console.warn('Collection information unavailable:', error.message));
+      }
+    } catch (error) {
+      if (generation !== postsGeneration) return;
+      console.warn('Unable to load posts:', error.message);
+      // Retry is explicit so a failing gateway cannot restart the spinner on every scroll.
+      more = false;
+      let retry = document.getElementById('posts-retry');
+      if (!retry) {
+        retry = document.createElement('button'); retry.type = 'button'; retry.id = 'posts-retry'; retry.className = 'square-button'; retry.textContent = 'Retry loading posts';
+        retry.style.cssText = 'width:auto;padding:10px 16px;margin:20px';
+        retry.onclick = () => { retry.remove(); canLoadNewPosts = true; loadPosts(pageSize); };
+        IndexDOM.postsLoadingAnimation.after(retry);
+      }
+    } finally {
+      clearTimeout(timeout);
+      if (generation === postsGeneration) {
+        stopLoadingAnimation('posts-loading-animation');
+        canLoadNewPosts = more;
+      }
+    }
+  }
+
+  const toggleNavVisibility = () => {
+    const forkModal = document.getElementById('fork-modal');
+
+    const currentScrollTop = window.pageYOffset || document.documentElement.scrollTop;
+    const maxScrollTop = document.documentElement.scrollHeight - document.documentElement.clientHeight;
+
+    if (IndexDOM.postModal.style.display == "block" || forkModal.style.display == "block") {
+      hideNav();
+      IndexDOM.topDomShrinkWrapper.style.borderBottomWidth = "1px";
+    } else {
+      if (currentScrollTop <= 0) {
+        showNav();
+        IndexDOM.topDomShrinkWrapper.style.borderBottomWidth = "0px";
+      } else {
+        IndexDOM.topDomShrinkWrapper.style.borderBottomWidth = "1px";
+        if (Math.abs(currentScrollTop - lastScrollTop) < IndexCONFIG.toggleNavVisibilityScrollThreshold) return;
+        if (lastScrollTop > IndexCONFIG.noScrollEffectEdgeDistance && maxScrollTop - lastScrollTop > IndexCONFIG.noScrollEffectEdgeDistance) {
+          if (currentScrollTop > lastScrollTop) hideNav();
+          else showNav();
+        }
+      }
+      lastScrollTop = window.pageYOffset || document.documentElement.scrollTop;
+    }
+  }
+
+  const pageMorePostsIfNeeded = () => {
+    const currentScrollTop = window.pageYOffset || document.documentElement.scrollTop;
+    const maxScrollTop = document.documentElement.scrollHeight - document.documentElement.clientHeight;
+
+    if (maxScrollTop - currentScrollTop < IndexCONFIG.pagingMargingBottom) loadPosts(IndexCONFIG.defaultPageSize);
+  }
+
+  const didScroll = () => {
+    toggleNavVisibility();
+    pageMorePostsIfNeeded();
+  }
+
+  const setupPostMode = () => {
+    const controls = [
+      ["single", IndexDOM.singlePostModeButton],
+      ["frames", IndexDOM.gridPostModeButton],
+      ["more", IndexDOM.morePostModeButton],
+      ["list", IndexDOM.listPostModeButton],
+    ];
+    // Mobile is a feed regardless: single and more collapse into frames.
+    const mobile = window.matchMedia("(max-width: 600px)");
+    const effectiveMode = () => (mobile.matches && postMode !== "list") ? "frames" : postMode;
+    const toggleView = () => {
+      const mode = effectiveMode();
+      IndexDOM.postFramesContainer.classList.toggle("post-frames-more", mode === "more");
+      IndexDOM.postFramesContainer.classList.toggle("post-frames-single", mode === "single");
+      IndexDOM.postFramesContainer.style.display = mode === "list" ? "none" : mode === "more" ? "grid" : "block";
+      IndexDOM.postListContainer.style.display = mode === "list" ? "block" : "none";
+      for (const [m, button] of controls) {
+        button.classList.toggle("post-mode-button-active", mode === m);
+        button.setAttribute("aria-pressed", String(mode === m));
+      }
+    };
+    const layoutFrames = async () => {
+      currentRow = 1;
+      greatestRightInRow = 0;
+      rows = [];
+      const frames = Array.from(IndexDOM.postFramesContainer.children);
+      IndexDOM.postFramesContainer.classList.add("post-frames-relayout");
+      try {
+        for (const frame of frames) frame.style.marginTop = "";
+        for (const frame of frames) await positionAndShowPostFrame(frame);
+      } finally {
+        IndexDOM.postFramesContainer.classList.remove("post-frames-relayout");
+      }
+    };
+    for (const [mode, button] of controls) {
+      button.addEventListener("click", async () => {
+        if (postMode === mode) return;
+        for (const [, control] of controls) control.disabled = true;
+        try {
+          postMode = mode;
+          toggleView();
+          if (mode === "list") {
+            await showPostList(posts.slice(IndexDOM.postListContainer.children.length));
+          } else {
+            await showPostFrames(posts.slice(IndexDOM.postFramesContainer.children.length), false);
+            await layoutFrames();
+          }
+        } finally {
+          for (const [, control] of controls) control.disabled = false;
+        }
+      });
+    }
+    let resizeTimer;
+    window.addEventListener("resize", () => {
+      clearTimeout(resizeTimer);
+      resizeTimer = setTimeout(() => { toggleView(); if (effectiveMode() === "frames") layoutFrames(); }, 150);
+    });
+    toggleView();
+  };
+
+  const resetPage = async () => {
+    postsGeneration++;
+    document.getElementById('posts-retry')?.remove();
+    IndexDOM.postFramesContainer.innerHTML = "";
+    IndexDOM.postListContainer.innerHTML = "";
+
+    posts = [];
+    nextPageOffset = 0;
+    currentRow = 1;
+    greatestRightInRow = 0;
+    rows = [];
+    lastScrollTop = 0;
+    canLoadNewPosts = true;
+    await loadPosts(IndexCONFIG.defaultPageSize);
+  }
+
+  const decorateTags = () => {
+    const allCustomTags = IndexDOM.tagsContainer.querySelectorAll('.custom-tag');
+    const tagsKey = 'tags';
+    const tagValuePrefix = "custom-tag-";
+
+    if (!Object.keys(projectTags).length) {
+      IndexDOM.tagsContainer.style.display = "none";
+      return;
+    } else {
+      IndexDOM.tagsContainer.style.display = "block";
+
+      const slider = IndexDOM.tagsContainer;
+      let isDown = false;
+      let startX;
+      let scrollLeft;
+
+      let isDragging = false;
+      slider.addEventListener('mousedown', (e) => {
+        // Don't start dragging if clicking on a tag
+        if (e.target.closest('.tag')) {
+          return;
+        }
+        isDown = true;
+        isDragging = false;
+        slider.classList.add('active');
+        startX = e.pageX - slider.offsetLeft;
+        scrollLeft = slider.scrollLeft;
+      });
+      slider.addEventListener('mouseleave', () => {
+        isDown = false;
+        isDragging = false;
+        slider.classList.remove('active');
+      });
+      slider.addEventListener('mouseup', (e) => {
+        // If we were dragging, don't trigger tag clicks
+        if (isDragging) {
+          e.preventDefault();
+        }
+        isDown = false;
+        isDragging = false;
+        slider.classList.remove('active');
+      });
+      slider.addEventListener('mousemove', (e) => {
+        if(!isDown) return;
+        isDragging = true;
+        e.preventDefault();
+        const x = e.pageX - slider.offsetLeft;
+        const walk = (x - startX) * IndexCONFIG.scrollFast; //scroll-fast
+        slider.scrollLeft = scrollLeft - walk;
+      });
+    }
+
+    // If no tags are active, set the default tag to active.
+    if (!activeTags.length) IndexDOM.defaultTag.classList.add("active");
+    // Clear tags when the default is clicked.
+    IndexDOM.defaultTag.addEventListener('click', (e) => {
+      // Prevent the default action
+      e.preventDefault();
+
+      // Nothing to do if the default is already selected.
+      if (IndexDOM.defaultTag.classList.contains("active")) return;
+
+      // Make it active.
+      IndexDOM.defaultTag.classList.add("active");
+
+      // No more active tags.
+      for (const customTag of allCustomTags)
+        if (customTag.classList.contains("active")) customTag.classList.remove("active");
+
+      activeTags = [];
+
+      // Get a reference to the current URL.
+      const url = new URL(window.location.href);
+
+      // Create the base URL (protocol + host + pathname)
+      const baseUrl = `${url.protocol}//${url.host}${url.pathname}`;
+
+      history.replaceState(null, "", baseUrl.toString());
+
+      // Reset the page.
+      resetPage();
+    });
+
+    // Loop through the project's tags to set up click behavior.
+    for (let tag of Array.from(allCustomTags)) {
+      // Get the tag value.
+      const tagValue = tag.id.replace(tagValuePrefix, "");
+
+      // Set the active tags.
+      if (activeTags.includes(tagValue)) tag.classList.add("active");
+
+      // Set the tag text.
+      const label = projectTags[tagValue];
+      if (typeof label !== 'string' || !label.trim()) { tag.remove(); continue; }
+      tag.querySelector('.tag-text').textContent = label;
+
+      // Add/remove tag on click.
+      tag.addEventListener('click', (e) => {
+        // Prevent the default action
+        e.preventDefault();
+
+        // Get a reference to the current URL.
+        const url = new URL(window.location.href);
+
+        // If there weren't
+        if (!activeTags.length) IndexDOM.defaultTag.classList.remove("active");
+
+        // Set the active tags.
+        if (activeTags.includes(tagValue)) {
+          tag.classList.remove("active");
+
+        if (activeTags.length == 1) {
+           return IndexDOM.defaultTag.click();
+          } else {
+            // Get the values that'll be set after a click.
+            // Get a reference to tags not including the active one.
+            activeTags = activeTags.filter(activeTag => activeTag !== tagValue);
+
+            url.searchParams.delete(tagsKey);
+
+            // Set all tags except the active one.
+            for (const activeTag of activeTags) url.searchParams.append(tagsKey, activeTag);
+          }
+        } else {
+          tag.classList.add("active");
+
+          // Add a new parameter to the URL
+          url.searchParams.append(tagsKey, tagValue);
+          activeTags.push(tagValue);
+        }
+
+        history.pushState(null, "", url.toString());
+
+        // Reset the page.
+        resetPage();
+      });
+    }
+  }
+
+  const setupBodyPadding = () => {
+    IndexDOM.bodyDom.style.paddingTop = IndexDOM.topDom.offsetHeight + "px";
+    // Adjust scroll top to the offset.
+    document.documentElement.style.scrollPaddingTop = IndexDOM.topDom.offsetHeight + "px";
+  }
+
+  // if there is ?id= in the url, open the object page.
+  const urlParams = new URLSearchParams(window.location.search);
+  const id = urlParams.get('id');
+  const previewId = urlParams.get('preview');
+  if (previewId && window.croptop) {
+    // ?preview=<post id>: only that post's feed preview, filling the viewport.
+    // The console embeds this in its post tiles; anyone can embed it.
+    document.body.innerHTML = "";
+    document.body.style.cssText = "margin:0;overflow:hidden;background:var(--surface-background-color);color:var(--foreground-color)";
+    const el = document.createElement("div");
+    el.className = "post-frame-widget";
+    el.style.cssText = "position:fixed;inset:0;width:auto;height:auto";
+    document.body.appendChild(el);
+    croptop.site().then((site) => {
+      const post = site.articles.find((a) => a.id === previewId);
+      if (post) croptop.preview(el, previewId, post, urlParams.get("preview-size") === "row" ? "row" : "frame"); else el.textContent = "no such post";
+    });
+    // Embedders cannot see clicks inside the frame; tell them so they can open the post.
+    el.addEventListener("click", () => { if (window.parent !== window) window.parent.postMessage({ type: "croptop-preview-click", post: previewId }, "*"); });
+  } else if (id) {
+    const anchor = window.location.hash.substring(1);
+    if (anchor) {
+      window.location.href = './' + id + '/#' + anchor;
+    } else {
+      window.location.href = './' + id + '/';
+    }
+  } else {
+    activeTags = urlParams.getAll('tags');
+    window.addEventListener("scroll", didScroll);
+    setupForking();
+    setupPostMode();
+    setupBodyPadding();
+    adjustSubheaderPlacement();
+    // Posts read chain settings, so wait for them.
+    loadSettings().then(() => {
+      loadPosts(IndexCONFIG.defaultPageSize);
+    });
+  }
+
+  let isUserScroll = false;
+  window.addEventListener('load', function() {
+    window.requestAnimationFrame(() => {
+      window.addEventListener('scroll', function() {
+        if (isUserScroll) didScroll();
+      });
+      window.requestAnimationFrame(() => {
+        isUserScroll = true;
+      });
+    });
+  });
+</script>
+{% endblock %}

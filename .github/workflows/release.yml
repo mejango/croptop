@@ -1,0 +1,96 @@
+name: release
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+jobs:
+  goreleaser:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          submodules: true
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.27"
+      - uses: goreleaser/goreleaser-action@v6
+        with:
+          version: "~> v2"
+          args: release --clean
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          HOMEBREW_TAP_GITHUB_TOKEN: ${{ secrets.HOMEBREW_TAP_GITHUB_TOKEN }}
+
+  macos-app:
+    needs: goreleaser
+    runs-on: macos-latest
+    # Secrets reach steps as env, since the secrets context is not allowed in step `if`.
+    env:
+      SPARKLE_ED25519_KEY: ${{ secrets.SPARKLE_ED25519_KEY }}
+      MACOS_CERT_P12: ${{ secrets.MACOS_CERT_P12 }}
+      MACOS_CERT_PASSWORD: ${{ secrets.MACOS_CERT_PASSWORD }}
+      AC_API_KEY_P8: ${{ secrets.AC_API_KEY_P8 }}
+      AC_API_KEY_ID: ${{ secrets.AC_API_KEY_ID }}
+      AC_API_ISSUER_ID: ${{ secrets.AC_API_ISSUER_ID }}
+    steps:
+      - uses: actions/checkout@v4
+      # Import the Developer ID Application cert into a throwaway keychain, if configured.
+      - name: Import signing certificate
+        if: ${{ env.MACOS_CERT_P12 != '' }}
+        env:
+          KEYCHAIN_PASSWORD: ${{ github.run_id }}
+        run: |
+          KC="$RUNNER_TEMP/croptop.keychain-db"
+          security create-keychain -p "$KEYCHAIN_PASSWORD" "$KC"
+          security set-keychain-settings -lut 21600 "$KC"
+          security unlock-keychain -p "$KEYCHAIN_PASSWORD" "$KC"
+          echo "$MACOS_CERT_P12" | base64 --decode > "$RUNNER_TEMP/cert.p12"
+          security import "$RUNNER_TEMP/cert.p12" -k "$KC" -P "$MACOS_CERT_PASSWORD" -T /usr/bin/codesign
+          rm -f "$RUNNER_TEMP/cert.p12"
+          security list-keychains -d user -s "$KC" login.keychain-db
+          security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "$KEYCHAIN_PASSWORD" "$KC"
+          ID=$(security find-identity -v -p codesigning "$KC" | grep "Developer ID Application" | head -1 | sed -E 's/.*"(.*)"/\1/')
+          echo "MACOS_SIGN_IDENTITY=$ID" >> "$GITHUB_ENV"
+          echo "signing as: $ID"
+      # Write the App Store Connect key notarytool uses, if configured.
+      - name: Set up notarization
+        if: ${{ env.AC_API_KEY_P8 != '' }}
+        run: |
+          echo "$AC_API_KEY_P8" | base64 --decode > "$RUNNER_TEMP/AuthKey.p8"
+          echo "AC_API_KEY_PATH=$RUNNER_TEMP/AuthKey.p8" >> "$GITHUB_ENV"
+      - name: Build Croptop.app and Croptop.dmg
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          VER=${GITHUB_REF_NAME#v}
+          mkdir -p in out
+          gh release download "$GITHUB_REF_NAME" --pattern "croptop_${VER}_darwin_*.tar.gz" --dir in
+          installer/macos.sh "$VER" in out
+          test -n "$SPARKLE_ED25519_KEY" || { echo "Missing Sparkle signing key; refusing to publish an unsigned update"; exit 1; }
+          umask 077
+          export SPARKLE_KEY_FILE="$RUNNER_TEMP/sparkle-ed25519.key"
+          trap 'rm -f "$SPARKLE_KEY_FILE"' EXIT
+          printf '%s' "$SPARKLE_ED25519_KEY" > "$SPARKLE_KEY_FILE"
+          python3 installer/publish-macos.py "$VER" out
+
+  windows-installer:
+    needs: goreleaser
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build croptop-setup
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          $ver = $env:GITHUB_REF_NAME.TrimStart("v")
+          foreach ($arch in @("amd64", "arm64")) {
+            gh release download $env:GITHUB_REF_NAME --pattern "croptop_${ver}_windows_${arch}.zip" --dir in
+            Expand-Archive "in/croptop_${ver}_windows_${arch}.zip" "dist/windows_${arch}"
+            & "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" /DVersion=$ver /DArch=$arch installer\windows.iss
+          }
+          gh release upload $env:GITHUB_REF_NAME dist/croptop-setup-amd64.exe dist/croptop-setup-arm64.exe --clobber

@@ -1,0 +1,61 @@
+<!doctype html><html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Get Croptop</title><style>body{background:#171717;color:#eee;font-family:system-ui;max-width:1000px;margin:40px auto;padding:0 20px}pre{white-space:pre-wrap;line-height:1.6}.ct-download{color:inherit;font-family:var(--font-family,system-ui);margin:24px 0 48px}.ct-download *{box-sizing:border-box}.ct-download-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:16px}.ct-download-card{color:#171712;background:#ead9b6;border:2px solid #171712;border-radius:3px 1px 5px 2px;padding:24px;display:flex;flex-direction:column;align-items:flex-start;min-width:0}.ct-download-card[data-os=linux]{background:#78a0df}.ct-download-card[data-os=windows]{background:#de8d80}.ct-download-card h2{font:400 34px/1.1 Georgia,serif!important;letter-spacing:-.035em;margin:0!important;color:inherit!important}.ct-download-card canvas{width:100%;height:auto;aspect-ratio:1.3;max-height:180px;display:block;margin:12px 0}.ct-download .ct-download-note{font-size:12px!important;line-height:1.4!important;margin:6px 0 0!important;color:inherit!important;opacity:.75}.ct-download-options{margin-top:auto;min-height:90px;display:flex;flex-direction:column;justify-content:flex-end;gap:7px;width:100%}.ct-download-group{display:flex;gap:4px;flex-wrap:wrap}.ct-download button{font:500 12px/1.2 var(--font-family,system-ui)!important;color:#171712!important;background:transparent!important;border:1px solid #17171255!important;border-radius:2px!important;padding:7px 9px!important;min-height:30px;cursor:pointer}.ct-download button[aria-pressed=true]{background:#171712!important;color:#f3e4c4!important;border-color:#171712!important}.ct-download .ct-download-link{display:block;width:100%;text-align:center;margin-top:18px;background:#171712!important;color:#f3e4c4!important;text-decoration:none!important;font-size:14px!important;line-height:1.4!important;font-weight:500;padding:13px 10px;border-radius:2px}.ct-download .ct-download-link:hover{background:#303026!important}.ct-download :focus-visible{outline:2px solid #171712;outline-offset:3px}.ct-download-source{font:12px var(--font-family,system-ui);opacity:.55;margin-top:36px}.ct-download-source a{color:inherit!important;text-decoration:none!important;display:inline-block;padding:8px 0}@media(max-width:650px){.ct-download-grid{grid-template-columns:1fr}.ct-download-card{display:grid;grid-template-columns:1fr 110px;gap:0 12px;padding:24px}.ct-download-card canvas{grid-column:2;grid-row:1/4;margin:0;align-self:center}.ct-download-card h2{grid-column:1}.ct-download-options{grid-column:1;min-height:0;margin-top:16px}.ct-download .ct-download-link{grid-column:1/-1}.ct-download-card .ct-download-note{grid-column:1}}
+</style><section class="ct-download" aria-label="Download Croptop"><div class="ct-download-grid"><div class="ct-download-card" data-os="mac"><h2>Mac</h2><canvas width="260" height="200" aria-hidden="true"></canvas><div class="ct-download-options"><p class="ct-download-note">Apple Silicon + Intel</p></div><a class="ct-download-link" href="https://github.com/mejango/croptop/releases/latest/download/Croptop.dmg">Download</a></div><div class="ct-download-card" data-os="linux"><h2>Linux</h2><canvas width="260" height="200" aria-hidden="true"></canvas><div class="ct-download-options"><div class="ct-download-group" role="group" aria-label="Linux package"><button type="button" data-format="deb" aria-pressed="true">DEB</button><button type="button" data-format="rpm" aria-pressed="false">RPM</button></div><div class="ct-download-group" role="group" aria-label="Linux processor"><button type="button" data-arch="amd64" aria-pressed="true">Intel / AMD</button><button type="button" data-arch="arm64" aria-pressed="false">ARM</button></div><p class="ct-download-note">Ubuntu / Debian</p></div><a class="ct-download-link" href="https://github.com/mejango/croptop/releases/download/v0.11.0/croptop_0.11.0_linux_amd64.deb">Download</a></div><div class="ct-download-card" data-os="windows"><h2>Windows</h2><canvas width="260" height="200" aria-hidden="true"></canvas><div class="ct-download-options"><div class="ct-download-group" role="group" aria-label="Windows processor"><button type="button" data-arch="amd64" aria-pressed="true">Intel / AMD</button><button type="button" data-arch="arm64" aria-pressed="false">ARM</button></div><p class="ct-download-note"></p></div><a class="ct-download-link" href="https://github.com/mejango/croptop/releases/latest/download/croptop-setup-amd64.exe">Download</a></div></div></section><pre>Croptop runs on your own computer and publishes peer to peer. One download, no account, no server.
+
+**macOS**: [Croptop.dmg](https://github.com/mejango/croptop/releases/latest/download/Croptop.dmg), drag it to Applications. It works on Apple Silicon and Intel. The macOS app is Developer ID signed and notarized by Apple. Open Croptop from Applications to use the native Mac app. For the command-line version and browser console, Homebrew users can `brew install mejango/tap/croptop`.
+
+**Windows**: [croptop-setup-amd64.exe](https://github.com/mejango/croptop/releases/latest/download/croptop-setup-amd64.exe) for Intel and AMD, or [croptop-setup-arm64.exe](https://github.com/mejango/croptop/releases/latest/download/croptop-setup-arm64.exe) for ARM. Windows shows a SmartScreen notice because the installer is unsigned; choose More info, then Run anyway.
+
+**Linux**: `.deb` and `.rpm` packages for amd64 and arm64 are on the [latest release](https://github.com/mejango/croptop/releases/latest), or use the one-liner below.
+
+**Command-line install, macOS or Linux**:
+
+```
+curl -fsSL https://crop.top/install.sh | sh
+```
+
+**Command-line install, Windows PowerShell**:
+
+```
+irm https://crop.top/install.ps1 | iex
+```
+
+On macOS, open Croptop from Applications. The native app brings your feed, sites, and post editor into one window. On Windows, open the Croptop shortcut to start the browser console. If you installed the command-line version, run `croptop` to open the browser console.
+
+Make a site, write a post, and press Publish. Claim a free name and your site is at crop.top/yourname; an ENS name works at yourname.crop.top.
+
+When a Mac app update is available, choose Get the update to download the new version. Command-line installations can update with `croptop update`. If you installed through a package manager, use that package manager to update.
+
+Source and every release: [github.com/mejango/croptop](https://github.com/mejango/croptop).
+</pre><script>(() => {
+ const mount = () => document.querySelectorAll('.ct-download:not([data-ready])').forEach(root => {
+  root.dataset.ready='true';
+  const latest='https://github.com/mejango/croptop/releases/latest/download/';
+  const linuxAsset=(format,arch)=>`https://github.com/mejango/croptop/releases/download/v0.11.0/croptop_0.11.0_linux_${arch}.${format}`;
+  root.querySelectorAll('.ct-download-card').forEach(card=>{
+   let arch='amd64',format='deb';
+   const update=()=>{
+    const os=card.dataset.os,link=card.querySelector('.ct-download-link');
+    link.href=os==='mac'?latest+'Croptop.dmg':os==='windows'?latest+`croptop-setup-${arch}.exe`:linuxAsset(format,arch);
+    link.setAttribute('aria-label',`Download for ${os==='mac'?'Mac, Apple Silicon and Intel':os==='windows'?`Windows, ${arch==='amd64'?'Intel and AMD':'ARM'}`:`Linux, ${format}, ${arch==='amd64'?'Intel and AMD':'ARM'}`}`);
+    card.querySelectorAll('[data-arch]').forEach(b=>b.setAttribute('aria-pressed',String(b.dataset.arch===arch)));
+    card.querySelectorAll('[data-format]').forEach(b=>b.setAttribute('aria-pressed',String(b.dataset.format===format)));
+    if(os==='linux')card.querySelector('.ct-download-note').textContent=format==='deb'?'Ubuntu / Debian':'Fedora / Red Hat';
+   };
+   card.querySelectorAll('[data-arch]').forEach(b=>b.onclick=()=>{arch=b.dataset.arch;update()});
+   card.querySelectorAll('[data-format]').forEach(b=>b.onclick=()=>{format=b.dataset.format;update()});update();
+   const c=card.querySelector('canvas'),x=c.getContext('2d');if(!x)return;
+   x.lineCap='round';x.lineJoin='round';x.strokeStyle='#171712';x.fillStyle='#f3e4c4';x.lineWidth=6;
+   const path=(points,fill=false)=>{x.beginPath();points.forEach(([a,b],i)=>i?x.lineTo(a,b):x.moveTo(a,b));if(fill){x.closePath();x.fill()}x.stroke()};
+   if(card.dataset.os==='mac'){
+    path([[43,35],[215,38],[211,142],[45,140]],true);path([[45,141],[23,166],[236,169],[213,143]],true);path([[104,157],[158,158]]);
+    x.save();x.translate(91,53);x.scale(.42,.42);x.lineWidth=7;path([[25,20],[31,172]]);path([[30,112],[0,87],[4,122],[31,141]],true);path([[30,102],[60,80],[55,116],[31,131]],true);x.beginPath();for(let i=0;i<80;i++){const a=i/80*Math.PI*2,r=29+9*Math.cos(10*a);const px=28+Math.cos(a)*r,py=42+Math.sin(a)*r;i?x.lineTo(px,py):x.moveTo(px,py)}x.closePath();x.fill();x.stroke();x.beginPath();x.arc(28,42,14,0,Math.PI*2);x.fill();x.stroke();x.restore();
+   }else if(card.dataset.os==='linux'){
+    path([[34,30],[227,34],[224,160],[36,162]],true);path([[36,56],[225,59]]);path([[62,82],[81,101],[62,120]]);path([[101,122],[140,123]]);
+   }else{
+    path([[43,29],[218,32],[215,153],[41,157]],true);path([[128,33],[130,153]]);path([[44,91],[216,89]]);path([[130,157],[130,173]]);path([[94,175],[168,176]]);
+   }
+  });
+ });
+ if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',mount,{once:true});else mount();
+})();
+</script></html>

@@ -1,0 +1,651 @@
+<div id="post-header" class="post-header body-header mobile-padding negative-space">
+  <div id="post-title">
+    <div id="post-date"></div>
+    <div id="post-name"></div>
+  </div>
+  <div id="post-subtitle" class="negative-space">
+      <span id="post-link"></span>
+  </div>
+</div>
+<div id="post-onchain" class="full-width mobile-padding">
+  <details id="post-form-collect-reveal">
+    <summary id="post-form-collect-toggle" class="form-toggle">buy</summary>
+    <div id="post-form-collect-container">
+    <div id="post-form-state-chain-section" class="form-section">
+      <div class="form-item">
+        <div class="form-value form-select-value">
+          <select id="post-form-state-chain-input" name="chain">
+            <!-- options will be added by JS -->
+          </select>
+        </div>
+      </div>
+      </div>
+      <div id="collect-post-form" class="form negative-space">
+        <span id="collect-post-form-header" class="form-header"></span>
+        <div class="form-body">
+            <div class="form-item" style="display: none;">
+              <div class="form-label">Collection address</div>
+              <div class="form-value"><input type="text" placeholder="0x..." value="" id="post-form-state-collection-address-input" min="1"></div>
+            </div>
+          </div>
+        </div>
+      <div id="record-post-form" class="form negative-space">
+        <span id="record-post-form-header" class="form-header"></span>
+        <button id="record-post-form-load-address-button" class="square-button form-load-address-button"><span class="form-load-address-button-text">connect wallet</span></button>
+        <div class="form-body">
+          <div class="form-section">
+            <div class="form-item">
+              <div class="form-label">Price</div>
+              <div class="form-value">
+                <span class="ether form-input-prefix">Ξ</span><input type="number" id="record-post-form-price-input" min="0" step="any">
+              </div>
+            </div>
+            <div class="form-item">
+              <div class="form-label">Copies</div>
+              <div class="form-value">
+                <input type="number" id="record-post-form-supply-input" min="1">
+              </div>
+            </div>
+          </div>
+          <div id="record-post-form-split-section" class="form-section">
+            <div class="form-item">
+              <div class="form-label">Your cut of each sale</div>
+              <div class="form-value">
+                <input type="number" id="record-post-form-split-percent-input" min="0" step="any"><span class="form-input-prefix">%</span>
+              </div>
+            </div>
+            <div class="form-item form-item-large">
+              <div class="form-label">Sent to</div>
+              <div class="form-value">
+                <input type="text" id="record-post-form-split-beneficiary-input" placeholder="0x…">
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+      <div id="post-form-loading-animation" class="loading-animation"></div>
+      <div id="post-form-error-message" class="form-error-message"></div>
+      <button id="post-form-button" class="square-button form-button form-main-button"><span id="post-form-button-text" class="form-button-text">buy</span><span id="post-form-button-loading-animation" class="loading-animation button-loading-animation"></span></button>
+      <a id="post-form-setup-shop" href="#fork-modal" style="display: block; margin-top: var(--spacing-3); font-size: var(--font-size-small); color: var(--foreground-secondary-color);">Set up your shop</a>
+    </div>
+  </details>
+</div>
+<img id="post-cover-image"></img>
+<video id="post-cover-video"></video>
+<div id="post-cover-audio-container" class="mobile-padding">
+  <audio id="post-cover-audio"></audio>
+</div>
+<div id="post-content" class="mobile-padding"></div>
+<div id="post-attachments" class="mobile-padding"></div>
+<div id="post-aggregation" class="mobile-padding"></div>
+<script>
+
+  // Configuration constants
+  const PostCONFIG = {
+    feeDivisor: 20,
+    formInputReactionTimeDelay: 600,
+    defaultChain: "ethereum sepolia",
+    defaultCollectionCategory: 0,
+    highlightColor: "#f056c1"
+  };
+
+  // Cache DOM elements for better performance
+  const PostDOM = {
+    postFormErrorMessage: document.getElementById("post-form-error-message"),
+    postFormButton: document.getElementById("post-form-button"),
+    postFormButtonText: document.getElementById("post-form-button-text"),
+    postFormButtonLoadingAnimation: document.getElementById("post-form-button-loading-animation"),
+    postFormLoadingAnimation: document.getElementById("post-form-loading-animation"),
+    postFormStateChainInput: document.getElementById("post-form-state-chain-input"),
+    postFormStateChainSection: document.getElementById("post-form-state-chain-section"),
+    postFormStateCollectionAddressInput: document.getElementById("post-form-state-collection-address-input"),
+    postName: document.getElementById("post-name"),
+    postDate: document.getElementById("post-date"),
+    postSubtitle: document.getElementById("post-subtitle"),
+    postLink: document.getElementById("post-link"),
+    postCoverImage: document.getElementById("post-cover-image"),
+    postCoverVideo: document.getElementById("post-cover-video"),
+    postCoverAudioContainer: document.getElementById("post-cover-audio-container"),
+    postCoverAudio: document.getElementById("post-cover-audio"),
+    postContent: document.getElementById("post-content"),
+    recordPostForm: document.getElementById("record-post-form"),
+    collectPostForm: document.getElementById("collect-post-form"),
+    postFormCollectReveal: document.getElementById("post-form-collect-reveal"),
+    postFormCollectToggle: document.getElementById("post-form-collect-toggle"),
+    collectPostFormHeader: document.getElementById("collect-post-form-header"),
+    recordPostFormHeader: document.getElementById("record-post-form-header"),
+    recordPostFormConnectButton: document.getElementById("record-post-form-load-address-button"),
+    recordPostFormPriceInput: document.getElementById("record-post-form-price-input"),
+    recordPostFormSupplyInput: document.getElementById("record-post-form-supply-input"),
+    recordPostFormSplitSection: document.getElementById("record-post-form-split-section"),
+    recordPostFormSplitPercentInput: document.getElementById("record-post-form-split-percent-input"),
+    recordPostFormSplitBeneficiaryInput: document.getElementById("record-post-form-split-beneficiary-input"),
+    postAttachments: document.getElementById("post-attachments"),
+    postAggregation: document.getElementById("post-aggregation"),
+    postOnchain: document.getElementById("post-onchain")
+  };
+
+  // Reuse the header action so shop setup has one opening flow.
+  document.getElementById("post-form-setup-shop").addEventListener("click", (event) => {
+    event.preventDefault();
+    document.getElementById("fork-button")?.click();
+  });
+
+  let tiersCache = {};
+  let allowanceCache = {};
+  let refreshFormState = null; // set by decoratePostPage; re-reads chain state for the open post
+  let highlightColor = PostCONFIG.highlightColor;
+  let signer;
+
+  // Error handling utilities
+  const showError = (message, type = "warn") => {
+    // textContent: messages can carry wallet/RPC error strings.
+    PostDOM.postFormErrorMessage.textContent = message?.message || String(message);
+    PostDOM.postFormErrorMessage.classList.remove("warn", "info");
+    PostDOM.postFormErrorMessage.classList.add(type);
+    PostDOM.postFormErrorMessage.style.display = "block";
+  };
+
+  const hideError = () => {
+    PostDOM.postFormErrorMessage.style.display = "none";
+  };
+
+  const showButton = (enabled = true) => {
+    PostDOM.postFormButton.disabled = !enabled;
+    PostDOM.postFormButton.style.display = "block";
+  };
+
+  const hideButton = () => {
+    PostDOM.postFormButton.disabled = true;
+    PostDOM.postFormButton.style.display = "none";
+  };
+
+  const loadAndRenderArticle = (articleID) => {
+    return fetch(`{{ assets_prefix }}${articleID}/article.json`)
+      // only if response is 200 OK, parse the JSON
+      .then(response => {
+        if (!response.ok) {
+          throw Error(response.statusText); // Throw an error if response is not OK.
+        }
+        return response.json();
+      })
+      .then(data => {
+        return renderMarkdown(data.content);
+      });
+  }
+
+  /// Load templateSettings.json into `env` and populate the chain selector.
+  /// Resolves once `env` is ready; callers that read chain state must await it.
+  const loadSettings = () =>
+    fetch("{{ assets_prefix }}templateSettings.json?t={{ build_timestamp }}")
+      .then(response => {
+        if (!response.ok) throw Error(response.statusText);
+        return response.json();
+      })
+      .then(data => {
+        Object.assign(env, data);
+        // Only offer chains that have a collection address configured.
+        const chains = CHAINS.filter(collectionAddressFor);
+        PostDOM.postFormStateChainInput.replaceChildren(...chains.map(c => new Option(c.label, c.key)));
+        if (chains.length) {
+          PostDOM.postFormStateChainInput.value = chains[0].key;
+          PostDOM.postFormStateCollectionAddressInput.value = collectionAddressFor(chains[0]);
+        }
+        if (data.highlightColor) highlightColor = data.highlightColor;
+      })
+      .catch(error => console.error('Error occurred when fetching templateSettings.json:', error))
+      .finally(() => document.documentElement.style.setProperty('--link-color', highlightColor));
+
+  // Shops have up to two posting categories: 0 for the operator, 1 for everyone else.
+  const POST_CATEGORIES = [0, 1];
+
+  // The active posting rules for the connected wallet (or the most open ones if no wallet yet). Null if none apply.
+  const postingRulesFor = async (chain, collectionAddress) => {
+    const cache = (allowanceCache[collectionAddress] ??= {});
+    const rules = [];
+    for (const category of POST_CATEGORIES) {
+      if (cache[category] === undefined) cache[category] = await tx_view_allowance(collectionAddress, category, resolveChainId(chain));
+      const a = cache[category];
+      if (a && parseInt(a.minimumTotalSupply.toString()) > 0) rules.push({ category, ...Object.fromEntries(["minimumPrice", "minimumTotalSupply", "maximumTotalSupply", "maximumSplitPercent", "allowedAddresses"].map(k => [k, a[k]])) });
+    }
+    if (!rules.length) return null;
+    const allows = (r, who) => !r.allowedAddresses.length || Array.from(r.allowedAddresses).some(x => x.toLowerCase() === who.toLowerCase());
+    return (signer && rules.find(r => allows(r, signer))) || rules.find(r => !r.allowedAddresses.length) || rules[0];
+  }
+
+  // Buy one copy: the price plus the Croptop fee, unless this is the network's own collection.
+  // ponytail: one copy per transaction. v6's publisher rejects a repeated post in one batch.
+  const buy = async (chain, collectionAddress, category, encodedIPFSUri, totalSupply, price, split = null) => {
+    const feeBeneficiary = resolveCPNBeneficiaryAddress() || signer;
+    const value = price + (isCpnCollection(collectionAddress) ? 0n : price / BigInt(PostCONFIG.feeDivisor));
+    // tx_collect switches the wallet to `chain` before signing.
+    let accepted;
+    try {
+      accepted = await tx_collect(collectionAddress, category, totalSupply, price, encodedIPFSUri, signer, feeBeneficiary, value, resolveChainId(chain), split);
+    } catch (e) {
+      // JBTerminalStore_RulesetNotFound: a new shop's first stage starts 6 minutes after deploy.
+      const data = e?.data || e?.info?.error?.data || e?.error?.data || "";
+      if (String(data).startsWith("0x453ebd8f")) throw new Error("This shop isn't open yet. Shops open a few minutes after deploying; try again shortly.");
+      throw e;
+    }
+    if (!accepted) {
+      showError("The connected network isn't supported.", "info");
+      hideButton();
+      return;
+    }
+    // The tier changed onchain: drop the cached copy and show the post's new state.
+    delete tiersCache[chain]?.[collectionAddress]?.[encodedIPFSUri];
+    if (refreshFormState) await refreshFormState();
+    showError("Bought. The copy is in your wallet.", "info");
+  }
+
+  // RECORD mode: nobody has added this post yet. Whoever adds it buys the first copy and sets
+  // the post's price and copy count within the shop's rules.
+  const decorateRecordForm = async (chain, collectionAddress, category, encodedIPFSUri, minimumTotalSupply, maximumTotalSupply, minimumPrice, allowedAddresses, maximumSplitPercent = 0) => {
+    const maxCut = maximumSplitPercent / SPLITS_TOTAL_PERCENT * 100; // as a percentage
+    const minPriceText = minimumPrice ? ethers.formatEther(minimumPrice) : "0";
+    const priceText = minimumPrice ? `at least <span class="ether">Ξ</span>${minPriceText}` : "any price, even free";
+    const plural = (n) => n === 1 ? "copy" : "copies";
+    const copiesText = maximumTotalSupply ? `${minimumTotalSupply} to ${maximumTotalSupply} copies` : `at least ${minimumTotalSupply} ${plural(minimumTotalSupply)}`;
+    PostDOM.recordPostFormHeader.innerHTML = `Add this post to the shop by buying its first copy. Set ${priceText}, and ${copiesText}.`;
+    PostDOM.recordPostFormPriceInput.value = minPriceText;
+    PostDOM.recordPostFormSupplyInput.value = minimumTotalSupply;
+    PostDOM.recordPostFormSplitSection.style.display = maxCut ? "flex" : "none";
+    PostDOM.recordPostFormSplitPercentInput.value = 0;
+    PostDOM.recordPostFormSplitPercentInput.max = maxCut;
+    if (signer) PostDOM.recordPostFormSplitBeneficiaryInput.value = signer;
+    hideButton();
+    PostDOM.postFormButtonText.innerHTML = "add";
+
+    const allowed = allowedAddresses.map(a => a.toLowerCase());
+    const checkState = () => {
+      const price = PostDOM.recordPostFormPriceInput.value === "" ? null : fixedPointNumber(PostDOM.recordPostFormPriceInput.value, 18);
+      const copies = Number(PostDOM.recordPostFormSupplyInput.value);
+      const cut = maxCut ? Number(PostDOM.recordPostFormSplitPercentInput.value || 0) : 0;
+      const splitTo = PostDOM.recordPostFormSplitBeneficiaryInput.value.trim();
+      const split = cut > 0 ? { percent: Math.round(cut / 100 * SPLITS_TOTAL_PERCENT), beneficiary: splitTo } : null;
+      if (signer && allowed.length && !allowed.includes(signer.toLowerCase())) {
+        showError(`Only these addresses can add posts to this shop: ${allowed.join(", ")}.`);
+        showButton(false);
+      } else if (price === null || price < minimumPrice) {
+        showError(`Price must be at least Ξ${minPriceText}.`);
+        showButton(false);
+      } else if (!Number.isInteger(copies) || copies < minimumTotalSupply || (maximumTotalSupply && copies > maximumTotalSupply)) {
+        showError(`Copies must be ${copiesText}.`);
+        showButton(false);
+      } else if (cut < 0 || cut > maxCut) {
+        showError(`Your cut can be at most ${maxCut}%.`);
+        showButton(false);
+      } else if (split && !ethers.isAddress(splitTo)) {
+        showError("Enter the address your cut should go to.");
+        showButton(false);
+      } else {
+        hideError();
+        showButton(true);
+      }
+      return { price, copies, split };
+    }
+
+    // Property assignment so re-decorating the form doesn't stack listeners.
+    PostDOM.recordPostFormPriceInput.oninput = checkState;
+    PostDOM.recordPostFormSupplyInput.oninput = checkState;
+    PostDOM.recordPostFormSplitPercentInput.oninput = checkState;
+    PostDOM.recordPostFormSplitBeneficiaryInput.oninput = checkState;
+
+    PostDOM.postFormButton.onclick = async () => {
+      startLoadingAnimation('post-form-button-loading-animation');
+      try {
+        signer = (await getSigner()).address;
+        if (!PostDOM.recordPostFormSplitBeneficiaryInput.value) PostDOM.recordPostFormSplitBeneficiaryInput.value = signer;
+        const { price, copies, split } = checkState();
+        if (PostDOM.postFormButton.disabled) return;
+        await buy(chain, collectionAddress, category, encodedIPFSUri, copies, price, split);
+      } catch (e) {
+        showError(e);
+      } finally {
+        stopLoadingAnimation('post-form-button-loading-animation');
+      }
+    }
+
+    checkState();
+  }
+
+  // COLLECT mode: the tier exists, so this mints another copy at the tier's price.
+  const decorateCollectForm = async (chain, collectionAddress, category, encodedIPFSUri, mintedSupply, remainingSupply, price) => {
+    const formattedPrice = ethers.formatEther(price);
+    PostDOM.collectPostFormHeader.innerHTML = remainingSupply == 1
+      ? `${mintedSupply} bought, only 1 copy of this post left for <span class="ether">Ξ</span>${formattedPrice}.`
+      : `${mintedSupply} bought, ${remainingSupply > 10000000 ? "infinite" : remainingSupply} copies left for <span class="ether">Ξ</span>${formattedPrice} each.`;
+    PostDOM.postFormButtonText.innerHTML = "buy";
+    hideError();
+    showButton(true);
+
+    PostDOM.postFormButton.onclick = async () => {
+      startLoadingAnimation('post-form-button-loading-animation');
+      try {
+        signer = (await getSigner()).address;
+        // The publisher charges an existing tier's own price; totalSupply is only validated for new tiers.
+        await buy(chain, collectionAddress, category, encodedIPFSUri, 1, price);
+      } catch (e) {
+        showError(e);
+      } finally {
+        stopLoadingAnimation('post-form-button-loading-animation');
+      }
+    }
+  }
+
+  const decoratePostBody = () => {
+      const firstChild = PostDOM.postContent.firstChild;
+  }
+
+  const getCleanerURL = (url) => {
+    const parsedUrl = new URL(url);
+    return `${parsedUrl.protocol}//${parsedUrl.host}${parsedUrl.pathname}`;
+  }
+
+  // Re-decorate the form depending on if the provided content has already been recorded onchain, and if it's sold out.
+  const decoratePostPage = async (postId, name, date, link, content, imageSrc, videoSrc, audioSrc, encodedIPFSUri, thumbnailAutogenerated, slug="") => {
+    // Show the loading animation.
+    startLoadingAnimation('post-form-loading-animation');
+    let postContentHasImgTags = false;
+    if (content) {
+      PostDOM.postContent.style.display = "block";
+      PostDOM.postContent.innerHTML = content;
+      if (window.croptop) croptop.activate(PostDOM.postContent, postId);
+      let imgs = PostDOM.postContent.getElementsByTagName("img");
+      for (let img of imgs) {
+        let src = img.getAttribute("src");
+        if (src) {
+          postContentHasImgTags = true;
+        }
+        if (!src.startsWith("https://") && !src.startsWith("http://") && !src.startsWith("/")) {
+          // Fix relative paths for homepage.
+          // No need to fix on /UUID/ pages.
+          // No need to fix on /slug/ pages.
+          let prefix = getCleanerURL(window.location.href);
+          if (slug.length > 0) {
+            if (!prefix.includes(slug) && !prefix.includes(postId)) {
+              let fixedSrc = `${prefix}${slug}/${src}`;
+              img.setAttribute("src", fixedSrc);
+            } else {
+              console.log(`No need to fix prefix for ${src}`);
+            }
+          } else {
+            if (!prefix.includes(postId)) {
+              let fixedSrc = `${prefix}${postId}/${src}`;
+              img.setAttribute("src", fixedSrc);
+            } else {
+              console.log(`No need to fix prefix for ${src}`);
+            }
+          }
+          // Old behavior: remove all relative images because the designated hero image is shown in postCoverImage tag.
+          // postContent.removeChild(img);
+        }
+      }
+    } else {
+      PostDOM.postContent.style.display = "none";
+    }
+
+    // Hide the form.
+    PostDOM.collectPostForm.style.display = "none";
+    PostDOM.recordPostForm.style.display = "none";
+
+    // Decorate the frame's title.
+    PostDOM.postName.innerHTML = name;
+    PostDOM.postDate.innerHTML = `${date} `;
+
+    // Reset the label for the collect toggle.
+    let storedPostFormCollectToggleText;
+
+    // Show and populate the frame's subtitle if there's a link.
+    if (link) {
+      PostDOM.postSubtitle.style.display = "block";
+      const a = document.createElement("a");
+      a.href = link;
+      a.target = "_blank";
+      a.textContent = link;
+      PostDOM.postLink.replaceChildren(a);
+    } else {
+      PostDOM.postSubtitle.style.display = "none";
+    }
+
+    // Decorate the image or video content.
+
+    if (videoSrc) {
+      PostDOM.postCoverImage.style.display = "none";
+      PostDOM.postCoverAudioContainer.style.display = "none";
+      PostDOM.postCoverVideo.style.display = "block";
+      PostDOM.postCoverVideo.autoplay = true;
+      PostDOM.postCoverVideo.loop = true;
+      PostDOM.postCoverVideo.muted = true;
+      PostDOM.postCoverVideo.controls = true;
+      PostDOM.postCoverVideo.playsInline = true;
+      PostDOM.postCoverVideo.preload = "auto";
+      PostDOM.postCoverVideo.poster = "{{ assets_prefix }}" + postId + "/_videoThumbnail.png";
+      PostDOM.postCoverImage.src = "";
+      PostDOM.postCoverVideo.src = videoSrc;
+    } else if (audioSrc) {
+      PostDOM.postCoverImage.style.display = "none"
+      PostDOM.postCoverVideo.style.display = "none"
+      PostDOM.postCoverAudioContainer.style.display = "block";
+      PostDOM.postCoverAudio.autoplay = false;
+      PostDOM.postCoverAudio.loop = false;
+      PostDOM.postCoverAudio.muted = false;
+      PostDOM.postCoverAudio.controls = true;
+      PostDOM.postCoverAudio.src = audioSrc;
+      PostDOM.postCoverVideo.src = "";
+      PostDOM.postCoverImage.src = "";
+    } else if (imageSrc && postContentHasImgTags) {
+      PostDOM.postCoverVideo.src = "";
+      PostDOM.postCoverVideo.style.display = "none";
+      PostDOM.postCoverImage.src = "";
+      PostDOM.postCoverImage.style.display = "none";
+      PostDOM.postCoverAudioContainer.style.display = "none";
+    } else if (imageSrc && !thumbnailAutogenerated && !postContentHasImgTags) {
+      PostDOM.postCoverImage.style.display = "block"
+      PostDOM.postCoverVideo.style.display = "none"
+      PostDOM.postCoverAudioContainer.style.display = "none";
+      PostDOM.postCoverVideo.src = "";
+      PostDOM.postCoverImage.src = imageSrc;
+    } else {
+      PostDOM.postCoverImage.style.display = "none"
+      PostDOM.postCoverVideo.style.display = "none"
+      PostDOM.postCoverAudioContainer.style.display = "none";
+      PostDOM.postCoverVideo.src = "";
+      PostDOM.postCoverImage.src = "";
+    }
+
+    const updateFormState = async () => {
+      // Get a reference to the chain, collectionAddress, and category fields.
+      const chain = PostDOM.postFormStateChainInput.value;
+      const collectionAddress = PostDOM.postFormStateCollectionAddressInput.value;
+
+      // Set a chain object.
+      if (!tiersCache[chain]) tiersCache[chain] = {};
+
+      // Look in the cache for tiers within the collectionAddress.
+      const collectionTiers = tiersCache[chain][collectionAddress];
+
+      // If there's no cache for the collectionAddress, set it to an empty object.
+      if (!collectionTiers) tiersCache[chain][collectionAddress] = {};
+
+      // Look in the cache for a tier for the collectionAddress and encodedIPFSUri.
+      let tier = tiersCache[chain][collectionAddress][encodedIPFSUri];
+
+      // If nothing is cached, load from the contract.
+      if (!tier) {
+        // Check to see if there's a tier for this content.
+        [tier] = await tx_view_tiers(collectionAddress, [encodedIPFSUri], resolveChainId(chain));
+
+        // If no tier, don't show the form.
+        if (!tier) {
+          // Show the error message.
+          showError("-", "info");
+          // Hide the forms.
+          PostDOM.recordPostForm.style.display = "none";
+          PostDOM.collectPostForm.style.display = "none";
+          // Disable the button.
+          hideButton();
+          PostDOM.postFormCollectToggle.innerHTML = 'buy';
+          return;
+        }
+
+        // Cache recorded tiers only, so a post added a moment ago is re-read next time.
+        if (parseInt(tier.id.toString()) != 0) tiersCache[chain][collectionAddress][encodedIPFSUri] = tier;
+      }
+
+      // Get a reference to the tier's ID.
+      const formattedTierId = parseInt(tier.id.toString());
+
+
+      // If there is no tier, the form's state is in RECORD mode, meaning the content must be recorded onchain before it can be collected.
+      if (formattedTierId != 0) {
+        // The form's state is in COLLECT mode, meaning new editions can be minted from an already-recorded NFT tier.
+
+        // Get a reference to the tier's remaining supply.
+        const formattedRemainingSupply = parseInt(tier.remainingSupply.toString());
+
+        // If there's no remaining supply, the form's state is in SOLD_OUT mode, meaning it can't be minted anymore.
+        if (formattedRemainingSupply == 0) {
+          // Show the error message.
+          showError("This post is sold out", "info");
+          // Hide the forms.
+          PostDOM.recordPostForm.style.display = "none";
+          PostDOM.collectPostForm.style.display = "none";
+          // Disable the button.
+          hideButton();
+          PostDOM.postFormCollectToggle.innerHTML = 'sold out';
+          return;
+        }
+
+        // Show the COLLECT form.
+        PostDOM.collectPostForm.style.display = "block";
+        // Hide the RECORD form.
+        PostDOM.recordPostForm.style.display = "none";
+        // Hide the error message.
+        hideError();
+
+        const formattedInitialSupply = parseInt(tier.initialSupply.toString());
+
+        // The supply that has been minted.
+        const formattedMintedSupply = formattedInitialSupply - formattedRemainingSupply;
+
+        if (formattedRemainingSupply == 1) {
+          PostDOM.postFormCollectToggle.innerHTML = `${formattedMintedSupply} bought, only 1 left`;
+        } else {
+          PostDOM.postFormCollectToggle.innerHTML = `${formattedMintedSupply} bought, ${formattedRemainingSupply > 10000000 ? "infinite" : formattedRemainingSupply } left`;
+        }
+
+        // Show the form.
+        await decorateCollectForm(chain, collectionAddress, 0, encodedIPFSUri, formattedMintedSupply, formattedRemainingSupply, BigInt(tier.price));
+      } else {
+        // Nobody has added this post yet. Find the posting rules that apply to whoever is connected.
+        const rules = await postingRulesFor(chain, collectionAddress);
+
+        if (!rules) {
+          PostDOM.postFormStateChainSection.style.display = chain ? "block" : "none";
+          hideError();
+          PostDOM.recordPostForm.style.display = "none";
+          PostDOM.collectPostForm.style.display = "none";
+          hideButton();
+          PostDOM.postFormCollectToggle.innerHTML = 'buy';
+          return;
+        }
+
+        PostDOM.recordPostForm.style.display = "block";
+        PostDOM.collectPostForm.style.display = "none";
+        hideError();
+        PostDOM.postFormCollectToggle.innerHTML = 'buy';
+
+        await decorateRecordForm(chain, collectionAddress, rules.category, encodedIPFSUri, parseInt(rules.minimumTotalSupply.toString()), parseInt(rules.maximumTotalSupply.toString()), BigInt(rules.minimumPrice), Array.from(rules.allowedAddresses), Number(rules.maximumSplitPercent));
+      }
+    }
+
+    // On chain change, point the form at that chain's collection and reload its state.
+    // Property assignment so opening another post doesn't stack listeners.
+    PostDOM.postFormStateChainInput.onchange = async () => {
+      PostDOM.postFormStateCollectionAddressInput.value = resolveCollectionAddress(PostDOM.postFormStateChainInput.value);
+
+      startLoadingAnimation('post-form-loading-animation');
+      try {
+        await updateFormState();
+      } finally {
+        stopLoadingAnimation('post-form-loading-animation');
+      }
+    };
+
+    refreshFormState = updateFormState;
+    PostDOM.recordPostFormConnectButton.onclick = async () => {
+      signer = (await getSigner()).address;
+      startLoadingAnimation('post-form-loading-animation');
+      try { await updateFormState(); } finally { stopLoadingAnimation('post-form-loading-animation'); }
+    };
+
+    await updateFormState();
+
+    decoratePostBody();
+
+    // Hide the loading animation.
+    stopLoadingAnimation('post-form-loading-animation');
+  }
+
+  const decorateAttachments = async (post) => {
+    PostDOM.postAttachments.innerHTML = '';
+    const previousPreview = document.getElementById("preview-pdf");
+    if (previousPreview) {
+      previousPreview.remove();
+    }
+    for (const attachment of post.attachments) {
+      const attachmentFullURL = "{{ assets_prefix }}" + post.id + "/" + attachment;
+      if (attachment.endsWith(".pdf")) {
+        const preview = document.createElement("embed");
+        preview.src = attachmentFullURL;
+        preview.className = "preview-pdf";
+        preview.id = "preview-pdf";
+
+        if (PostDOM.postCoverImage) {
+          PostDOM.postCoverImage.style.display = "none";
+        }
+
+        if (PostDOM.postOnchain) {
+          PostDOM.postOnchain.parentNode.insertBefore(preview, PostDOM.postOnchain.nextSibling);
+        }
+
+        const link = document.createElement("a");
+        link.href = attachmentFullURL;
+        link.target = "_blank";
+        link.innerHTML = attachment;
+        link.className = "attachment-link";
+        PostDOM.postAttachments.appendChild(link);
+
+        PostDOM.postAttachments.style.paddingTop = "1em";
+      }
+    }
+  }
+
+  const decorateAggregation = async (post) => {
+    PostDOM.postAggregation.replaceChildren();
+    const domain = post.originalSiteDomain;
+    const id = post.originalPostID;
+    if (!domain || !id || !/^[a-f0-9-]{36}$/i.test(id)) return;
+    let host;
+    if (/^k51[a-z0-9]{20,100}$/.test(domain)) host = domain + ".eth.sucks";
+    else if (/^[a-z0-9.-]+\.eth$/i.test(domain)) host = domain + ".sucks";
+    else if (/^[a-z0-9.-]+\.[a-z]{2,}$/i.test(domain)) host = domain;
+    else return;
+    const link = document.createElement("a");
+    link.href = "https://" + host + "/" + encodeURIComponent(id) + "/";
+    link.target = "_blank";
+    link.rel = "noopener noreferrer";
+    link.textContent = "Posted by " + (post.originalSiteName || domain);
+    link.className = "aggregation-link";
+    PostDOM.postAggregation.appendChild(link);
+    PostDOM.postAggregation.style.paddingTop = "1em";
+  }
+
+</script>
+{% if article_type == 1 %}
+<script>
+  PostDOM.postOnchain.style.display = "none";
+</script>
+{% endif %}

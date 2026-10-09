@@ -1,0 +1,155 @@
+{
+  "name": "Croptop",
+  "description": "Publish and access indie content freely through .eth domains",
+  "author": "Jango",
+  "authorWebsite": "https://croptop.eth.sucks",
+  "version": "1.2.2",
+  "idealItemsPerPage": 10,
+  "generateIndexPagination": false,
+  "buildNumber": 599,
+  "generateNFTMetadata": true,
+  "generateTagPages": true,
+  "settings": {
+    "maintenanceMessage": {
+      "name": "Maintenance Banner",
+      "type": "string",
+      "defaultValue": "Under maintenance: this site is moving to Juicebox v6. Buying and deploying may not work yet.",
+      "description": "Shown at the top of every page. Leave blank to hide."
+    },
+    "curatorAddress": {
+      "name": "Your Address",
+      "type": "string",
+      "defaultValue": "",
+      "description": "The Ethereum address of the curator of this collection where you'll receive rewards."
+    },
+    "ethereumMainnetCollectionAddress": {
+      "name": "Ethereum",
+      "type": "string",
+      "defaultValue": "0x779957e5376571adaf544e63ffc8404e98f30d30",
+      "description": "Defaults to the Croptop network's collection. Replace with your own after deploying one (the \"$\" button)."
+    },
+    "ethereumSepoliaCollectionAddress": {
+      "name": "Ethereum Sepolia",
+      "type": "string",
+      "defaultValue": "0x2b70edc0b7db710f7d8708c6240d6fa9e62b71f5",
+      "description": "Defaults to the Croptop network's testnet collection."
+    },
+    "optimismMainnetCollectionAddress": {
+      "name": "Optimism",
+      "type": "string",
+      "defaultValue": "",
+      "description": ""
+    },
+    "optimismSepoliaCollectionAddress": {
+      "name": "Optimism Sepolia",
+      "type": "string",
+      "defaultValue": "",
+      "description": ""
+    },
+    "baseMainnetCollectionAddress": {
+      "name": "Base",
+      "type": "string",
+      "defaultValue": "",
+      "description": ""
+    },
+    "baseSepoliaCollectionAddress": {
+      "name": "Base Sepolia",
+      "type": "string",
+      "defaultValue": "",
+      "description": ""
+    },
+    "arbitrumMainnetCollectionAddress": {
+      "name": "Arbitrum",
+      "type": "string",
+      "defaultValue": "",
+      "description": ""
+    },
+    "arbitrumSepoliaCollectionAddress": {
+      "name": "Arbitrum Sepolia",
+      "type": "string",
+      "defaultValue": "",
+      "description": ""
+    },
+    "ethereumMainnetRPC": {
+      "name": "Ethereum RPC",
+      "type": "string",
+      "defaultValue": "https://juicebox.center/v1/rpc/1",
+      "description": "",
+      "advanced": true
+    },
+    "ethereumSepoliaRPC": {
+      "name": "Ethereum Sepolia RPC",
+      "type": "string",
+      "defaultValue": "https://juicebox.center/v1/rpc/11155111",
+      "description": "",
+      "advanced": true
+    },
+    "optimismMainnetRPC": {
+      "name": "Optimism RPC",
+      "type": "string",
+      "defaultValue": "https://juicebox.center/v1/rpc/10",
+      "description": "",
+      "advanced": true
+    },
+    "optimismSepoliaRPC": {
+      "name": "Optimism Sepolia RPC",
+      "type": "string",
+      "defaultValue": "https://juicebox.center/v1/rpc/11155420",
+      "description": "",
+      "advanced": true
+    },
+    "baseMainnetRPC": {
+      "name": "Base RPC",
+      "type": "string",
+      "defaultValue": "https://juicebox.center/v1/rpc/8453",
+      "description": "",
+      "advanced": true
+    },
+    "baseSepoliaRPC": {
+      "name": "Base Sepolia RPC",
+      "type": "string",
+      "defaultValue": "https://juicebox.center/v1/rpc/84532",
+      "description": "",
+      "advanced": true
+    },
+    "arbitrumMainnetRPC": {
+      "name": "Arbitrum RPC",
+      "type": "string",
+      "defaultValue": "https://juicebox.center/v1/rpc/42161",
+      "description": "",
+      "advanced": true
+    },
+    "arbitrumSepoliaRPC": {
+      "name": "Arbitrum Sepolia RPC",
+      "type": "string",
+      "defaultValue": "https://juicebox.center/v1/rpc/421614",
+      "description": "",
+      "advanced": true
+    },
+    "backgroundColor": {
+      "name": "Background Color",
+      "type": "string",
+      "defaultValue": "",
+      "description": "Page background as a hex color, such as #FFF8ED. Leave both background and foreground blank for automatic light and dark colors."
+    },
+    "foregroundColor": {
+      "name": "Foreground Color",
+      "type": "string",
+      "defaultValue": "",
+      "description": "Text and button borders as a hex color, such as #24211D. Muted text and surfaces follow your colors."
+    },
+    "postViewMode": {
+      "name": "Post View",
+      "type": "string",
+      "defaultValue": "frames",
+      "description": "How posts open on the site: single, frames, more, or list. The app sets this when you change views.",
+      "advanced": true
+    },
+    "highlightColor": {
+      "name": "Highlight Color",
+      "type": "string",
+      "defaultValue": "#F056C1",
+      "description": "Color for links and buttons"
+    }
+  }
+}

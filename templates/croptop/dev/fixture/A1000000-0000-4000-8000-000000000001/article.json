@@ -1,0 +1,21 @@
+{
+  "articleType": 0,
+  "attachments": [],
+  "cids": {},
+  "content": "# Hello\n\nA **text** post with a [link](https://croptop.eth.sucks), a list, and a footnote[^1].\n\n- one\n- two\n- [ ] a task\n\n[^1]: Footnotes render through markdown-it-footnote.",
+  "contentRendered": "<p># Hello</p>\n<p>A **text** post with a [link](https://croptop.eth.sucks), a list, and a footnote[^1].</p>\n<p>- one\n- two\n- [ ] a task</p>\n<p>[^1]: Footnotes render through markdown-it-footnote.</p>\n",
+  "created": 780000000.0,
+  "externalLink": "",
+  "hasAudio": false,
+  "hasVideo": false,
+  "heroImage": "",
+  "heroImageFilename": "",
+  "heroImageURL": "",
+  "id": "A1000000-0000-4000-8000-000000000001",
+  "link": "/A1000000-0000-4000-8000-000000000001/",
+  "slug": "",
+  "tags": {
+    "notes": "notes"
+  },
+  "title": "Hello, croptop"
+}

@@ -1,0 +1,25 @@
+{
+  "attributes" : [
+    {
+      "trait_type" : "title",
+      "value" : "Load up | bottom #1"
+    },
+    {
+      "trait_type" : "title_sha256",
+      "value" : "946f66956d2453808f61e7b78a8216e9c0402fba290fa797acd76e0d6c9a22b9"
+    },
+    {
+      "trait_type" : "content_sha256",
+      "value" : "fe23f57d2d430d6c09a882ea944cb8284e064d84e41e72fdf49a5e1e210ebb8d"
+    },
+    {
+      "trait_type" : "created_at",
+      "value" : "1761970860"
+    }
+  ],
+  "description" : "",
+  "external_url" : "https://k51qzi5uqu5dhxiwvl4xx3sco13y50yoo28rbhe3sneirnj2qatinx75qpsqtb.eth.sucks/0AC3B2B6-90BE-4D1B-B14F-3A549D7A9953/",
+  "image" : "https://ipfs.io/ipfs/QmPd3AphXGcrL529goRSuVNRoPE1BEPeaQbSzcnQ4rQeQS",
+  "mimeType" : "image/png",
+  "name" : "Load up | bottom #1"
+}

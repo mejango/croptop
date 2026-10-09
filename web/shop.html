@@ -1,0 +1,38 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Create shop - Croptop</title><link rel="stylesheet" href="/style.css"><link rel="stylesheet" href="/shop.css">
+<script defer src="/shop-assets/ethers.umd.min.js"></script><script defer src="/shop-assets/scripts/chains.js"></script><script defer src="/shop-assets/scripts/abis.js"></script><script defer src="/shop-assets/scripts/tx.js"></script><script defer src="/shop-assets/scripts/txs/croptop_deployer.js"></script><script defer src="/shop.js"></script></head>
+<body class="shop-page"><main><header class="shop-header"><span class="shop-logo"><img src="/shop-logo.png" width="108" height="108" alt="Croptop"></span><h1>Create shop</h1></header><p class="shop-advanced">If you want more control over your store setup, use <a href="https://juicebox.money/create" target="_blank" rel="noopener noreferrer">https://juicebox.money/create</a>.</p><p id="message" role="status" aria-live="polite">Loading…</p>
+<form id="details" class="sheet" hidden>
+<div class="shop-name-row">
+<label for="shop-name">Store name<input id="shop-name" type="text" name="name" maxlength="100" placeholder="Banny’s Shop" required></label>
+<label for="shop-symbol">ID<input id="shop-symbol" type="text" name="symbol" maxlength="20" placeholder="BANNY" aria-describedby="symbol-help" required><span id="symbol-help" class="visually-hidden">The short name for your shop’s token.</span></label>
+</div>
+<div class="shop-field">
+<div class="shop-field-heading">
+<label for="shop-owner">Revenue manager</label>
+<p id="owner-help" class="help">Set the address that manages your store’s revenues.</p>
+</div>
+<input id="shop-owner" type="text" name="owner" placeholder="Defaults to your address" pattern="0x[0-9a-fA-F]{40}" aria-describedby="owner-help" required>
+<button id="connect-wallet" class="btn" type="button">connect wallet</button>
+</div>
+<div class="shop-field">
+<div class="shop-field-heading">
+<label for="shop-price">Price</label>
+<p id="price-help" class="help">Anyone can buy posts. Set the minimum price for posts added by others.</p>
+</div>
+<div class="shop-price"><span aria-hidden="true">Ξ</span><input id="shop-price" type="text" name="price" value="0.001" inputmode="decimal" aria-label="Price in ETH" aria-describedby="price-help" required></div>
+</div>
+<div class="shop-field">
+<div class="shop-field-heading">
+<label for="environment">Networks</label>
+<p id="network-help" class="help">Choose where you want your shop.</p>
+</div>
+<div class="shop-select"><select id="environment" aria-describedby="network-help"><option value="mainnet">Production</option><option value="testnet">Testnets</option></select></div>
+<div id="networks" role="group" aria-label="Networks"></div>
+</div>
+<button id="get-quote" class="btn" type="submit" disabled>get deploy quote</button>
+</form>
+<section id="review" hidden><h2>Review</h2><p id="summary"></p><div id="costs"></div><p class="help">Each network needs ETH for its creation fee and gas. Your wallet shows the final fee before approval. Networks are approved separately.</p><details class="shop-rules"><summary>Shop rules</summary><p class="help">62% of issued tokens go to buyers and 38% to the revenue wallet. Issuance falls 1% weekly, with a 10% cash-out tax. Others may keep up to 10% of sales of posts they add. The revenue wallet can add posts at any price.</p></details><button id="approve" class="btn">Approve in wallet</button></section>
+<button id="edit" class="btn quiet" hidden>Edit shop details</button>
+<section id="progress" hidden><h2>Deployment</h2><div id="chains"></div><p id="publish-note"></p><a id="settings-link" class="btn quiet">Back to settings</a></section>
+<noscript>Enable JavaScript to create a shop.</noscript></main></body></html>

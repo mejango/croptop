@@ -1,0 +1,304 @@
+package publish
+
+import (
+	"context"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"io"
+	"io/fs"
+	"net/http"
+	"net/url"
+	"os"
+	"path/filepath"
+	"strings"
+	"sync"
+	"time"
+
+	"github.com/mejango/croptop/internal/gateway"
+	"github.com/mejango/croptop/internal/ipfs"
+	"github.com/mejango/croptop/internal/render"
+	"github.com/mejango/croptop/internal/store"
+)
+
+const httpFetchTimeout = 5 * time.Minute
+
+// ipfsFetchTimeout bounds one read over IPFS. A variable so that tests can
+// lower it.
+var ipfsFetchTimeout = 4 * time.Minute
+
+// fetchSite downloads a published site into dest. It tries IPFS first (the
+// exact CID), then reads the files rebuildSource needs over HTTP from the
+// gateway list. HTTP is what keeps adopt and sync working when the only
+// IPFS provider of the new version has gone offline.
+func (p *Publisher) fetchSite(ctx context.Context, ipns, cid, dest string, policy ...*store.Site) error {
+	if len(policy) == 0 || policy[0] == nil {
+		return FetchSite(ctx, p.Node, ipns, cid, dest, p.log)
+	}
+	return fetchSiteFromURLs(ctx, p.Node, cid, dest, p.log, func() []string {
+		site := policy[0]
+		if p.Store != nil {
+			current, err := p.Store.Site(site.ID)
+			if err != nil {
+				return nil
+			}
+			site = current
+		}
+		return gateway.FetchURLsForSite(site, cid)
+	})
+}
+
+// FetchSite is the shared fetch used by adopt, sync, and follow.
+func FetchSite(ctx context.Context, node ipfs.Engine, ipns, cid, dest string, logf func(string, ...any)) error {
+	return fetchSiteFromURLs(ctx, node, cid, dest, logf, func() []string { return gateway.FetchURLs(ipns, cid) })
+}
+
+func fetchSiteFromURLs(ctx context.Context, node ipfs.Engine, cid, dest string, logf func(string, ...any), urls func() []string) error {
+	if logf == nil {
+		logf = func(string, ...any) {}
+	}
+	ictx, cancel := context.WithTimeout(ctx, ipfsFetchTimeout)
+	err := node.Get(ictx, "/ipfs/"+cid, dest)
+	cancel()
+	if err == nil {
+		if _, statErr := os.Stat(filepath.Join(dest, "planet.json")); statErr == nil {
+			return nil
+		}
+		err = errors.New("fetched tree has no planet.json")
+	}
+	logf("ipfs fetch failed (%v); trying gateways", err)
+	os.RemoveAll(dest)
+	last := ErrHostingDisabled
+	allowed := func(base string) bool {
+		for _, current := range urls() {
+			if base == current {
+				return true
+			}
+		}
+		return false
+	}
+	for _, base := range urls() {
+		hctx, cancel := context.WithTimeout(ctx, httpFetchTimeout)
+		last = fetchTreeHTTP(hctx, base, dest, func() bool { return allowed(base) })
+		cancel()
+		if last == nil {
+			logf("fetched from %s", base)
+			return nil
+		}
+		logf("%s: %v", base, last)
+		os.RemoveAll(dest)
+	}
+	return fmt.Errorf("could not fetch %s from IPFS or any gateway: %w", cid, last)
+}
+
+// fetchTreeHTTP reads the published files adopt and sync need from base.
+func fetchTreeHTTP(ctx context.Context, base, dest string, allowed ...func() bool) error {
+	client := &http.Client{Timeout: 90 * time.Second}
+	get := func(rel string, required bool) ([]byte, error) {
+		if len(allowed) > 0 && !allowed[0]() {
+			return nil, ErrHostingDisabled
+		}
+		req, err := http.NewRequestWithContext(ctx, "GET", base+rel, nil)
+		if err != nil {
+			return nil, err
+		}
+		resp, err := client.Do(req)
+		if err != nil {
+			return nil, err
+		}
+		defer resp.Body.Close()
+		if resp.StatusCode != 200 {
+			if required {
+				return nil, fmt.Errorf("%s: %s", rel, resp.Status)
+			}
+			return nil, nil
+		}
+		return io.ReadAll(io.LimitReader(resp.Body, 512<<20))
+	}
+	save := func(rel string, b []byte) error {
+		path := filepath.Join(dest, filepath.FromSlash(rel))
+		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+			return err
+		}
+		return os.WriteFile(path, b, 0o644)
+	}
+	planetJSON, err := get("planet.json", true)
+	if err != nil {
+		return err
+	}
+	var planet struct {
+		Articles []render.PublicPost `json:"articles"`
+	}
+	if err := json.Unmarshal(planetJSON, &planet); err != nil {
+		return fmt.Errorf("planet.json: %w", err)
+	}
+	if err := save("planet.json", planetJSON); err != nil {
+		return err
+	}
+	for _, f := range []string{"templateSettings.json", "avatar.png", "favicon.ico"} {
+		if b, err := get(f, false); err == nil && b != nil {
+			if err := save(f, b); err != nil {
+				return err
+			}
+		}
+	}
+	// posts in parallel, a few at a time
+	sem := make(chan struct{}, 4)
+	var wg sync.WaitGroup
+	var mu sync.Mutex
+	var firstErr error
+	for _, a := range planet.Articles {
+		a := a
+		wg.Add(1)
+		sem <- struct{}{}
+		go func() {
+			defer wg.Done()
+			defer func() { <-sem }()
+			names := []string{"article.json", "nft.json", "nft.json.cid.txt", "_cover.png", "_videoThumbnail.png"}
+			names = append(names, a.Attachments...)
+			for i, name := range names {
+				b, err := get(a.ID+"/"+url.PathEscape(name), false)
+				if err != nil {
+					mu.Lock()
+					if firstErr == nil {
+						firstErr = fmt.Errorf("%s/%s: %w", a.ID, name, err)
+					}
+					mu.Unlock()
+					return
+				}
+				if b == nil {
+					if i == 0 { // no article.json on the gateway: use the inline copy
+						b, _ = json.Marshal(a)
+					} else {
+						continue
+					}
+				}
+				if err := save(a.ID+"/"+name, b); err != nil {
+					mu.Lock()
+					if firstErr == nil {
+						firstErr = err
+					}
+					mu.Unlock()
+					return
+				}
+			}
+		}()
+	}
+	wg.Wait()
+	return firstErr
+}
+
+// prewarm asks the public gateways for the site so they fetch and cache it
+// while this node is still online, as Planet does after every publish. It
+// returns once every request has finished or the deadline passes.
+func (p *Publisher) prewarm(ctx context.Context, site *store.Site, cid string) {
+	site, err := p.hostedSite(site)
+	if err != nil {
+		return
+	}
+	hostURL := HostOf(site)
+	ctx, cancel := context.WithTimeout(ctx, 90*time.Second)
+	defer cancel()
+	root := gateway.URL(site)
+	urls := []string{root, root + "planet.json", root + "avatar.png", root + "favicon.ico", root + "rss.xml", gateway.CIDURL(site, cid), gateway.CIDURL(site, cid) + "planet.json"}
+	client := &http.Client{Timeout: 80 * time.Second}
+	var wg sync.WaitGroup
+	for _, u := range urls {
+		if strings.Contains(u, "dweb.link") {
+			continue // refuses programmatic fetches since 2026-09-21
+		}
+		u := u
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			if err := p.checkHost(site, hostURL); err != nil {
+				return
+			}
+			req, err := http.NewRequestWithContext(ctx, "GET", u, nil)
+			if err != nil {
+				return
+			}
+			resp, err := client.Do(req)
+			if err != nil {
+				p.log("prewarm %s: %v", strings.TrimPrefix(u, "https://"), err)
+				return
+			}
+			io.Copy(io.Discard, io.LimitReader(resp.Body, 8<<20))
+			resp.Body.Close()
+			p.log("prewarm %s: %s", strings.TrimPrefix(u, "https://"), resp.Status)
+		}()
+	}
+	wg.Wait()
+}
+
+// prewarmAll walks every published file and asks the canonical gateway for it
+// by CID, so the gateway's node holds the whole site while this one is still
+// online. Runs in the background after publish; a few requests at a time.
+func (p *Publisher) prewarmAll(site *store.Site, cid string) {
+	site, err := p.hostedSite(site)
+	if err != nil {
+		return
+	}
+	hostURL := HostOf(site)
+	ctx, cancel := context.WithTimeout(context.Background(), 40*time.Minute)
+	defer cancel()
+	base := gateway.CIDURL(site, cid)
+	if strings.Contains(base, "dweb.link") {
+		return // a CIDv0 root: its only CID gateway refuses programmatic fetches
+	}
+	dir := p.Store.PublicDir(site.ID)
+	var paths []string
+	filepath.WalkDir(dir, func(path string, d fs.DirEntry, err error) error {
+		if err == nil && !d.IsDir() {
+			rel, _ := filepath.Rel(dir, path)
+			paths = append(paths, filepath.ToSlash(rel))
+		}
+		return nil
+	})
+	client := &http.Client{Timeout: 3 * time.Minute}
+	start := time.Now()
+	remaining := paths
+	// The gateway keeps whatever blocks it managed to fetch, so a second and
+	// third pass over the failures usually completes a site a slow link
+	// could not deliver in one go.
+	for pass := 1; pass <= 3 && len(remaining) > 0 && ctx.Err() == nil; pass++ {
+		sem := make(chan struct{}, 4)
+		var wg sync.WaitGroup
+		var mu sync.Mutex
+		var failed []string
+		for _, rel := range remaining {
+			if err := p.checkHost(site, hostURL); err != nil {
+				wg.Wait()
+				return
+			}
+			rel := rel
+			wg.Add(1)
+			sem <- struct{}{}
+			go func() {
+				defer wg.Done()
+				defer func() { <-sem }()
+				if err := p.checkHost(site, hostURL); err != nil {
+					return
+				}
+				req, err := http.NewRequestWithContext(ctx, "GET", base+rel, nil)
+				if err != nil {
+					return
+				}
+				resp, err := client.Do(req)
+				if err == nil {
+					io.Copy(io.Discard, io.LimitReader(resp.Body, 32<<20))
+					resp.Body.Close()
+				}
+				if err != nil || resp.StatusCode >= 400 {
+					mu.Lock()
+					failed = append(failed, rel)
+					mu.Unlock()
+				}
+			}()
+		}
+		wg.Wait()
+		remaining = failed
+	}
+	ok, failed := len(paths)-len(remaining), len(remaining)
+	p.log("gateway now holds %d of %d files for %s (%d failed) after %s", ok, len(paths), site.Name, failed, time.Since(start).Round(time.Second))
+}

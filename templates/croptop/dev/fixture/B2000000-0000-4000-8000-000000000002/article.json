@@ -1,0 +1,25 @@
+{
+  "articleType": 0,
+  "attachments": [
+    "cover.png"
+  ],
+  "cids": {},
+  "content": "![cover](cover.png)\n\nA post whose hero image is an attachment.",
+  "contentRendered": "<p>![cover](cover.png)</p>\n<p>A post whose hero image is an attachment.</p>\n",
+  "created": 780100000.0,
+  "externalLink": "",
+  "hasAudio": false,
+  "hasVideo": false,
+  "heroImage": "",
+  "heroImageFilename": "cover.png",
+  "heroImageURL": "",
+  "id": "B2000000-0000-4000-8000-000000000002",
+  "link": "/B2000000-0000-4000-8000-000000000002/",
+  "slug": "",
+  "tags": {
+    "art": "art"
+  },
+  "title": "A picture",
+  "heroImageWidth": 320,
+  "heroImageHeight": 200
+}

@@ -1,0 +1,25 @@
+{
+  "articleType" : 0,
+  "attachments" : [
+    "Screenshot 2025-11-01 at 01.29.07.png"
+  ],
+  "cids" : {
+    "Screenshot 2025-11-01 at 01.29.07.png" : "QmdXfYGaY3HEeHFzWRtAim8UdRon4Grzw2tGhiG3kziJn5"
+  },
+  "content" : "<img width=\"957\" alt=\"Screenshot 2025-11-01 at 01.29.07\" src=\"Screenshot 2025-11-01 at 01.29.07.png\">\n\n\n",
+  "contentRendered" : "<img width=\"957\" alt=\"Screenshot 2025-11-01 at 01.29.07\" src=\"Screenshot 2025-11-01 at 01.29.07.png\">\n",
+  "created" : 783663420,
+  "heroImage" : "Screenshot 2025-11-01 at 01.29.07.png",
+  "heroImageHeight" : 1078,
+  "heroImageWidth" : 1914,
+  "id" : "5FE26221-419D-4548-9F64-B37F98978383",
+  "isIncludedInNavigation" : false,
+  "link" : "/5FE26221-419D-4548-9F64-B37F98978383/",
+  "navigationWeight" : 1,
+  "starType" : 0,
+  "summary" : "",
+  "tags" : {
+    "mockups" : "mockups"
+  },
+  "title" : "Create a store | bottom #1"
+}

@@ -1,0 +1,25 @@
+{
+  "articleType" : 0,
+  "attachments" : [
+    "Screenshot 2025-11-01 at 01.27.45.png"
+  ],
+  "cids" : {
+    "Screenshot 2025-11-01 at 01.27.45.png" : "QmaF2kQL7z5ipTmudwFDz45fcgMex3RurSq1h5fXKPteXg"
+  },
+  "content" : "<img width=\"958\" alt=\"Screenshot 2025-11-01 at 01.27.45\" src=\"Screenshot 2025-11-01 at 01.27.45.png\">\n\n\n",
+  "contentRendered" : "<img width=\"958\" alt=\"Screenshot 2025-11-01 at 01.27.45\" src=\"Screenshot 2025-11-01 at 01.27.45.png\">\n",
+  "created" : 783663720,
+  "heroImage" : "Screenshot 2025-11-01 at 01.27.45.png",
+  "heroImageHeight" : 1074,
+  "heroImageWidth" : 1916,
+  "id" : "F26DB78E-F9B6-4090-A829-60FD9C1BA15C",
+  "isIncludedInNavigation" : false,
+  "link" : "/F26DB78E-F9B6-4090-A829-60FD9C1BA15C/",
+  "navigationWeight" : 1,
+  "starType" : 0,
+  "summary" : "",
+  "tags" : {
+    "mockups" : "mockups"
+  },
+  "title" : "Load up | top #1"
+}

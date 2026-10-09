@@ -1,0 +1,297 @@
+package publish
+
+import (
+	"context"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"os"
+	"path/filepath"
+	"regexp"
+	"strings"
+
+	"github.com/mejango/croptop/internal/render"
+	"github.com/mejango/croptop/internal/store"
+)
+
+// Adopt takes over a published site on this machine from just its IPNS name
+// (or ENS domain) and private key: the published tree is fetched from IPFS
+// and the source files rebuilt from it.
+// Adopt fetches a published site and makes this machine its publisher. With
+// force it re-adopts a site that is already here, rebuilding its posts from
+// the network again; the key must be the same one.
+func (p *Publisher) Adopt(ctx context.Context, nameOrENS string, pemBytes []byte, force bool) (string, error) {
+	name := strings.TrimPrefix(strings.TrimSpace(nameOrENS), "/ipns/")
+	if strings.HasSuffix(name, ".eth") {
+		p.log("resolving %s", name)
+		resolved, err := p.Node.Resolve(ctx, "/ipns/"+name)
+		if err != nil {
+			return "", fmt.Errorf("resolve %s: %w", name, err)
+		}
+		name = strings.TrimPrefix(resolved, "/ipns/")
+		if strings.HasPrefix(name, "/ipfs/") {
+			return "", fmt.Errorf("%s points at a fixed CID, not an IPNS name; Croptop cannot update it", nameOrENS)
+		}
+	}
+	p.log("resolving IPNS %s", name)
+	path, err := p.Node.Resolve(ctx, "/ipns/"+name)
+	if err != nil {
+		return "", fmt.Errorf("resolve /ipns/%s: %w", name, err)
+	}
+	cid := strings.TrimPrefix(path, "/ipfs/")
+	tmp, err := os.MkdirTemp(p.Store.Root, "adopt-*")
+	if err != nil {
+		return "", err
+	}
+	defer os.RemoveAll(tmp)
+	p.log("fetching %s", cid)
+	if err := p.fetchSite(ctx, name, cid, filepath.Join(tmp, "site")); err != nil {
+		return "", err
+	}
+	pubDir := filepath.Join(tmp, "site")
+	var head struct {
+		ID string `json:"id"`
+	}
+	b, err := os.ReadFile(filepath.Join(pubDir, "planet.json"))
+	if err != nil {
+		return "", fmt.Errorf("%s is not a Planet/Croptop site (no planet.json)", name)
+	}
+	if err := json.Unmarshal(b, &head); err != nil || head.ID == "" {
+		return "", fmt.Errorf("planet.json has no id")
+	}
+	ks := p.Node.Keystore()
+	if ks.Has(head.ID) && !force {
+		return "", fmt.Errorf("a key for %s already exists on this machine (use --force to rebuild the site from the network)", head.ID)
+	}
+	if !ks.Has(head.ID) {
+		if err := importKey(ks, head.ID, pemBytes); err != nil {
+			return "", err
+		}
+	}
+	derived, err := ks.Name(head.ID)
+	if err != nil {
+		return "", err
+	}
+	if derived != name {
+		if !force {
+			ks.Delete(head.ID)
+		}
+		return "", fmt.Errorf("that key belongs to %s, not %s", derived, name)
+	}
+	if _, err := os.Stat(p.Store.SiteDir(head.ID)); err == nil && !force {
+		return "", fmt.Errorf("site %s already exists here", head.ID)
+	}
+	// Published metadata describes the source's choice, not permission to
+	// host a new copy from this machine. A forced rebuild keeps this owner's
+	// current choice and the private endpoint/name paired with it.
+	local, err := p.Store.Site(head.ID)
+	if err != nil && !errors.Is(err, store.ErrNotFound) {
+		return "", err
+	}
+	os.RemoveAll(p.Store.PublicDir(head.ID))
+	if err := os.MkdirAll(filepath.Dir(p.Store.PublicDir(head.ID)), 0o755); err != nil {
+		return "", err
+	}
+	if err := os.Rename(pubDir, p.Store.PublicDir(head.ID)); err != nil {
+		return "", err
+	}
+	if err := rebuildSource(p.Store, head.ID, p.Store.PublicDir(head.ID), func(site *store.Site) error {
+		if err := restoreStorageChoice(site, local); err != nil {
+			return err
+		}
+		if local == nil { // public metadata cannot carry a private host choice
+			delete(site.Raw, HostKey)
+			delete(site.Raw, NameKey)
+		}
+		return nil
+	}); err != nil {
+		return "", err
+	}
+	site, err := p.Store.Site(head.ID)
+	if err != nil {
+		return "", err
+	}
+	site.LastPublishedCID = &cid
+	rememberVersion(site, cid)
+	if rec, err := p.Node.NetworkRecord(ctx, name); err == nil {
+		site.IPNSSequence = rec.Sequence
+	}
+	return head.ID, p.Store.SaveSite(site)
+}
+
+// rebuildSource reconstructs sites/<id>/ from a published tree. Everything
+// the template needs is in the public files, so a site is recoverable from
+// the network plus its key.
+func rebuildSource(st *store.Store, siteID, pubDir string, configure ...func(*store.Site) error) error {
+	b, err := os.ReadFile(filepath.Join(pubDir, "planet.json"))
+	if err != nil {
+		return err
+	}
+	var pub map[string]json.RawMessage
+	if err := json.Unmarshal(b, &pub); err != nil {
+		return err
+	}
+	var articles []render.PublicPost
+	if raw, ok := pub["articles"]; ok {
+		if err := json.Unmarshal(raw, &articles); err != nil {
+			return err
+		}
+	}
+	delete(pub, "articles")
+	pub["templateName"] = json.RawMessage(`"Croptop"`)
+	siteJSON, _ := json.Marshal(pub)
+	var site store.Site
+	if err := json.Unmarshal(siteJSON, &site); err != nil {
+		return err
+	}
+	if site.ID != siteID {
+		return fmt.Errorf("planet.json id %s does not match %s", site.ID, siteID)
+	}
+	for _, apply := range configure {
+		if err := apply(&site); err != nil {
+			return err
+		}
+	}
+	if err := st.SaveSite(&site); err != nil {
+		return err
+	}
+	for _, f := range []string{"avatar.png", "favicon.ico", "templateSettings.json"} {
+		src := filepath.Join(pubDir, f)
+		if _, err := os.Stat(src); err == nil {
+			if err := copyFile(src, filepath.Join(st.SiteDir(siteID), f)); err != nil {
+				return err
+			}
+		}
+	}
+	// planet.json lists only the feed; pages live in the tree as folders with
+	// their own article.json, so walk the folders too
+	seen := map[string]bool{}
+	for _, a := range articles {
+		seen[a.ID] = true
+	}
+	if entries, err := os.ReadDir(pubDir); err == nil {
+		for _, e := range entries {
+			if !e.IsDir() || seen[e.Name()] {
+				continue
+			}
+			pb, err := os.ReadFile(filepath.Join(pubDir, e.Name(), "article.json"))
+			if err != nil {
+				continue
+			}
+			var page render.PublicPost
+			if json.Unmarshal(pb, &page) == nil && page.ID == e.Name() {
+				articles = append(articles, page)
+				seen[page.ID] = true
+			}
+		}
+	}
+	// the published article.json does not say which pages are navigation
+	// items or in what order, but the rendered index.html does
+	navWeight := navigationFromIndex(pubDir, articles)
+	for _, a := range articles {
+		postDir := filepath.Join(pubDir, a.ID)
+		// prefer the per-post article.json; it is the same shape
+		if pb, err := os.ReadFile(filepath.Join(postDir, "article.json")); err == nil {
+			var full render.PublicPost
+			if json.Unmarshal(pb, &full) == nil && full.ID == a.ID {
+				a = full
+			}
+		}
+		post := postFromPublic(a) // article.json carries the exact content; article.md is title + content
+		if w, ok := navWeight[post.ID]; ok {
+			yes := true
+			post.IsIncludedInNavigation, post.NavigationWeight = &yes, &w
+		}
+		if err := st.SavePost(siteID, post); err != nil {
+			return err
+		}
+		names := append([]string{}, post.Attachments...)
+		names = append(names, "_cover.png", "_videoThumbnail.png")
+		for _, name := range names {
+			src := filepath.Join(postDir, name)
+			if _, err := os.Stat(src); err != nil {
+				continue
+			}
+			if err := copyFile(src, filepath.Join(st.PostDir(siteID, post.ID), name)); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}
+
+func postFromPublic(a render.PublicPost) *store.Post {
+	p := &store.Post{
+		OriginalSiteName: a.OriginalSiteName, OriginalSiteDomain: a.OriginalSiteDomain, OriginalPostID: a.OriginalPostID, OriginalPostDate: a.OriginalPostDate, SubmissionTargets: a.SubmissionTargets,
+		ID: a.ID, Title: a.Title, Content: a.Content, Created: a.Created, ArticleType: a.ArticleType,
+		Link: "/" + a.ID + "/", Attachments: a.Attachments, CIDs: a.CIDs, Tags: a.Tags,
+		HeroImageWidth: a.HeroImageWidth, HeroImageHeight: a.HeroImageHeight,
+		VideoFilename: a.VideoFilename, AudioFilename: a.AudioFilename, Modified: a.Modified, Pinned: a.Pinned,
+	}
+	if a.ContentRendered != "" {
+		s := a.ContentRendered
+		p.ContentRendered = &s
+	}
+	if a.Slug != "" {
+		s := a.Slug
+		p.Slug = &s
+	}
+	if a.ExternalLink != "" {
+		s := a.ExternalLink
+		p.ExternalLink = &s
+	}
+	if a.HeroImageFilename != nil && *a.HeroImageFilename != "" && *a.HeroImageFilename != "_videoThumbnail.png" {
+		if render.HeroImage(p) != *a.HeroImageFilename { // only when it was chosen explicitly
+			p.HeroImage = a.HeroImageFilename
+		}
+	}
+	if p.Attachments == nil {
+		p.Attachments = []string{}
+	}
+	empty := "" // Planet posts carry an empty summary; nft.json's description depends on it
+	p.Summary = &empty
+	return p
+}
+
+var navAnchor = regexp.MustCompile(`(?s)<a\s+href="([^"]*)"\s+class="nav-(?:item|current)"[^>]*>(.*?)</a>`)
+
+// navItems returns the href and inner HTML of each navigation link the
+// template rendered into pubDir's index.html, in order.
+func navItems(pubDir string) [][]string {
+	b, err := os.ReadFile(filepath.Join(pubDir, "index.html"))
+	if err != nil {
+		return nil
+	}
+	h := string(b)
+	i := strings.Index(h, `id="nav"`)
+	if i < 0 {
+		return nil
+	}
+	h = h[i:]
+	if j := strings.Index(h, "</div>"); j > 0 {
+		h = h[:j]
+	}
+	return navAnchor.FindAllStringSubmatch(h, -1)
+}
+
+// navigationFromIndex reads the navigation the template rendered into
+// index.html and maps each item back to a page: by external link, or by the
+// slug or id in its href. The value is the item's position.
+func navigationFromIndex(pubDir string, articles []render.PublicPost) map[string]int {
+	out := map[string]int{}
+	for n, m := range navItems(pubDir) {
+		href := strings.TrimSpace(m[1])
+		path := strings.Trim(strings.TrimPrefix(strings.TrimPrefix(href, "./"), "../"), "/")
+		for _, a := range articles {
+			if a.ArticleType != 1 {
+				continue
+			}
+			ext := strings.TrimSpace(a.ExternalLink)
+			if (ext != "" && ext == href) || (path != "" && (path == a.ID || path == a.Slug)) {
+				out[a.ID] = n
+				break
+			}
+		}
+	}
+	return out
+}
