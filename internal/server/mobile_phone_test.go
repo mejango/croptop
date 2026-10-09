@@ -248,19 +248,42 @@ func TestPhoneSessionRejectsSigningArbitraryServiceBytes(t *testing.T) {
 	}
 }
 
-func TestPhoneReadyRequiresTheHostedBootstrapSequence(t *testing.T) {
+func TestPhoneReadyRequiresHostedBootstrapContentOrNewerHead(t *testing.T) {
 	s, site, _ := phoneTestServer(t)
-	service := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		writeJSON(w, 200, map[string]any{"ipns": site.IPNS, "ready": true, "sequence": "1"})
-	}))
-	defer service.Close()
-	s.MobileOrigin = service.URL
-	ctx, cancel := context.WithTimeout(context.Background(), 25*time.Millisecond)
-	defer cancel()
-	if err := s.waitPhoneReady(ctx, site.IPNS, "session", 2); err == nil {
-		t.Fatal("old compatible host head reported ready")
-	}
-	if err := s.waitPhoneReady(context.Background(), site.IPNS, "session", 1); err != nil {
-		t.Fatal(err)
+	const bootstrapCID = "bafy-bootstrap-content"
+	for _, test := range []struct {
+		name, cid, sequence, ipns, reason string
+		ready                             bool
+		wantError                         string
+	}{
+		{"unchanged republish retains lower host sequence", bootstrapCID, "1", site.IPNS, "", true, ""},
+		{"exact bootstrap", bootstrapCID, "2", site.IPNS, "", true, ""},
+		{"same content newer sequence", bootstrapCID, "3", site.IPNS, "", true, ""},
+		{"newer ready publication", "bafy-newer-content", "3", site.IPNS, "", true, ""},
+		{"older compatible publication", "bafy-older-content", "1", site.IPNS, "", true, "still uploading"},
+		{"conflicting same sequence", "bafy-conflicting-content", "2", site.IPNS, "", true, "still uploading"},
+		{"wrong site with matching content", bootstrapCID, "2", "another-site", "", true, "different site"},
+		{"matching content is not ready", bootstrapCID, "1", site.IPNS, "Hosting is disabled.", false, "Hosting is disabled."},
+		{"newer publication is not ready", "bafy-newer-content", "3", site.IPNS, "Template is unsupported.", false, "Template is unsupported."},
+		{"matching content malformed sequence", bootstrapCID, "invalid", site.IPNS, "", true, "still uploading"},
+		{"newer sequence without content identity", "", "3", site.IPNS, "", true, "still uploading"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			service := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				writeJSON(w, 200, map[string]any{"ipns": test.ipns, "ready": test.ready, "reason": test.reason, "cid": test.cid, "sequence": test.sequence})
+			}))
+			defer service.Close()
+			s.MobileOrigin = service.URL
+			ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
+			defer cancel()
+			err := s.waitPhoneReady(ctx, site.IPNS, "session", publish.Result{CID: bootstrapCID, Sequence: 2})
+			if test.wantError == "" {
+				if err != nil {
+					t.Fatal(err)
+				}
+			} else if err == nil || !strings.Contains(err.Error(), test.wantError) {
+				t.Fatalf("error %v, want %q", err, test.wantError)
+			}
+		})
 	}
 }

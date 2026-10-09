@@ -256,7 +256,7 @@ func (s *Server) openPhoneConnection(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, 502, err)
 		return
 	}
-	if err := s.waitPhoneReady(ctx, site.IPNS, token, published.Sequence); err != nil {
+	if err := s.waitPhoneReady(ctx, site.IPNS, token, published); err != nil {
 		writeErr(w, 409, err)
 		return
 	}
@@ -305,7 +305,10 @@ func (s *Server) openPhoneConnection(w http.ResponseWriter, r *http.Request) {
 // Publish can finish while a large first host upload continues in the
 // publisher's existing queue. Do not pair against an old compatible head or
 // claim the computer can sleep until the hosted service sees this publication.
-func (s *Server) waitPhoneReady(ctx context.Context, ipns, token string, sequence uint64) error {
+// An unchanged re-publish can advance the local sequence without advancing the
+// host's sequence: the host already has the exact content CID and settles the
+// queued push. Matching content is therefore sufficient, as is a newer head.
+func (s *Server) waitPhoneReady(ctx context.Context, ipns, token string, published publish.Result) error {
 	ctx, cancel := context.WithTimeout(ctx, 90*time.Second)
 	defer cancel()
 	reason := "The hosted publication is still uploading. Keep this computer awake and try connecting again."
@@ -314,6 +317,7 @@ func (s *Server) waitPhoneReady(ctx context.Context, ipns, token string, sequenc
 			IPNS     string `json:"ipns"`
 			Ready    bool   `json:"ready"`
 			Reason   string `json:"reason"`
+			CID      string `json:"cid"`
 			Sequence string `json:"sequence"`
 		}
 		err := s.phoneAPI(ctx, "GET", "/site", token, nil, &readiness)
@@ -322,7 +326,9 @@ func (s *Server) waitPhoneReady(ctx context.Context, ipns, token string, sequenc
 				return errors.New("phone service returned a different site")
 			}
 			seq, parseErr := strconv.ParseUint(readiness.Sequence, 10, 64)
-			if parseErr == nil && seq >= sequence {
+			matchingContent := published.CID != "" && readiness.CID == published.CID
+			newerHead := readiness.CID != "" && seq > published.Sequence
+			if parseErr == nil && (matchingContent || newerHead) {
 				if readiness.Ready {
 					return nil
 				}
