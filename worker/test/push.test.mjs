@@ -56,6 +56,71 @@ function kv() {
   };
 }
 
+// Exercises the public handler with signed multipart requests while keeping
+// all storage and identities local to the test. Array entries preserve aliases
+// and duplicate fields, unlike the object shorthand in the older fixtures.
+function stagingHarness() {
+  const { publicKey, privateKey } = generateKeyPairSync("ed25519");
+  const ipns = ipnsName(new Uint8Array(publicKey.export({ format: "der", type: "spki" }).slice(-32)));
+  const env = { DOMAIN: "crop.test", SITES: r2(), REGISTRY: kv() };
+  const waits = [], ctx = { waitUntil: (promise) => waits.push(promise) };
+  const push = (cid, seq, entries, { parent, part, manifest } = {}) => {
+    const t = Math.floor(Date.now() / 1000);
+    const sig = sign(null, Buffer.from(`croptop-push\ncrop.test\n${ipns}\n${cid}\n${seq}\n${t}`), privateKey).toString("base64");
+    const form = new FormData();
+    for (const [field, value] of entries) form.append(field, new Blob([value]), "payload");
+    if (manifest !== undefined) form.append("manifest", JSON.stringify(manifest));
+    const headers = { "X-Croptop-Ipns": ipns, "X-Croptop-Cid": cid, "X-Croptop-Seq": String(seq), "X-Croptop-Time": String(t), "X-Croptop-Sig": sig };
+    if (parent) headers["X-Croptop-Parent"] = parent;
+    if (part) headers["X-Croptop-Part"] = part;
+    return worker.fetch(new Request("https://crop.test/v0/host/push", { method: "POST", headers, body: form }), env, ctx);
+  };
+  return { env, ipns, push, waits };
+}
+
+test("staging preserves normalized duplicates, resumed files, and verified blocks", async () => {
+  const h = stagingHarness(), cid = "bafystagingsemantics";
+  await h.env.SITES.put(`owners/${cid}`, h.ipns);
+  await h.env.SITES.put(`sites/${cid}/resumed.txt`, "resume");
+  await h.env.SITES.put(`sites/${cid}/resized.txt`, "old");
+  const valid = "valid folder block", validCID = blockCID(valid);
+  const forgedCID = blockCID("the authentic folder block");
+  const existing = "already stored folder block", existingCID = blockCID(existing);
+  await h.env.SITES.put(`blocks/${existingCID}`, existing);
+  const put = h.env.SITES.put, writes = [];
+  h.env.SITES.put = async (key, body, options) => {
+    const bytes = new Uint8Array(await new Response(body).arrayBuffer());
+    writes.push({ key, text: new TextDecoder().decode(bytes) });
+    return put(key, bytes, options);
+  };
+  const response = await h.push(cid, 1, [
+    ["file:/same.txt", "first"], ["file:same.txt", "other"],
+    ["file:///changed.txt", "a"], ["file:changed.txt", "longer"],
+    ["file:resumed.txt", "XXXXXX"], ["file:resized.txt", "new contents"],
+    ["file:../unsafe.txt", "not stored"], ["file:/", "not stored"], ["ignored", "not stored"],
+    ["block:" + validCID, valid], ["block:" + forgedCID, "forged"],
+    ["block:" + existingCID, "cannot replace an already stored block"], ["block:not-a-cid", "invalid"],
+  ]);
+  assert.equal(response.status, 200, await response.clone().text());
+  assert.equal((await response.json()).files, 6, "valid duplicate and resumed file parts still count; blocks and invalid paths do not");
+  const saved = async (rel) => (await h.env.SITES.get(`sites/${cid}/${rel}`))?.text();
+  assert.equal(await saved("same.txt"), "first", "same-size normalized duplicate is skipped");
+  assert.equal(await saved("changed.txt"), "longer", "different-size normalized duplicate replaces its earlier value");
+  assert.equal(await saved("resumed.txt"), "resume", "same-size staged file is reused");
+  assert.equal(await saved("resized.txt"), "new contents");
+  assert.deepEqual(writes.filter((entry) => entry.key === `sites/${cid}/same.txt`).map((entry) => entry.text), ["first"]);
+  assert.deepEqual(writes.filter((entry) => entry.key === `sites/${cid}/changed.txt`).map((entry) => entry.text), ["a", "longer"]);
+  assert.equal(writes.filter((entry) => entry.key === `sites/${cid}/resumed.txt`).length, 0);
+  assert.equal(await h.env.SITES.get(`sites/${cid}/../unsafe.txt`), null);
+  assert.equal(await h.env.SITES.get(`sites/${cid}/`), null);
+  assert.equal(await (await h.env.SITES.get(`blocks/${validCID}`)).text(), valid);
+  assert.equal(await h.env.SITES.get(`blocks/${forgedCID}`), null, "hash-mismatched folder block is never stored");
+  assert.equal(await (await h.env.SITES.get(`blocks/${existingCID}`)).text(), existing);
+  assert.equal(await h.env.SITES.get("blocks/not-a-cid"), null);
+  assert.equal((await (await h.env.SITES.get(`heads/${h.ipns}`)).json()).cid, cid);
+  assert.equal(h.waits.length, 0, "all staging completed in the request, not background tasks");
+});
+
 test("a push on a parent carries the rest of the site and refuses a stale parent", async () => {
   const { publicKey, privateKey } = generateKeyPairSync("ed25519");
   const ipns = ipnsName(new Uint8Array(publicKey.export({ format: "der", type: "spki" }).slice(-32)));

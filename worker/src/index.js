@@ -524,6 +524,25 @@ async function claim(request, url, env) {
   return entryResponse(e);
 }
 
+// Persist the multipart files and verified directory blocks before the caller
+// validates its manifest or moves the site's head.
+async function stageMultipart(env, cid, form) {
+  let n = 0;
+  for (const [field, value] of form.entries()) {
+    if (typeof value === "string") continue;
+    // the version's folder blocks, so the next reader can list it before any IPFS peer has it
+    if (field.startsWith("block:")) { await putBlock(env, field.slice(6), value); continue; }
+    // the path rides in the field name ("file:<path>"): file names lose their directories in some parsers
+    if (!field.startsWith("file:")) continue;
+    const rel = field.slice(5).replace(/^\/+/, "");
+    if (!rel || rel.includes("..")) continue;
+    const have = await env.SITES.head(`sites/${cid}/${rel}`);
+    if (!have || have.size !== value.size) await env.SITES.put(`sites/${cid}/${rel}`, value.stream(), { httpMetadata: { contentType: contentType(rel) } });
+    n++;
+  }
+  return n;
+}
+
 async function push(request, url, env, ctx) {
   const h = (k) => request.headers.get("X-Croptop-" + k) || "";
   const ipns = h("Ipns"), cid = h("Cid"), seq = Number(h("Seq")), t = Number(h("Time")), parent = h("Parent");
@@ -539,19 +558,7 @@ async function push(request, url, env, ctx) {
   if (h("File")) return pushChunk(request, env, ctx, cid, h, signingHost(request, url, env));
   const form = await request.formData();
   const manifest = typeof form.get("manifest") === "string" ? form.get("manifest") : null;
-  let n = 0;
-  for (const [field, value] of form.entries()) {
-    if (typeof value === "string") continue;
-    // the version's folder blocks, so the next reader can list it before any IPFS peer has it
-    if (field.startsWith("block:")) { await putBlock(env, field.slice(6), value); continue; }
-    // the path rides in the field name ("file:<path>"): file names lose their directories in some parsers
-    if (!field.startsWith("file:")) continue;
-    const rel = field.slice(5).replace(/^\/+/, "");
-    if (!rel || rel.includes("..")) continue;
-    const have = await env.SITES.head(`sites/${cid}/${rel}`);
-    if (!have || have.size !== value.size) await env.SITES.put(`sites/${cid}/${rel}`, value.stream(), { httpMetadata: { contentType: contentType(rel) } });
-    n++;
-  }
+  const n = await stageMultipart(env, cid, form);
   if (n === 0) return text("no files", 400);
   // a site bigger than one request arrives as "i/n" parts; the last one commits
   const [partNo, partCount] = (h("Part") || "1/1").split("/").map(Number);
