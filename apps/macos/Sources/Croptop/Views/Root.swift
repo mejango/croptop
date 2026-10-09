@@ -36,6 +36,7 @@ struct RootView: View {
             case .newSite: NewSiteSheet()
             case .follow: FollowSheet()
             case .curate: CurateSheet()
+            case .connectPhone(let site): PhoneConnectionSheet(site: site)
             }
         }
     }

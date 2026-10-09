@@ -144,7 +144,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { false }
 
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
-        guard AppUpdater.blocksRelaunch(screen: model.screen, sheet: model.sheet, publishing: model.publishing, collaborationOpen: model.collaborationOpen) else { return .terminateNow }
+        guard AppUpdater.blocksRelaunch(screen: model.screen, sheet: model.sheet, publishing: model.publishing,
+                                       collaborationOpen: model.collaborationOpen,
+                                       phonePreparationCleanups: model.phonePreparationCleanups) else { return .terminateNow }
         let alert = NSAlert()
         if !model.publishing.isEmpty {
             alert.messageText = "Publishing is still in progress"
@@ -153,10 +155,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             alert.runModal()
             return .terminateCancel
         }
-        alert.messageText = "Finish editing before quitting?"
-        alert.informativeText = "Unsaved changes will be lost if you quit now."
-        alert.addButton(withTitle: "Keep editing")
-        alert.addButton(withTitle: "Quit without saving")
+        let phoneSheet: Bool = { if case .connectPhone = model.sheet { return true }; return false }()
+        if phoneSheet || model.phonePreparationCleanups > 0 {
+            alert.messageText = "Finish connecting your phone before quitting?"
+            alert.informativeText = "Quitting may interrupt preparation. Hosting permission, published content and any key already sent are not revoked."
+            alert.addButton(withTitle: "Keep Croptop open")
+            alert.addButton(withTitle: "Quit")
+        } else {
+            alert.messageText = "Finish editing before quitting?"
+            alert.informativeText = "Unsaved changes will be lost if you quit now."
+            alert.addButton(withTitle: "Keep editing")
+            alert.addButton(withTitle: "Quit without saving")
+        }
         return alert.runModal() == .alertSecondButtonReturn ? .terminateNow : .terminateCancel
     }
 

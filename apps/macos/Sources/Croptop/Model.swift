@@ -14,7 +14,15 @@ enum Screen: Hashable {
 
 enum Sheet: Identifiable {
     case newSite, follow, curate
-    var id: Int { switch self { case .newSite: return 0; case .follow: return 1; case .curate: return 2 } }
+    case connectPhone(Site)
+    var id: String {
+        switch self {
+        case .newSite: return "new-site"
+        case .follow: return "follow"
+        case .curate: return "curate"
+        case .connectPhone(let site): return "phone:" + site.id
+        }
+    }
 }
 
 struct Toast: Equatable { var text: String; var error = false }
@@ -41,6 +49,7 @@ final class AppModel: ObservableObject {
     @Published var droppedFiles: [URL] = []          // handed to the next new-post editor
     @Published var updating = false
     @Published var collaborationOpen = false
+    @Published var phonePreparationCleanups = 0
 
     // The console may be a separately installed, older engine. Its update flag
     // must not decide whether this signed app needs to be downloaded again.

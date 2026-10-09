@@ -37,10 +37,12 @@ final class AppUpdater: NSObject, ObservableObject, SPUUpdaterDelegate {
         let controller = SPUStandardUpdaterController(startingUpdater: false, updaterDelegate: self, userDriverDelegate: nil)
         self.controller = controller
         controller.updater.publisher(for: \.canCheckForUpdates).assign(to: &$canCheck)
-        Publishers.CombineLatest4(model.$screen, model.$sheet, model.$publishing, model.$collaborationOpen)
+        let connectionWork = model.$collaborationOpen.combineLatest(model.$phonePreparationCleanups)
+        Publishers.CombineLatest4(model.$screen, model.$sheet, model.$publishing, connectionWork)
             .receive(on: RunLoop.main)
-            .sink { [weak self] screen, sheet, publishing, collaborationOpen in
-                self?.gate.blocked = Self.blocksRelaunch(screen: screen, sheet: sheet, publishing: publishing, collaborationOpen: collaborationOpen)
+            .sink { [weak self] screen, sheet, publishing, connectionWork in
+                self?.gate.blocked = Self.blocksRelaunch(screen: screen, sheet: sheet, publishing: publishing,
+                                                       collaborationOpen: connectionWork.0, phonePreparationCleanups: connectionWork.1)
             }.store(in: &observations)
         controller.startUpdater()
         // Sparkle's own scheduled check runs once a day; probe the feed quietly on launch and hourly so the rail
@@ -51,8 +53,9 @@ final class AppUpdater: NSObject, ObservableObject, SPUUpdaterDelegate {
         DispatchQueue.main.asyncAfter(deadline: .now() + 5) { [weak controller] in controller?.updater.checkForUpdateInformation() }
     }
 
-    static func blocksRelaunch(screen: Screen, sheet: Sheet?, publishing: Set<String>, collaborationOpen: Bool = false) -> Bool {
-        if collaborationOpen || sheet != nil || !publishing.isEmpty { return true }
+    static func blocksRelaunch(screen: Screen, sheet: Sheet?, publishing: Set<String>, collaborationOpen: Bool = false,
+                              phonePreparationCleanups: Int = 0) -> Bool {
+        if collaborationOpen || phonePreparationCleanups > 0 || sheet != nil || !publishing.isEmpty { return true }
         switch screen {
         case .editor, .settings, .storageSettings: return true
         default: return false
