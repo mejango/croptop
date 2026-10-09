@@ -1,6 +1,10 @@
 package store
 
-import "encoding/json"
+import (
+	"encoding/json"
+	"net/url"
+	"strings"
+)
 
 // Site mirrors Planet's MyPlanetModel (My/<uuid>/planet.json). Only the
 // fields this program reads are typed; everything else rides along in Raw.
@@ -125,7 +129,31 @@ func (s Site) Public() map[string]json.RawMessage {
 		out.put("contributors", contributors)
 	}
 	out.put(StorageKey, s.StorageMode())
+	// A local publishing endpoint can contain credentials. Only explicitly
+	// hosted sites need its public destination binding, and credentials must
+	// never be copied to immutable published metadata or silently stripped.
+	if s.HostingEnabled() {
+		if endpoint := publicHostEndpoint(m["croptopHost"]); endpoint != "" {
+			out.put("croptopHost", endpoint)
+		}
+	}
 	return out
+}
+
+func publicHostEndpoint(raw json.RawMessage) string {
+	var endpoint string
+	if json.Unmarshal(raw, &endpoint) != nil {
+		return ""
+	}
+	endpoint = strings.TrimSuffix(strings.TrimSpace(endpoint), "/")
+	u, err := url.Parse(endpoint)
+	if err != nil || (u.Scheme != "https" && u.Scheme != "http") || u.Hostname() == "" || u.User != nil || strings.ContainsAny(endpoint, "?#") {
+		return ""
+	}
+	// Retain a custom host's path prefix and port: the publishing transport
+	// appends its API paths to this endpoint. This projection must not redirect
+	// a custom host to another origin or rewrite the owner's private setting.
+	return endpoint
 }
 
 var publicSiteKeys = []string{
@@ -140,7 +168,7 @@ var publicSiteKeys = []string{
 	// Croptop additions a page render depends on. They are public anyway (in
 	// the URLs and the HTML), and with them a machine holding only the key
 	// renders a new post the way the owner's machine would.
-	"domain", "croptopGateway", "croptopHost", "croptopName", "croptopCustomDomain", StorageKey, "croptopMobile",
+	"domain", "croptopGateway", "croptopName", "croptopCustomDomain", StorageKey, "croptopMobile",
 	"customCodeHeadEnabled", "customCodeHead", "customCodeBodyStartEnabled", "customCodeBodyStart",
 	"customCodeBodyEndEnabled", "customCodeBodyEnd",
 }
