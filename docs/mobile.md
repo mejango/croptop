@@ -27,6 +27,8 @@ The whole composer origin is reserved even when disabled. It never falls through
 
 The dedicated service's base IPFS engine and temporary per-operation engines are private, offline and non-listening. It runs no public host gateway, swarm listeners, DHT bootstrapping, followers or desktop console. The service retains bounded private operation files, reconciles uncertain commits before cleanup, and keeps published receipt IDs for duplicate prevention. Pairing relays ciphertext only, expires after ten minutes, and requires matching codes plus confirmation on both devices. The pairing link contains a temporary capability, never the site key.
 
+Retention is not a blanket seven-day deletion promise: the private operation journal retains site/post identifiers, submitted titles and captions, media hashes/types, and status/receipt information indefinitely. Background cleanup expires private media and staging after seven days only after successful reconciliation; uncertain commits retain their bytes. Removing a local connection does not erase that server journal or previously published content. Public IPFS copies may remain available independently of this service. Native store privacy disclosures and the operator's privacy-policy URL must reflect this behavior before distribution.
+
 ## Configure the service
 
 Run the pilot as a separate service, not as a replacement for the existing crop.top host. Inject `CROPTOP_MOBILE_PROXY_SECRET` through the platform secret store before starting; its value must match the dedicated Worker's `MOBILE_PROXY_SECRET`. Never commit or log it. Public configuration and the start command are:
