@@ -73,6 +73,7 @@ final class PhoneConnectionTests: XCTestCase {
 
     @MainActor private func render(_ model: PhoneConnectionModel) throws -> NSBitmapImageRep {
         _ = NSApplication.shared
+        AppFonts.register()
         let view = NSHostingView(rootView: PhoneConnectionSheet(model: model).environmentObject(AppModel()))
         view.frame = NSRect(x: 0, y: 0, width: 560, height: 660)
         view.layoutSubtreeIfNeeded()
@@ -275,6 +276,8 @@ final class PhoneConnectionTests: XCTestCase {
         XCTAssertFalse(text.contains("anywhere"), text)
         XCTAssertFalse(text.contains("Connect your published site"), text)
         XCTAssertFalse(text.contains("Allow crop.top"), text)
+        XCTAssertFalse(text.contains("Keep this Mac"), text)
+        XCTAssertFalse(text.contains("does not revoke"), text)
         XCTAssertTrue(text.contains("publishing key"), "Keep the distinct phone-key disclosure: \(text)")
     }
 
@@ -533,11 +536,66 @@ final class PhoneConnectionTests: XCTestCase {
         _ = await model.close()
     }
 
+    @MainActor func testRenderedPairingShowsOnlyQRAndExpiryWithoutLosingConfirmationOrCancellation() async throws {
+        for claimed in [false, true] {
+            let (model, client, _) = fixture(storage: SiteStorage.hosted.rawValue)
+            await model.begin()?.value
+            if claimed { await model.refresh() }
+            XCTAssertEqual(model.phase, claimed ? .confirm : .scan)
+
+            let bitmap = try render(model)
+            let textRequest = VNRecognizeTextRequest()
+            textRequest.recognitionLevel = .accurate
+            textRequest.recognitionLanguages = ["en-US"]
+            let qrRequest = VNDetectBarcodesRequest()
+            qrRequest.symbologies = [.qr]
+            try VNImageRequestHandler(cgImage: XCTUnwrap(bitmap.cgImage)).perform([textRequest, qrRequest])
+            let observations = textRequest.results ?? []
+            let lines = observations.compactMap { $0.topCandidates(1).first?.string }
+            let text = lines.joined(separator: " ")
+            XCTAssertTrue(lines.contains(claimed ? "Confirm your phone" : "Scan with your phone"), text)
+            for removed in ["camera", "Open the connection", "private link expires", "Copy private link",
+                            "Copied privately", "Share only", "Waiting for your phone", "Keep this Mac",
+                            "full publishing access", "does not revoke"] {
+                XCTAssertFalse(text.contains(removed), "Removed copy '\(removed)' is visible: \(text)")
+            }
+
+            let qr = try XCTUnwrap(qrRequest.results?.first)
+            XCTAssertEqual(qrRequest.results?.count, 1)
+            XCTAssertEqual(qr.payloadStringValue, client.pair.url, "Decode synthetic pairing data only")
+            let expiryLines = observations.filter { $0.topCandidates(1).first?.string.hasPrefix("Expires at ") == true }
+            XCTAssertEqual(expiryLines.count, 1, text)
+            let expiry = try XCTUnwrap(expiryLines.first)
+            // Vision coordinates have their origin at the bottom left. Expiry
+            // must sit below the QR, not return to a separate right-hand column.
+            XCTAssertLessThan(expiry.boundingBox.maxY, qr.boundingBox.minY)
+            XCTAssertGreaterThanOrEqual(expiry.boundingBox.minX, qr.boundingBox.minX - 0.03)
+            XCTAssertLessThanOrEqual(expiry.boundingBox.maxX, qr.boundingBox.maxX + 0.03)
+
+            if claimed {
+                XCTAssertTrue(text.contains("Eight-digit code shown on your phone"), text)
+                XCTAssertTrue(text.contains("Give this phone publishing access"), text)
+                XCTAssertFalse(model.canConfirm, "The code is still required before granting access")
+                model.code = "12345678"
+                XCTAssertTrue(model.canConfirm)
+            } else {
+                XCTAssertFalse(text.contains("Eight-digit code"), text)
+                XCTAssertFalse(model.canConfirm)
+            }
+            XCTAssertTrue(client.confirmed.isEmpty, "Rendering the pairing must not grant access")
+            let closed = await model.close()
+            XCTAssertTrue(closed)
+            XCTAssertEqual(model.phase, .closed)
+            XCTAssertNil(model.pairing)
+            XCTAssertTrue(client.cancelled.contains { $0.0 == model.site.id && $0.1 == client.prepared.first?.1 })
+        }
+    }
+
     @MainActor func testNativeSheetSnapshotsWhenRequested() async throws {
         guard let directory = ProcessInfo.processInfo.environment["CROPTOP_PHONE_SNAPSHOT_DIR"] else { return }
         _ = NSApplication.shared
         try FileManager.default.createDirectory(atPath: directory, withIntermediateDirectories: true)
-        for phase in ["hosted", "unhosted", "publication", "preparing", "confirm"] {
+        for phase in ["hosted", "unhosted", "publication", "preparing", "scan", "confirm"] {
             let (model, client, _) = fixture(storage: phase == "unhosted" ? SiteStorage.p2p.rawValue : SiteStorage.hosted.rawValue)
             if phase == "preparing" {
                 client.prepareBody = { siteID, id in client.result(siteID: siteID, id: id, state: "preparing") }

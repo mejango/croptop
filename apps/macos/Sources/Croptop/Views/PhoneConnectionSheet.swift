@@ -38,9 +38,6 @@ struct PhoneConnectionSheet: View {
                     }
                 }.frame(maxWidth: .infinity, alignment: .leading).padding(1)
             }.frame(maxHeight: .infinity)
-            Divider()
-            Text("Keep this Mac’s key backup. Your phone receives full publishing access. Removing a phone’s local key does not revoke other copies.")
-                .font(Theme.formHelp).foregroundColor(Theme.muted).fixedSize(horizontal: false, vertical: true)
             if closing { Text("Stopping this connection…").font(Theme.formHelp) }
         }
         .padding(Theme.content)
@@ -129,21 +126,15 @@ struct PhoneConnectionSheet: View {
     @ViewBuilder private var pairing: some View {
         if let pairing = connection.pairing {
             VStack(alignment: .leading, spacing: 14) {
-                Text(connection.phase == .confirm ? "Confirm your phone" : "Scan with your phone camera")
+                Text(connection.phase == .confirm ? "Confirm your phone" : "Scan with your phone")
                     .font(Theme.heading(20))
-                HStack(alignment: .center, spacing: 20) {
+                VStack(alignment: .leading, spacing: 8) {
                     if let image = PhoneConnectionQR.image(for: pairing.url) {
                         Image(nsImage: image).interpolation(.none).resizable().frame(width: 196, height: 196)
-                            .accessibilityLabel("Private connection QR code. Scan with your phone camera.")
+                            .accessibilityLabel("Private connection QR code. Scan with your phone.")
                     }
-                    VStack(alignment: .leading, spacing: 12) {
-                        Text("Open the connection on your phone. This private link expires at \(Date(timeIntervalSince1970: pairing.expiresAt).formatted(date: .omitted, time: .shortened)).")
-                            .font(Theme.formText)
-                        Button { connection.copyLink() } label: {
-                            Label(connection.copied ? "Copied privately" : "Copy private link", systemImage: "doc.on.doc")
-                        }.buttonStyle(TextActionButtonStyle())
-                        Text("Share only with your own phone.").font(Theme.formHelp).foregroundColor(Theme.muted)
-                    }
+                    Text("Expires at \(Date(timeIntervalSince1970: pairing.expiresAt).formatted(date: .omitted, time: .shortened))")
+                        .font(Theme.formHelp).foregroundColor(Theme.muted)
                 }
                 if connection.phase == .confirm {
                     Labeled(title: "Eight-digit code shown on your phone") {
@@ -154,11 +145,6 @@ struct PhoneConnectionSheet: View {
                     }
                     Button(connection.busy ? "Confirming…" : "Give this phone publishing access") { connection.confirm() }
                         .buttonStyle(BorderedButton(kind: .hot)).disabled(!connection.canConfirm)
-                } else {
-                    HStack(spacing: 8) {
-                        LoadingTicker(accessibilityLabel: "Waiting for your phone")
-                        Text("Waiting for your phone…").font(Theme.formText)
-                    }
                 }
             }
         }
