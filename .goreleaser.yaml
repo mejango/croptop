@@ -1,6 +1,16 @@
 version: 2
 project_name: croptop
 
+# CI stages artifacts only. A signed Mac build and signed updater feed must be
+# present before the release operator promotes this draft.
+release:
+  draft: true
+  make_latest: false
+  use_existing_draft: true
+  replace_existing_draft: false
+  replace_existing_artifacts: false
+  target_commitish: "{{ .Commit }}"
+
 builds:
   - main: ./cmd/croptop
     binary: croptop
@@ -38,8 +48,9 @@ brews:
     repository:
       owner: mejango
       name: homebrew-tap
-      token: "{{ .Env.HOMEBREW_TAP_GITHUB_TOKEN }}"
-    skip_upload: '{{ if eq .Env.HOMEBREW_TAP_GITHUB_TOKEN "" }}true{{ else }}false{{ end }}'
+    # Draft downloads are private. Publish this generated formula only after
+    # the complete release has been verified and promoted.
+    skip_upload: true
     directory: Formula
     install: bin.install "croptop"
     test: system "#{bin}/croptop", "version"

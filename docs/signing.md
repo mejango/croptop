@@ -1,52 +1,69 @@
 # Signing and notarizing the Mac app
 
-The macOS build (`installer/macos.sh`) signs and notarizes when it is given a
-Developer ID Application identity and notarization credentials, and otherwise
-produces an ad-hoc (unsigned) build that still runs locally. There are two ways
-to get a signed, notarized `Croptop.dmg`.
+The release workflow stages CLI/Linux/Windows artifacts into a **draft**, never
+marks it latest, and does not update Homebrew. Mac signing, notarization, signed
+feed generation, and promotion are explicitly owned by the release operator on
+the signing Mac. There is no automatic CI Mac publisher or unsigned fallback.
 
-## A. In GitHub Actions (preferred: every tag is signed)
+`installer/macos.sh` still permits ad-hoc development builds when credentials
+are absent. Such builds are not distributable. Release preparation verifies
+Developer ID signing, Gatekeeper acceptance, and notarization before generating
+the signed updater feed.
 
-Add these repository secrets (`gh secret set <NAME> --repo mejango/croptop`).
-Run the commands on the Mac that holds your Developer ID Application certificate.
+## Stage a complete release before promotion
 
-| Secret | What it is | How to produce it |
-|---|---|---|
-| `MACOS_CERT_P12` | Your Developer ID Application cert and key, base64'd | Keychain Access, right-click the "Developer ID Application: … (SY2W527QJA)" identity, Export as `cert.p12` with a password. Then `base64 -i cert.p12 \| gh secret set MACOS_CERT_P12 --repo mejango/croptop` |
-| `MACOS_CERT_PASSWORD` | The password you set on that `.p12` | `gh secret set MACOS_CERT_PASSWORD --repo mejango/croptop` (type it) |
-| `AC_API_KEY_P8` | An App Store Connect API key (`.p8`), base64'd | App Store Connect, Users and Access, Integrations, Team Keys, generate a key with the "Developer" role. Download `AuthKey_XXXX.p8` once. Then `base64 -i AuthKey_XXXX.p8 \| gh secret set AC_API_KEY_P8 --repo mejango/croptop` |
-| `AC_API_KEY_ID` | The key's ID (the `XXXX` in the filename) | `gh secret set AC_API_KEY_ID --repo mejango/croptop` |
-| `AC_API_ISSUER_ID` | The issuer UUID shown above the keys list | `gh secret set AC_API_ISSUER_ID --repo mejango/croptop` |
+1. Commit and test the exact release source. Set a new numeric
+   `installer/macos-build-number` greater than every distributed stable or pilot
+   build. Verify the bundled engine's default phone origin against the live
+   trusted composer; all CLI architectures and the Mac engine must agree.
+2. Create the version tag once from that commit. Do not move an existing tag or
+   rewrite the pilot. Wait for the tag's `release` workflow to finish staging
+   all six CLI archives, Linux packages, and both Windows installers. Its
+   `signed-mac-handoff` job is a handoff, not a claim that Mac is released.
+3. On the signing Mac, use a clean checkout of that same tag. Download its draft
+   Darwin archives with authenticated `gh release download`, verify their
+   `checksums.txt`, and build with `installer/macos.sh`. Set
+   `MACOS_SIGN_IDENTITY` and either the existing `NOTARY_PROFILE` or
+   `AC_API_KEY_PATH`/`AC_API_KEY_ID`/`AC_API_ISSUER_ID`. Alternatively, the local
+   `installer/pilot-macos.py build` helper supports a stable numeric version,
+   an explicit `--commit`, and an isolated temporary signing keychain; it never
+   uploads or changes tags/releases.
+4. Set `SPARKLE_KEY_FILE` to the protected key outside the repository and run
+   `python3 installer/publish-macos.py <version> <out> --prepare-only`. This
+   validates signing/notarization and prepares `out/update/Croptop-<build>.dmg`
+   and `out/update/appcast.xml` without changing GitHub.
+5. Immediately before uploading, run
+   `python3 installer/release_guard.py <tag> --commit <full-commit-sha>`. It
+   requires the remote tag to resolve to that exact commit and refuses all
+   published releases, including prereleases. Upload `Croptop.dmg`, the
+   immutable numbered DMG, signed appcast, provenance, and complete checksums
+   into the draft. Do not use `--clobber` on published artifacts.
+6. Verify every required asset, hash, signature, notarization ticket, version,
+   build number, source pin, and appcast enclosure URL. Publish the complete
+   release initially with `--draft=false --prerelease --latest=false`, verify
+   anonymous exact-tag downloads, then promote that same release with
+   `--prerelease=false --latest=true`. The existing latest appcast URL then
+   changes only after its numbered DMG is downloadable. Immutable-release
+   repositories lock assets at initial publication, so all uploads precede it.
+7. Verify the live latest feed and a real existing Mac's update check. Only then
+   publish the Homebrew formula retained as the workflow artifact
+   `homebrew-formula-<tag>`, using the already verified release checksums.
 
-With those set, the `macos-app` job imports the cert into a throwaway keychain,
-signs with hardened runtime and a secure timestamp, notarizes the app and the
-dmg, and staples both. Publishing also requires `SPARKLE_ED25519_KEY`. Without
-signing credentials a local build can still be ad-hoc signed, but the release
-publisher refuses to upload it. If you have the banny App Store Connect key, reuse
-it here.
+The draft-only settings in `.goreleaser.yaml`, runtime guards in
+`installer/release_guard.py`, and `installer/test_release_guard.py` prevent
+ordinary release reruns from overwriting a published release or exposing a
+half-built updater release. Tag-triggered workflows must be safe before a tag
+is created; using the GitHub API to create a tag is not a CI-bypass mechanism.
 
-## B. Locally, on the Mac that has the certificate
+## Legacy latest-only Mac repair helper
 
-Mirrors the banny release flow. Needs the Developer ID Application identity in
-your keychain and a stored notary profile (once):
-
-```
-xcrun notarytool store-credentials croptop-notary \
-  --key AuthKey_XXXX.p8 --key-id XXXX --issuer <issuer-uuid>
-```
-
-Then, for a tag that goreleaser has already published the darwin tarballs for:
-
-```
-installer/release-macos.sh 0.11.0
-```
-
-That downloads the release's darwin builds, signs and notarizes the app, and
-uploads the stapled `Croptop.dmg` to the release. It reads:
-
-- `MACOS_SIGN_IDENTITY` (default: the one Developer ID Application identity in
-  your keychain)
-- `NOTARY_PROFILE` (default `croptop-notary`)
+`installer/release-macos.sh <version>` and `installer/publish-macos.py` **without**
+`--prepare-only` are legacy helpers for an already published latest release.
+They are not the first-release staging path and cannot promote a draft. The
+shell helper reads `MACOS_SIGN_IDENTITY` (otherwise finds a local Developer ID
+identity) and `NOTARY_PROFILE` (default `croptop-notary`); update signing also
+requires `SPARKLE_KEY_FILE`. Do not use these helpers to make a new release
+latest before its artifacts and signed feed are ready.
 
 ## Notes
 
@@ -71,25 +88,31 @@ Increment `installer/macos-build-number` for every distributed Mac build,
 including rebuilds with the same marketing version. Never reuse a published
 build number. `CROPTOP_BUILD_NUMBER` may override this for isolated local tests.
 The feed uses `Croptop-<build>.dmg`, an immutable asset; `Croptop.dmg` remains the
-manual download alias. The publisher refuses rollbacks and conflicting builds,
-and uploads the feed last. It never creates tags.
+manual download alias. Preparation never creates tags or releases. The legacy
+latest-only publisher refuses rollbacks and conflicting numbered builds and
+uploads the feed last; normal new releases use the complete-draft flow above.
 
 The private key lives outside the repository. On this signing Mac it is
 `~/Documents/croptop-signing/sparkle-ed25519.key` (mode 0600). Back it up securely;
 losing it breaks updates for existing installations. Only the public key in
-`installer/sparkle-public-key.txt` is shipped. To publish an already built app:
+`installer/sparkle-public-key.txt` is shipped. To prepare an already built app:
 
 ```sh
 export SPARKLE_KEY_FILE="$HOME/Documents/croptop-signing/sparkle-ed25519.key"
 python3 installer/publish-macos.py 0.11.0 /path/to/build/out --prepare-only
-python3 installer/publish-macos.py 0.11.0 /path/to/build/out
 ```
 
 Preparation validates Developer ID notarization and creates the signed appcast
-with checksum-pinned Sparkle tools. The release must already exist and be the
-latest release. Preserve the same key for all future releases. Never put it in
-command arguments, logs, or source control. In CI use the `SPARKLE_ED25519_KEY`
-secret, written to a temporary file with restricted permissions.
+with checksum-pinned Sparkle tools; it does not require the release to be
+latest. Preserve the same key for all future releases. Never put it in command
+arguments, logs, or source control. CI does not currently consume Mac signing
+secrets. A future automated signing path must fail closed on missing
+credentials and retain the draft/promotion gates.
+
+For rollback, mark the prior complete stable release latest again to halt
+further rollout. Keep published tags and numbered artifacts intact. Already
+updated Macs do not automatically downgrade; distribute a corrected, higher
+build instead, considering any data-format migrations.
 
 An already running external console service is not owned by the GUI app and is
 not stopped during updates. The bundled engine updates with the app; an older
