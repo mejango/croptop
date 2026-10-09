@@ -3,6 +3,15 @@ import CoreImage.CIFilterBuiltins
 import SwiftUI
 
 struct PhoneConnectionSheet: View {
+    private let connection: PhoneConnectionModel
+
+    init(site: Site) { connection = PhoneConnectionModel(site: site) }
+    init(model: PhoneConnectionModel) { connection = model }
+
+    var body: some View { PhoneConnectionView(model: connection) }
+}
+
+struct PhoneConnectionView: View {
     @EnvironmentObject private var app: AppModel
     @Environment(\.dismiss) private var dismiss
     @StateObject private var connection: PhoneConnectionModel
