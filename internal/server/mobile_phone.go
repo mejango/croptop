@@ -26,10 +26,11 @@ import (
 	qrcode "github.com/skip2/go-qrcode"
 )
 
-// A pilot may select its dedicated trusted origin at build time without
-// changing the stable default or requiring GUI users to set shell flags.
+// The ordinary desktop build connects to the deployed, dedicated key-holding
+// origin. Isolated deployments may still override it at build time without
+// requiring GUI users to set shell flags.
 // -ldflags '-X github.com/mejango/croptop/internal/server.defaultMobileOrigin=https://…'
-var defaultMobileOrigin = "https://app.crop.top"
+var defaultMobileOrigin = "https://croptop-phone-923c1bafd14ea328.croptop.workers.dev"
 
 type phoneConnection struct {
 	SiteID, Name, Token, URL string

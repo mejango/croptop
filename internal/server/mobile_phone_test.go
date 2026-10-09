@@ -231,6 +231,38 @@ func TestPhoneExpiredPendingAndServiceOriginValidation(t *testing.T) {
 	}
 }
 
+func TestPhoneDefaultOriginAndExplicitOverrides(t *testing.T) {
+	const deployedOrigin = "https://croptop-phone-923c1bafd14ea328.croptop.workers.dev"
+	if defaultMobileOrigin != deployedOrigin {
+		t.Fatalf("ordinary desktop build defaults to %q instead of deployed trusted origin", defaultMobileOrigin)
+	}
+	for _, override := range []string{"", "https://isolated-composer.example", "http://127.0.0.1:18090"} {
+		s := &Server{MobileOrigin: override}
+		want := override
+		if want == "" {
+			want = deployedOrigin
+		}
+		got, err := s.mobileOrigin()
+		if err != nil || got != want {
+			t.Fatalf("override %q: origin %q, error %v; want %q", override, got, err, want)
+		}
+		if s.MobileOrigin != override {
+			t.Fatal("origin resolution rewrote explicit configuration")
+		}
+	}
+	// Keep the existing link-time override mechanism used by isolated builds;
+	// an explicit runtime origin must still win over that build's default.
+	before := defaultMobileOrigin
+	defer func() { defaultMobileOrigin = before }()
+	defaultMobileOrigin = "https://build-specific-composer.example"
+	if got, err := (&Server{}).mobileOrigin(); err != nil || got != defaultMobileOrigin {
+		t.Fatalf("build default override lost: %q, %v", got, err)
+	}
+	if got, err := (&Server{MobileOrigin: deployedOrigin}).mobileOrigin(); err != nil || got != deployedOrigin {
+		t.Fatalf("runtime origin must override build default: %q, %v", got, err)
+	}
+}
+
 func TestPhoneSessionRejectsSigningArbitraryServiceBytes(t *testing.T) {
 	s, site, _ := phoneTestServer(t)
 	requests := 0
