@@ -51,24 +51,39 @@ type Server struct {
 	DataDir, Origin, HostURL, TemplateDigest string
 	Enabled                                  bool
 	Pairing                                  *PairingRelay
+	// AllowSites limits the pilot to these Ed25519 IPNS names. Empty permits
+	// any valid site identity; the list is never returned to clients.
+	AllowSites []string
+	// ProxySecret optionally requires the trusted edge's shared credential.
+	// Only readiness GET/HEAD bypasses it. Never expose it in config or logs.
+	ProxySecret string
+	// RequireHostedSite enrolls only proven owners of a compatible published
+	// site. It is useful for a public pilot without manual identity registration.
+	RequireHostedSite bool
+	// MaxOpenOperations bounds retained drafts across all sites. Zero keeps
+	// the historical per-site limit only. Admission is reserved before upload.
+	MaxOpenOperations int
 
-	once        sync.Once
-	initErr     error
-	mu          sync.Mutex
-	auth        authState
-	challenges  map[string]challenge
-	issuance    map[string]issuanceWindow
-	operations  map[string]*operation
-	active      map[string]*job
-	gates       map[string]*sync.Mutex
-	slots       chan struct{}
-	uploads     chan struct{}
-	normalizers chan struct{}
-	clock       func() time.Time
-	closed      bool
-	shutdown    context.CancelFunc
-	wg          sync.WaitGroup
-	dataLock    io.Closer
+	once           sync.Once
+	initErr        error
+	mu             sync.Mutex
+	auth           authState
+	challenges     map[string]challenge
+	issuance       map[string]issuanceWindow
+	operations     map[string]*operation
+	active         map[string]*job
+	gates          map[string]*sync.Mutex
+	slots          chan struct{}
+	uploads        chan struct{}
+	normalizers    chan struct{}
+	enrollments    chan struct{}
+	clock          func() time.Time
+	closed         bool
+	shutdown       context.CancelFunc
+	wg             sync.WaitGroup
+	dataLock       io.Closer
+	allowedSites   map[string]struct{}
+	pendingUploads int
 }
 
 type job struct{ cancel context.CancelFunc }
@@ -101,6 +116,20 @@ func (s *Server) initialize() {
 		s.initErr = errors.New("mobile publisher, private data directory, and template digest are required")
 		return
 	}
+	if s.MaxOpenOperations < 0 {
+		s.initErr = errors.New("mobile open-operation limit must not be negative")
+		return
+	}
+	if len(s.AllowSites) != 0 {
+		s.allowedSites = make(map[string]struct{}, len(s.AllowSites))
+		for _, name := range s.AllowSites {
+			if !validSiteIdentity(name) {
+				s.initErr = errors.New("mobile allowlist contains an invalid Ed25519 IPNS name")
+				return
+			}
+			s.allowedSites[name] = struct{}{}
+		}
+	}
 	s.challenges = make(map[string]challenge)
 	s.issuance = make(map[string]issuanceWindow)
 	s.operations = make(map[string]*operation)
@@ -109,6 +138,7 @@ func (s *Server) initialize() {
 	s.slots = make(chan struct{}, 4)
 	s.uploads = make(chan struct{}, 4)
 	s.normalizers = make(chan struct{}, 1)
+	s.enrollments = make(chan struct{}, 4)
 	if s.Pairing == nil {
 		s.Pairing = NewPairingRelay(s.Origin)
 	}
@@ -240,6 +270,24 @@ func (s *Server) serveHTTP(w http.ResponseWriter, r *http.Request) {
 	s.wg.Add(1)
 	s.mu.Unlock()
 	defer s.wg.Done()
+	// Health is deliberately cheap and reveals neither identities, storage
+	// paths nor upstream details. It proves initialization, not host reachability.
+	if r.URL.Path == apiPrefix+"/health" && (r.Method == http.MethodGet || r.Method == http.MethodHead) {
+		if !s.Enabled {
+			apiError(w, 503, "unavailable", "Phone publishing is unavailable.")
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		if r.Method == http.MethodGet {
+			_, _ = io.WriteString(w, "{\"status\":\"ready\"}\n")
+		}
+		return
+	}
+	if !s.trustedProxy(r) {
+		apiError(w, http.StatusForbidden, "proxy_required", "Use the configured Croptop composer.")
+		return
+	}
 	// Native apps omit Origin; browser requests must originate at the dedicated
 	// trusted composer. Never reflect arbitrary origins or allow credentials.
 	if origin := r.Header.Get("Origin"); origin != "" && origin != s.Origin {
@@ -329,6 +377,9 @@ type siteResponse struct {
 }
 
 func (s *Server) inspect(ctx context.Context, name string) (publish.SiteSnapshot, error) {
+	if !s.siteAllowed(name) {
+		return publish.SiteSnapshot{}, errors.New("This site is not included in the phone publishing pilot.")
+	}
 	head, err := s.Publisher.InspectSite(ctx, s.HostURL, name)
 	if err != nil {
 		return head, err

@@ -30,10 +30,13 @@ import (
 // service, or running desktop is used after the initial publication.
 func TestMobilePublicationWithRealHostAndRestartRecovery(t *testing.T) {
 	ctx := context.Background()
-	newNode := func() *ipfs.Embedded {
+	newNode := func(private ...bool) *ipfs.Embedded {
 		t.Helper()
 		node := ipfs.NewEmbedded(t.TempDir())
 		node.Offline = true
+		if len(private) > 0 {
+			node.Private = private[0]
+		}
 		if err := node.Start(ctx); err != nil {
 			t.Fatal(err)
 		}
@@ -136,7 +139,7 @@ func TestMobilePublicationWithRealHostAndRestartRecovery(t *testing.T) {
 	}
 
 	newPublisher := func() (*publish.Publisher, *ipfs.Embedded) {
-		node := newNode()
+		node := newNode(true)
 		source := &store.Store{Root: t.TempDir()}
 		return &publish.Publisher{Store: source, Node: node, Render: &render.Renderer{Store: source, Templates: templates.FS, CIDs: node}}, node
 	}
@@ -145,7 +148,7 @@ func TestMobilePublicationWithRealHostAndRestartRecovery(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	server := &Server{Publisher: NewPrivatePublisher(backend), DataDir: t.TempDir(), Origin: "https://app.crop.top", HostURL: hostServer.URL, TemplateDigest: templateDigest, Enabled: true}
+	server := &Server{Publisher: NewPrivatePublisher(backend), DataDir: t.TempDir(), Origin: "https://app.crop.top", HostURL: hostServer.URL, TemplateDigest: templateDigest, Enabled: true, RequireHostedSite: true, MaxOpenOperations: 20}
 	f := &serviceFixture{server: server, handler: server.Handler(), key: deviceKey, name: name}
 	if err := server.Init(); err != nil {
 		t.Fatal(err)
@@ -275,7 +278,7 @@ func TestMobilePublicationWithRealHostAndRestartRecovery(t *testing.T) {
 		t.Fatal(err)
 	}
 	restartedBackend, restartedNode := newPublisher()
-	restarted := &Server{Publisher: NewPrivatePublisher(restartedBackend), DataDir: server.DataDir, Origin: server.Origin, HostURL: server.HostURL, TemplateDigest: server.TemplateDigest, Enabled: true}
+	restarted := &Server{Publisher: NewPrivatePublisher(restartedBackend), DataDir: server.DataDir, Origin: server.Origin, HostURL: server.HostURL, TemplateDigest: server.TemplateDigest, Enabled: true, RequireHostedSite: true, MaxOpenOperations: 20}
 	if err := restarted.Init(); err != nil {
 		t.Fatalf("restart mobile service: %v", err)
 	}

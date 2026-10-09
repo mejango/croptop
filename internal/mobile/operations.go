@@ -78,15 +78,45 @@ func (s *Server) respondOperation(w http.ResponseWriter, op *operation) {
 }
 
 func (s *Server) allowedLocked(name string) bool {
-	return !s.closed && s.Enabled && s.auth.Connections[name]
+	return !s.closed && s.Enabled && s.siteAllowed(name) && s.auth.Connections[name]
+}
+
+func openOperation(op *operation) bool {
+	return op.State != "published" && op.Code != "draft_expired"
+}
+
+func (s *Server) openOperationCountLocked() int {
+	count := 0
+	for _, op := range s.operations {
+		if openOperation(op) {
+			count++
+		}
+	}
+	return count
 }
 
 func (s *Server) createHTTP(w http.ResponseWriter, r *http.Request, name string) {
 	s.mu.Lock()
 	enabled := s.allowedLocked(name)
+	full := s.MaxOpenOperations > 0 && s.openOperationCountLocked()+s.pendingUploads >= s.MaxOpenOperations
+	reserved := enabled && !full && s.MaxOpenOperations > 0
+	if reserved {
+		s.pendingUploads++
+	}
 	s.mu.Unlock()
+	if reserved {
+		defer func() {
+			s.mu.Lock()
+			s.pendingUploads--
+			s.mu.Unlock()
+		}()
+	}
 	if !enabled {
 		apiError(w, 403, "connection_disabled", "Enable phone publishing for this site first.")
+		return
+	}
+	if full {
+		apiError(w, 429, "service_draft_limit", "The phone publisher has too many pending drafts. Keep this draft and retry after a pending post finishes; saved operation status remains available.")
 		return
 	}
 	select {
@@ -153,7 +183,7 @@ func (s *Server) createHTTP(w http.ResponseWriter, r *http.Request, name string)
 	}
 	count := 0
 	for _, op := range s.operations {
-		if op.IPNS == name && op.State != "published" && op.Code != "draft_expired" {
+		if op.IPNS == name && openOperation(op) {
 			count++
 		}
 	}

@@ -1,0 +1,13 @@
+# Optional config-as-code descriptor for a dedicated service. If the Railway
+# account uses platform-managed settings, set this startCommand and health path
+# explicitly there instead; do not reuse the public host's command or volume.
+[build]
+builder = "DOCKERFILE"
+dockerfilePath = "Dockerfile"
+
+[deploy]
+startCommand = "croptop mobile --listen 0.0.0.0:8090 --data /data"
+healthcheckPath = "/v0/mobile/health"
+healthcheckTimeout = 120
+restartPolicyType = "ALWAYS"
+numReplicas = 1

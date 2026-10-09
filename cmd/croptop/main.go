@@ -63,24 +63,27 @@ const usage = `croptop — publish Croptop sites to IPFS
 Flags for serve: --listen <addr>, --role node (headless: no browser, log only)
   croptop host --domain crop.top --listen 127.0.0.1:8090 [--root croptop.eth] [--announce /dns4/…/tcp/…]
                            run a gateway and pin host for a domain (see docs/host.md)
+  croptop mobile --mobile-origin https://composer.example --listen 127.0.0.1:8090
+                           run only the keyless phone composer/API, with no public IPFS listeners
 
 Common flags: --data <dir> (default: ` + "%s" + `), --templates <dir>
 `
 
 type app struct {
-	pubWait      bool // command-line publish waits for the push and warm-up
-	dataDir      string
-	mobileOrigin string
-	mobileHost   string
-	templatesDir string
-	cfg          *config.Config
-	store        *store.Store
-	engine       ipfs.Engine
-	kubo         *ipfs.Node // set when engine is kubo
-	follow       *follow.Store
-	tpl          *tpl.Resolver
-	pub          *publish.Publisher
-	tmpl         fs.FS
+	pubWait          bool // command-line publish waits for the push and warm-up
+	dataDir          string
+	mobileOrigin     string
+	mobileHost       string
+	mobileAllowSites string
+	templatesDir     string
+	cfg              *config.Config
+	store            *store.Store
+	engine           ipfs.Engine
+	kubo             *ipfs.Node // set when engine is kubo
+	follow           *follow.Store
+	tpl              *tpl.Resolver
+	pub              *publish.Publisher
+	tmpl             fs.FS
 }
 
 func main() {
@@ -116,12 +119,13 @@ func run(args []string) error {
 	root := fs.String("root", "", "site the bare domain serves: an ENS name, IPNS name, or CID (host)")
 	announce := fs.String("announce", os.Getenv("CROPTOP_ANNOUNCE"), "public multiaddrs to advertise, comma separated, for a node behind a proxy (host)")
 	trust := fs.String("trust", os.Getenv("CROPTOP_TRUST"), "domains whose forwarded pushes are accepted, comma separated (host)")
-	fs.StringVar(&a.mobileOrigin, "mobile-origin", os.Getenv("CROPTOP_MOBILE_ORIGIN"), "dedicated HTTPS phone composer origin; enables the mobile service for host, or selects the connection service for serve")
+	fs.StringVar(&a.mobileOrigin, "mobile-origin", os.Getenv("CROPTOP_MOBILE_ORIGIN"), "dedicated HTTPS phone composer origin (mobile, host, or serve connection setup)")
 	mobileHost := os.Getenv("CROPTOP_MOBILE_HOST")
 	if mobileHost == "" {
 		mobileHost = publish.DefaultHost
 	}
-	fs.StringVar(&a.mobileHost, "mobile-host", mobileHost, "fixed publication host for the mobile service (host)")
+	fs.StringVar(&a.mobileHost, "mobile-host", mobileHost, "fixed publication host for the mobile service (mobile, host)")
+	fs.StringVar(&a.mobileAllowSites, "mobile-allow-sites", os.Getenv("CROPTOP_MOBILE_ALLOW_SITES"), "comma-separated Ed25519 IPNS pilot identities; empty allows all valid sites (mobile, host)")
 	if err := fs.Parse(flagsFirst(args)); err != nil {
 		return nil
 	}
@@ -129,6 +133,8 @@ func run(args []string) error {
 	var postKey []byte
 
 	switch cmd {
+	case "mobile":
+		return a.mobile(*listen)
 	case "update":
 		rel, err := update.Latest(context.Background())
 		if err != nil {

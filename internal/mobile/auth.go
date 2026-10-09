@@ -1,7 +1,10 @@
 package mobile
 
 import (
+	"context"
 	"crypto/rand"
+	"crypto/sha256"
+	"crypto/subtle"
 	"encoding/base64"
 	"fmt"
 	"net"
@@ -28,6 +31,34 @@ type authState struct {
 type issuanceWindow struct {
 	Started int64
 	Count   int
+}
+
+func validSiteIdentity(name string) bool {
+	if !strings.HasPrefix(name, "k51") || len(name) > 128 {
+		return false
+	}
+	_, err := ipfs.PublicKeyOf(name)
+	return err == nil
+}
+
+// siteAllowed owns the operator's identity policy. Configuration is immutable
+// while serving; checking on every request invalidates persisted sessions when
+// a restarted pilot removes a site, without a remote state lookup.
+func (s *Server) siteAllowed(name string) bool {
+	if s.allowedSites == nil {
+		return true
+	}
+	_, ok := s.allowedSites[name]
+	return ok
+}
+
+func (s *Server) trustedProxy(r *http.Request) bool {
+	if s.ProxySecret == "" {
+		return true
+	}
+	expected := sha256.Sum256([]byte(s.ProxySecret))
+	actual := sha256.Sum256([]byte(r.Header.Get("X-Croptop-Mobile-Proxy")))
+	return subtle.ConstantTimeCompare(expected[:], actual[:]) == 1
 }
 
 // RemoteAddr is the trusted socket peer. Untrusted forwarding headers may not
@@ -73,12 +104,12 @@ func (s *Server) challengeHTTP(w http.ResponseWriter, r *http.Request) {
 	if !decodeJSON(w, r, &body) {
 		return
 	}
-	if !strings.HasPrefix(body.IPNS, "k51") || len(body.IPNS) > 128 {
+	if !validSiteIdentity(body.IPNS) {
 		apiError(w, 400, "invalid_site", "Import a valid Ed25519 Croptop site key.")
 		return
 	}
-	if _, err := ipfs.PublicKeyOf(body.IPNS); err != nil {
-		apiError(w, 400, "invalid_site", "Import a valid Ed25519 Croptop site key.")
+	if !s.siteAllowed(body.IPNS) {
+		apiError(w, 403, "site_not_allowed", "This site is not included in the phone publishing pilot.")
 		return
 	}
 	s.mu.Lock()
@@ -127,9 +158,38 @@ func (s *Server) sessionHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	c, ok := s.challenges[body.ID]
 	delete(s.challenges, body.ID) // every attempt consumes the challenge
+	if ok && !s.siteAllowed(c.IPNS) {
+		apiError(w, 403, "site_not_allowed", "This site is not included in the phone publishing pilot.")
+		return
+	}
 	if !ok || c.ExpiresAt <= s.now().Unix() || !ipfs.VerifyIPNS(c.IPNS, []byte(c.Message), body.Signature) {
 		apiError(w, 401, "invalid_signature", "The connection signature expired or could not be verified. Reconnect to try again.")
 		return
+	}
+	if s.RequireHostedSite {
+		select {
+		case s.enrollments <- struct{}{}:
+		default:
+			apiError(w, 429, "busy", "Several sites are connecting. Reconnect to try again shortly.")
+			return
+		}
+		// A proven key alone must not allocate durable public-service state.
+		// Do not hold the authentication mutex during bounded upstream I/O:
+		// existing connections and readiness remain available while it runs.
+		s.mu.Unlock()
+		ctx, cancel := context.WithTimeout(r.Context(), 30*time.Second)
+		_, err := s.inspect(ctx, c.IPNS)
+		cancel()
+		<-s.enrollments
+		s.mu.Lock()
+		if err != nil {
+			apiError(w, 409, "site_not_ready", "This site is not ready for phone posting: "+err.Error()+" Reconnect after resolving this, or retry if the host is temporarily unavailable.")
+			return
+		}
+		if s.closed {
+			apiError(w, 503, "unavailable", "Phone publishing is shutting down. Reconnect shortly.")
+			return
+		}
 	}
 	for hash, sess := range s.auth.Sessions {
 		if sess.ExpiresAt <= s.now().Unix() {
@@ -178,7 +238,7 @@ func (s *Server) authenticate(r *http.Request) string {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	sess, ok := s.auth.Sessions[digest([]byte(strings.TrimPrefix(h, "Bearer ")))]
-	if !ok || sess.ExpiresAt <= s.now().Unix() {
+	if !ok || sess.ExpiresAt <= s.now().Unix() || !s.siteAllowed(sess.IPNS) {
 		return ""
 	}
 	return sess.IPNS

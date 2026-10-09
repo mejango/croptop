@@ -38,9 +38,11 @@ type fakePublisher struct {
 	prepared                                               []publish.NewPost
 	posts                                                  map[string]publish.Posted
 	commits                                                int
+	inspections                                            int
 	commitErr, inspectErr                                  error
 	prepareStarted, prepareWait, commitStarted, commitWait chan struct{}
 	commitAccepted, replyWait                              chan struct{}
+	inspectStarted, inspectWait                            chan struct{}
 }
 
 func testCID(value string) string {
@@ -49,8 +51,22 @@ func testCID(value string) string {
 }
 
 func (f *fakePublisher) InspectSite(ctx context.Context, host, name string) (publish.SiteSnapshot, error) {
+	if f.inspectStarted != nil {
+		select {
+		case f.inspectStarted <- struct{}{}:
+		default:
+		}
+	}
+	if f.inspectWait != nil {
+		select {
+		case <-f.inspectWait:
+		case <-ctx.Done():
+			return publish.SiteSnapshot{}, ctx.Err()
+		}
+	}
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	f.inspections++
 	if f.inspectErr != nil {
 		return publish.SiteSnapshot{}, f.inspectErr
 	}
@@ -145,7 +161,7 @@ type serviceFixture struct {
 	name, token string
 }
 
-func newServiceFixture(t *testing.T) *serviceFixture {
+func newServiceFixture(t *testing.T, configure ...func(*Server)) *serviceFixture {
 	t.Helper()
 	pub, key, err := ed25519.GenerateKey(rand.Reader)
 	if err != nil {
@@ -162,6 +178,9 @@ func newServiceFixture(t *testing.T) *serviceFixture {
 	publish.SetHost(site, "https://crop.top")
 	fake := &fakePublisher{site: site, head: testCID("initial"), seq: 1, posts: map[string]publish.Posted{}}
 	s := &Server{Publisher: fake, DataDir: t.TempDir(), Origin: "https://app.crop.top", HostURL: "https://crop.top", TemplateDigest: digest, Enabled: true}
+	for _, apply := range configure {
+		apply(s)
+	}
 	f := &serviceFixture{server: s, handler: s.Handler(), publisher: fake, key: key, name: name}
 	if err := s.Init(); err != nil {
 		t.Fatal(err)
