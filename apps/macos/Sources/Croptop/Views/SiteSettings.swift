@@ -2,6 +2,18 @@ import SwiftUI
 import AppKit
 import UniformTypeIdentifiers
 
+/// Mobile owns its saved-site baseline from entry (including its initial read)
+/// until navigation away. Other mutations cannot race that read or its handoff.
+struct SiteSettingsOperationState {
+    let busy: Bool
+    let publishing: Bool
+    let phonePreparationCleanups: Int
+    let mobileSelected: Bool
+
+    var canEnterMobile: Bool { !busy && !publishing }
+    var blocksMutation: Bool { !canEnterMobile || phonePreparationCleanups > 0 || mobileSelected }
+}
+
 struct SiteLogoPicker: View {
     @Binding var selection: URL?
     var current: URL?
@@ -106,6 +118,7 @@ struct SiteSettingsView: View {
                             .padding(.vertical, 10)
                             .overlay(alignment: .bottom) { Rectangle().fill(section == item ? Theme.rule : .clear).frame(height: 1) }
                     }.buttonStyle(.hover).accessibilityAddTraits(section == item ? .isSelected : [])
+                        .disabled(item == "Mobile" && !operationState.canEnterMobile)
                 }
                 Spacer(minLength: 0)
             }
@@ -132,7 +145,7 @@ struct SiteSettingsView: View {
                         case "Storage": storageFields
                         case "Mobile": MobileSettingsView(siteID: siteID, onSavedSite: mergeSavedPhoneSite,
                                                           onDone: { section = "Site" }, onCleanup: refreshSavedPhoneSite)
-                            .disabled(busy || model.publishing.contains(siteID))
+                            .disabled(!operationState.canEnterMobile)
                         case "Money": paymentFields
                         case "Advanced": advancedFields
                         case "Contributors": ContributorsView(siteID: siteID)
@@ -203,7 +216,12 @@ struct SiteSettingsView: View {
     }
 
     private var siteOperationInProgress: Bool {
-        busy || model.publishing.contains(siteID) || model.phonePreparationCleanups > 0
+        operationState.blocksMutation
+    }
+
+    private var operationState: SiteSettingsOperationState {
+        SiteSettingsOperationState(busy: busy, publishing: model.publishing.contains(siteID),
+                                   phonePreparationCleanups: model.phonePreparationCleanups, mobileSelected: section == "Mobile")
     }
 
     private func mergeSavedPhoneSite(_ saved: Site) {
@@ -736,6 +754,8 @@ struct SiteSettingsView: View {
     }
     private func removeSite() async {
         guard !siteOperationInProgress else { return }
+        busy = true
+        defer { busy = false }
         do { try await API.shared.deleteSite(siteID); await model.load(); model.screen = .feed }
         catch { self.error = error.localizedDescription }
     }

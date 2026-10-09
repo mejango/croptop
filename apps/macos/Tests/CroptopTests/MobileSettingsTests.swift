@@ -21,6 +21,26 @@ import XCTest
 @MainActor final class MobileSettingsTests: XCTestCase {
     private enum FixtureError: Error { case callbackTimedOut }
 
+    func testMobileSelectionBlocksSettingsMutationsBeforeItsConnectionGateAppears() {
+        let ordinary = SiteSettingsOperationState(busy: false, publishing: false, phonePreparationCleanups: 0, mobileSelected: false)
+        XCTAssertFalse(ordinary.blocksMutation)
+        XCTAssertTrue(ordinary.canEnterMobile)
+        let loadingMobile = SiteSettingsOperationState(busy: false, publishing: false, phonePreparationCleanups: 0, mobileSelected: true)
+        XCTAssertTrue(loadingMobile.blocksMutation, "Save/delete/claim must not race the initial saved-site read")
+        XCTAssertTrue(loadingMobile.canEnterMobile, "The selected Mobile tab must not disable its own Connect action")
+    }
+
+    func testSavingDeletingAndPublishingBlockMobileEntryWhileCleanupCanBeWaitedOut() {
+        for (busy, publishing) in [(true, false), (false, true), (true, true)] {
+            let operation = SiteSettingsOperationState(busy: busy, publishing: publishing, phonePreparationCleanups: 0, mobileSelected: false)
+            XCTAssertTrue(operation.blocksMutation)
+            XCTAssertFalse(operation.canEnterMobile, "Do not start a Mobile load during another settings operation")
+        }
+        let draining = SiteSettingsOperationState(busy: false, publishing: false, phonePreparationCleanups: 1, mobileSelected: false)
+        XCTAssertTrue(draining.blocksMutation)
+        XCTAssertTrue(draining.canEnterMobile, "Mobile may open its waiting state while the loader waits for cleanup")
+    }
+
     private func site(id: String = "11111111-2222-3333-4444-555555555555",
                       storage: String? = "p2p", gateway: String? = "sucks") -> Site {
         Site(id: id, name: "Mobile settings fixture", ipns: "k51fixture",
