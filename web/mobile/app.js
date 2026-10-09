@@ -9,7 +9,10 @@ let busy = false, storageReady = false, saving = Promise.resolve(), pollTimer, c
 let pairingActive = false, draftSaved = true, saveRevision = 0, pairingController;
 let activeTab = false, initialized = false, releaseTab;
 const hidden = (id, value) => { $(id).hidden = value; };
-function error(message = '') { $('error').textContent = message; hidden('error', !message); }
+function error(value = '') {
+  if (value) message();
+  $('error').textContent = value; hidden('error', !value);
+}
 function message(value = '') { $('message').textContent = value; hidden('message', !value); }
 function explain(problem) {
   if (problem.name === 'AbortError' || problem.name === 'TimeoutError') return 'The service took too long to respond. Your draft is still here. Check publication before trying again.';
@@ -86,7 +89,7 @@ function render() {
     $('site-status').textContent = site ? !site.ready ? site.reason || 'Open your existing publisher, enable hosted storage, and publish once with mobile support.' : site.enabled ? 'Ready. Your computer can sleep.' : 'Your site is ready. Allow phone posting to continue.' : 'Check your site’s hosted connection to continue.';
   }
   if (draftSaved) $('draft-status').textContent = draft?.image ? (draft.ipns && connection && draft.ipns !== connection.ipns ? 'This draft belongs to another site. Reconnect its original key to publish.' : locked ? 'Post saved on this phone. Reopening keeps the same post.' : 'Draft saved on this phone.') : 'Choose an image to start. Your draft stays on this phone.';
-  $('publish-help').textContent = !connection ? 'Connect your site below to publish from anywhere.' : !site?.enabled ? 'Allow phone posting below before publishing.' : locked ? 'Keep this page open until publication is confirmed.' : 'You’ll review the prepared image before it goes live.';
+  $('publish-help').textContent = !connection ? 'Connect your site below to publish from anywhere.' : !site?.enabled ? 'Allow phone posting below before publishing.' : operation?.state === 'failed' ? 'This attempt stopped. Your image and words are still saved.' : locked ? 'Keep this page open until publication is confirmed.' : 'You’ll review the prepared image before it goes live.';
   if (published) {
     try { $('post-link').href = safeURL(operation.url); } catch (problem) { $('post-link').removeAttribute('href'); error(explain(problem)); }
   }
@@ -163,6 +166,7 @@ async function acceptOperation(operation) {
     showImage(blob, true);
     message('Your post is prepared. Review the image, then publish.');
   } else if (operation.state === 'failed') {
+    clearTimeout(pollTimer);
     error(operation.error || 'The post could not be prepared. Retry uses the same saved post.');
   } else {
     message(operation.state === 'committing' ? 'Confirming publication… Your saved post will recover if this page closes.' : 'Preparing your image and post…');

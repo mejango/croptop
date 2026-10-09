@@ -15,7 +15,7 @@ const pairingFixture = JSON.parse(await readFile(new URL('testdata/mobile-pairin
 const image = await readFile(new URL('templates/croptop/dev/fixture/B2000000-0000-4000-8000-000000000002/cover.png', root));
 const publicKey = createPublicKey(createPrivateKey(fixture.privateKeyPEM));
 
-async function fixtureService({ corruptPreview = false, dropCommit = false } = {}) {
+async function fixtureService({ corruptPreview = false, dropCommit = false, deferPreparation = false } = {}) {
   const state = { uploads: 0, commits: 0, enableCalls: 0, sessions: 0, signed: 0, pairingClaims: 0, requests: [], operation: null, enabled: false, invalidateSession: false };
   const send = (res, value, status = 200) => { res.writeHead(status, { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' }); res.end(JSON.stringify(value)); };
   let origin;
@@ -73,6 +73,7 @@ async function fixtureService({ corruptPreview = false, dropCommit = false } = {
         if (state.operation) assert.equal(state.operation.id, id, 'Retries must retain original identity');
         state.uploads++;
         state.operation ||= { id, postID: id, ipns: fixture.ipns, title: multipart.get('title'), caption: multipart.get('caption'), state: 'needs_signature', mediaSHA256: createHash('sha256').update(image).digest('hex'), mediaType: 'image/png', proposal: { id: 'browser-proposal', cid: fixture.cid, parent: fixture.cid, sequence: fixture.sequence, host: fixture.host, time: fixture.time, expiresAt: fixture.expiresAt, recordPayload: fixture.recordPayload, pushPayload: fixture.pushPayload } };
+        if (deferPreparation) state.operation = { ...state.operation, state: 'preparing', proposal: null };
         return send(res, state.operation, 202);
       }
       if (/^\/operations\/[^/]+\/image$/.test(path)) { res.writeHead(200, { 'Content-Type': 'image/png', 'Cache-Control': 'no-store' }); return res.end(corruptPreview ? Buffer.concat([image, Buffer.from('tampered')]) : image); }
@@ -88,7 +89,10 @@ async function fixtureService({ corruptPreview = false, dropCommit = false } = {
         if (dropCommit) return req.socket.destroy();
         return send(res, state.operation);
       }
-      if (/^\/operations\/[^/]+$/.test(path)) return state.operation ? send(res, state.operation) : send(res, { error: 'Not found' }, 404);
+      if (/^\/operations\/[^/]+$/.test(path)) {
+        if (state.failNextOperationRead) { state.failNextOperationRead = false; return send(res, { code: 'temporarily_unavailable', error: 'Could not check image preparation. Try checking this saved post again.' }, 503); }
+        return state.operation ? send(res, state.operation) : send(res, { error: 'Not found' }, 404);
+      }
       return send(res, { error: 'Unsupported fixture request' }, 404);
     } catch (error) { state.serverError = error; send(res, { error: error.message }, 500); }
   });
@@ -228,6 +232,16 @@ for (const browserName of (process.env.MOBILE_BROWSERS || 'chromium,webkit').spl
     await page.locator('#publish').click();
     await page.locator('#error').waitFor();
     assert.equal(service.state.signed, 1, await page.locator('#error').textContent());
+    assert.equal(await page.locator('#message').isVisible(), false, 'A lost commit response must not leave an active Publishing message');
+    assert.equal(await page.locator('#publish').innerText(), 'Check publication');
+    assert.equal(await page.locator('#publish').isEnabled(), true);
+    assert.match(await page.locator('#draft-status').innerText(), /Reopening keeps the same post/);
+    assert.match(await page.locator('#publish-help').innerText(), /until publication is confirmed/);
+    const uncertain = await page.evaluate(async () => {
+      const saved = await (await import('./storage.js')).read('draft');
+      return { id: saved.id, submitted: saved.submitted, signed: saved.signed, state: saved.operation.state };
+    });
+    assert.deepEqual(uncertain, { id: identity, submitted: true, signed: true, state: 'committing' });
     await page.reload();
     await page.locator('#receipt').waitFor();
     assert.equal(await page.locator('#post-link').getAttribute('href'), service.state.operation.url);
@@ -251,6 +265,75 @@ for (const browserName of (process.env.MOBILE_BROWSERS || 'chromium,webkit').spl
     assert.equal((await duplicate.evaluate(async () => (await (await import('./storage.js')).read('draft')))).id, identity, 'Closing the active tab lets another recover the same receipt');
     assert.deepEqual(failures, []);
     assert.ifError(service.state.serverError);
+    await context.close();
+  });
+  test(browserName + ': image preparation errors replace stale progress and preserve safe draft recovery', { timeout: 90000 }, async t => {
+    const service = await fixtureService({ deferPreparation: true });
+    t.after(service.close);
+    const options = browserName === 'chromium' && process.env.CHROMIUM_EXECUTABLE ? { executablePath: process.env.CHROMIUM_EXECUTABLE } : {};
+    const browser = await playwright[browserName].launch({ headless: true, ...options });
+    t.after(() => browser.close());
+    const { page, context, failures } = await open(browser, service.origin);
+    await page.clock.install({ time: new Date(fixture.time * 1000) });
+    await page.clock.pauseAt(new Date((fixture.time + 1) * 1000));
+    await pick(page); await connect(page);
+    await page.locator('#caption').fill('Keep the original image and words.');
+    await page.locator('#publish').click();
+    await page.locator('#message').filter({ hasText: 'Preparing your image and post' }).waitFor();
+    await page.locator('#publish').filter({ hasText: 'Check publication' }).waitFor();
+    const original = service.state.operation.id;
+    const reads = () => service.state.requests.filter(request => request.method === 'GET' && request.path === '/v0/mobile/operations/' + original).length;
+
+    // A transport error does not prove the operation failed or permit a new ID.
+    service.state.failNextOperationRead = true;
+    await page.locator('#publish').click();
+    await page.locator('#error').filter({ hasText: 'Could not check image preparation' }).waitFor();
+    assert.equal(await page.locator('#message').isVisible(), false);
+    assert.equal(await page.locator('#publish').innerText(), 'Check publication');
+    assert.equal(await page.locator('#publish').isEnabled(), true);
+    assert.equal(await page.locator('#caption').isDisabled(), true);
+    assert.match(await page.locator('#draft-status').innerText(), /Reopening keeps the same post/);
+    assert.equal((await page.evaluate(async () => (await (await import('./storage.js')).read('draft')).id)), original);
+
+    // Match the service's authoritative pre-signing image rejection. Trigger
+    // a manual status check while the original automatic poll is still queued.
+    const rejection = 'this image uses unsupported HDR or color encoding; export an SDR sRGB PNG or JPEG and try again';
+    service.state.operation = { ...service.state.operation, state: 'failed', code: 'image_invalid', error: rejection, proposal: null };
+    await page.evaluate(() => window.dispatchEvent(new Event('online')));
+    await page.locator('#error').filter({ hasText: rejection }).waitFor();
+    assert.equal(await page.locator('#message').isVisible(), false);
+    assert.equal(await page.locator('#copy-expired').innerText(), 'Edit this draft');
+    assert.equal(await page.locator('#copy-expired').isEnabled(), true);
+    assert.equal(await page.locator('#publish-help').innerText(), 'This attempt stopped. Your image and words are still saved.');
+    await page.setViewportSize({ width: 360, height: 780 });
+    assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true);
+    await capture(page, browserName, 'image-preparation-rejected');
+    const failedReads = reads();
+    await page.clock.runFor(2200);
+    assert.equal(await page.locator('#error').innerText(), rejection);
+    assert.equal(reads(), failedReads, 'A terminal failure cancels the previously queued automatic poll');
+    const retained = await page.evaluate(async () => {
+      const saved = await (await import('./storage.js')).read('draft');
+      const sha256 = Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256', await saved.image.arrayBuffer())), value => value.toString(16).padStart(2, '0')).join('');
+      return { id: saved.id, caption: saved.caption, submitted: saved.submitted, signed: saved.signed, state: saved.operation.state, code: saved.operation.code, sha256 };
+    });
+    assert.deepEqual(retained, { id: original, caption: 'Keep the original image and words.', submitted: true, signed: false, state: 'failed', code: 'image_invalid', sha256: createHash('sha256').update(image).digest('hex') });
+    assert.equal(service.state.uploads, 1); assert.equal(service.state.commits, 0); assert.equal(service.state.signed, 0);
+
+    // The existing edit action rechecks that unsigned failure before archiving
+    // it. Presentation changes must not silently resubmit or alter image bytes.
+    await page.locator('#copy-expired').click();
+    await page.locator('#message').filter({ hasText: 'This image could not be prepared and was not published' }).waitFor();
+    const edited = await page.evaluate(async original => {
+      const { read } = await import('./storage.js');
+      const current = await read('draft'), archived = await read('draft:' + original);
+      return { id: current.id, submitted: current.submitted, caption: current.caption, bytes: current.image.size, archivedID: archived.id, archivedCode: archived.operation.code };
+    }, original);
+    assert.notEqual(edited.id, original);
+    assert.deepEqual({ ...edited, id: original }, { id: original, submitted: false, caption: retained.caption, bytes: image.length, archivedID: original, archivedCode: 'image_invalid' });
+    assert.equal(service.state.uploads, 1); assert.equal(service.state.commits, 0);
+    assert.equal(await page.locator('#caption').isEnabled(), true);
+    assert.deepEqual(failures, []); assert.ifError(service.state.serverError);
     await context.close();
   });
   test(browserName + ': changed normalized media is never signed; original draft remains', { timeout: 90000 }, async t => {
