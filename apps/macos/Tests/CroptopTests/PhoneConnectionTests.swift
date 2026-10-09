@@ -284,6 +284,23 @@ final class PhoneConnectionTests: XCTestCase {
         XCTAssertFalse(Mirror(reflecting: decoded).children.contains { $0.label == "code" })
     }
 
+    @MainActor func testFailureCopyDoesNotInventAnUploadForCompatibilityOrServiceErrors() async {
+        for code in ["site_not_ready", "service_timeout"] {
+            let (model, client, _) = fixture()
+            client.prepareBody = { siteID, id in
+                var value = client.result(siteID: siteID, id: id, state: "failed")
+                value.code = code
+                return value
+            }
+            model.consent = true
+            await model.begin()?.value
+            XCTAssertEqual(model.phase, .failed)
+            XCTAssertFalse(model.error?.contains("upload finishes") ?? true)
+            if code == "site_not_ready" { XCTAssertTrue(model.error?.contains("template") ?? false) }
+            else { XCTAssertTrue(model.error?.contains("respond") ?? false) }
+        }
+    }
+
     @MainActor func testGeneratedNativeQRCanBeDecodedWithoutNetwork() throws {
         let client = PhoneClientFixture(date: Date())
         let image = try XCTUnwrap(PhoneConnectionQR.image(for: client.pair.url))

@@ -134,6 +134,7 @@ struct PhoneConnectionSheet: View {
                 if connection.phase == .confirm {
                     Labeled(title: "Eight-digit code shown on your phone") {
                         TextField("00000000", text: $connection.code).field().font(Theme.code)
+                            .accessibilityLabel("Eight-digit code shown on your phone")
                             .disableAutocorrection(true)
                             .onSubmit { connection.confirm() }
                     }
@@ -155,7 +156,6 @@ struct PhoneConnectionSheet: View {
         Task {
             if await connection.close() {
                 dismiss()
-                Task { await app.load() }
             } else { closing = false }
         }
     }
