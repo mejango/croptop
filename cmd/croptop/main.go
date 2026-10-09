@@ -626,23 +626,12 @@ func (a *app) host(domain, listen, root, announce, trust string) error {
 	// service is switched off or moved to a different dedicated origin.
 	var handler http.Handler = mobile.Gateway(&mobile.Server{Origin: "https://app." + h.Domain}, nil, nil, h.Domain, h)
 	if a.mobileOrigin != "" {
-		if err := mobile.ValidateComposerOrigin(a.mobileOrigin, h.Domain); err != nil {
-			return err
-		}
-		digest, err := render.MobileTemplateDigest(a.tmpl)
+		phone, composer, err := a.mobileHandler(h.Domain, h)
 		if err != nil {
-			return fmt.Errorf("phone template: %w", err)
-		}
-		phone := &mobile.Server{Publisher: mobile.NewPrivatePublisher(a.pub), DataDir: filepath.Join(a.dataDir, "mobile"), Origin: a.mobileOrigin, HostURL: a.mobileHost, TemplateDigest: digest, Enabled: true}
-		if err := phone.Init(); err != nil {
-			return fmt.Errorf("phone service: %w", err)
+			return err
 		}
 		defer phone.Close()
-		assets, err := fs.Sub(web.FS, "mobile")
-		if err != nil {
-			return err
-		}
-		handler = mobile.Gateway(phone, assets, a.tmpl, h.Domain, h)
+		handler = composer
 		println("phone composer enabled at " + a.mobileOrigin)
 	}
 	srv := &http.Server{Addr: listen, Handler: handler, ReadHeaderTimeout: 30 * time.Second}
