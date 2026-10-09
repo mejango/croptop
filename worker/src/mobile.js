@@ -50,6 +50,59 @@ function error(status, code, message, method) {
   return response(JSON.stringify({ error: message, code }), status, "application/json; charset=utf-8", method);
 }
 
+// Reuse the same inert responses on the dedicated mobile-only entrypoint.
+export { error as mobileError };
+
+const RATE_BINDINGS = ["MOBILE_API_LIMITER", "MOBILE_AUTH_LIMITER", "MOBILE_PAIRING_LIMITER", "MOBILE_UPLOAD_LIMITER"];
+
+function proxySecret(env) {
+  const secret = env.MOBILE_PROXY_SECRET;
+  return typeof secret === "string" && secret.length >= 32 && secret.length <= 256 && /^[A-Za-z0-9_-]+$/.test(secret) ? secret : null;
+}
+
+// Keep method/route classification in one place. The service still validates
+// operation UUIDs and pairing IDs; the edge only admits the known API surface.
+function apiRoute(pathname) {
+  const route = pathname.slice(API_PREFIX.length);
+  if (route === "health") return { method: "GET", head: true };
+  if (route === "config" || route === "site") return { method: "GET" };
+  if (route === "challenge" || route === "session") return { method: "POST", limiter: "MOBILE_AUTH_LIMITER" };
+  if (route === "connection") return { method: "PUT" };
+  if (route === "operations") return { method: "POST", limiter: "MOBILE_UPLOAD_LIMITER" };
+  if (/^operations\/[A-Za-z0-9_-]{1,128}(?:\/image)?$/.test(route)) return { method: "GET" };
+  if (/^operations\/[A-Za-z0-9_-]{1,128}\/(?:prepare|commit)$/.test(route)) return { method: "POST", limiter: "MOBILE_UPLOAD_LIMITER" };
+  if (route === "pairings") return { method: "POST", limiter: "MOBILE_PAIRING_LIMITER" };
+  if (/^pairings\/[A-Za-z0-9_-]{1,128}$/.test(route)) return { method: "GET", limiter: "MOBILE_PAIRING_LIMITER" };
+  if (/^pairings\/[A-Za-z0-9_-]{1,128}\/(?:claim|consume|complete)$/.test(route)) return { method: "POST", limiter: "MOBILE_PAIRING_LIMITER" };
+  return null;
+}
+
+async function limitAPI(request, route, env) {
+  // Cloudflare supplies this header on inbound requests. Never trust arbitrary
+  // forwarding headers, tokens, path IDs or query parameters to pick a bucket.
+  // Use a digest so the rate-limiter infrastructure does not retain raw IPs.
+  const ip = request.headers.get("cf-connecting-ip");
+  if (!ip || ip.length > 45 || !/^[0-9a-fA-F:.]+$/.test(ip)) {
+    return error(503, "mobile_unavailable", "Phone publishing is temporarily unavailable. Your draft is still saved.", request.method);
+  }
+  // Same-zone Worker subrequests can alter X-Real-IP and therefore the supplied
+  // connecting IP. All Worker-originated traffic shares a separate bucket;
+  // neither a rotated IP nor a different CF-Worker value can reset it.
+  const source = request.headers.has("cf-worker") ? "worker-subrequest" : ip.toLowerCase();
+  const hash = await crypto.subtle.digest("SHA-256", new TextEncoder().encode("croptop-mobile-ip-v1:" + source));
+  const key = Array.from(new Uint8Array(hash), (byte) => byte.toString(16).padStart(2, "0")).join("");
+  for (const name of ["MOBILE_API_LIMITER", ...(route.limiter ? [route.limiter] : [])]) {
+    const result = await env[name].limit({ key });
+    if (!result || typeof result.success !== "boolean") throw new Error("Invalid rate limit result");
+    if (!result.success) {
+      const limited = error(429, "rate_limited", "Too many requests. Wait a minute, then check your saved post before retrying.", request.method);
+      limited.headers.set("retry-after", "60");
+      return limited;
+    }
+  }
+  return null;
+}
+
 export function mobileOriginConfig(env) {
   const defaultHost = "app." + env.DOMAIN.toLowerCase();
   const config = { defaultHost, host: null, origin: null };
@@ -69,7 +122,7 @@ export function mobileOriginConfig(env) {
   return config;
 }
 
-export async function serveMobile(request, url, env, config = mobileOriginConfig(env)) {
+export async function serveMobile(request, url, env, config = mobileOriginConfig(env), policy = {}) {
   try {
     if (!config.origin) {
       return error(503, "mobile_origin_unconfigured", "The trusted phone app address has not been configured correctly.", request.method);
@@ -80,7 +133,11 @@ export async function serveMobile(request, url, env, config = mobileOriginConfig
     if (env.MOBILE_ENABLED !== "true") {
       return error(503, "mobile_disabled", "Phone publishing is not available yet. Your existing Croptop publisher still works.", request.method);
     }
-    if (url.pathname.startsWith(API_PREFIX)) return await proxyMobile(request, url, env);
+    if ((policy.requireProxySecret && !proxySecret(env)) ||
+        (policy.requireRateLimits && RATE_BINDINGS.some((name) => typeof env[name]?.limit !== "function"))) {
+      return error(503, "mobile_unconfigured", "Phone publishing has not been configured on this host.", request.method);
+    }
+    if (url.pathname.startsWith(API_PREFIX)) return await proxyMobile(request, url, env, policy);
     const asset = ASSETS.get(url.pathname);
     if (!asset) return error(404, "not_found", "This address is not part of the Croptop phone app.", request.method);
     if (request.method !== "GET" && request.method !== "HEAD") {
@@ -94,18 +151,30 @@ export async function serveMobile(request, url, env, config = mobileOriginConfig
   }
 }
 
-async function proxyMobile(request, url, env) {
+async function proxyMobile(request, url, env, policy) {
   // Encoded separators, dots, or percent escapes can be decoded differently by
   // intermediaries. Mobile routes use only simple ASCII segments; fail closed.
   if (!/^\/v0\/mobile\/[A-Za-z0-9_/-]+$/.test(url.pathname) || url.pathname.includes("//")) {
     return error(400, "invalid_path", "Invalid phone publishing address.", request.method);
   }
-  if (!["GET", "HEAD", "POST", "PUT", "OPTIONS"].includes(request.method)) {
+  const route = apiRoute(url.pathname);
+  if (!route) {
+    return error(404, "not_found", "This address is not part of the Croptop phone app.", request.method);
+  }
+  if (request.method !== route.method && !(route.head && request.method === "HEAD") && request.method !== "OPTIONS") {
     return error(405, "method_not_allowed", "This request method is not supported.", request.method);
   }
   const origin = request.headers.get("origin");
   if (origin && origin !== url.origin) {
     return error(403, "origin", "Open the Croptop phone app to publish.", request.method);
+  }
+  if (policy.requireRateLimits) {
+    try {
+      const limited = await limitAPI(request, route, env);
+      if (limited) return limited;
+    } catch {
+      return error(503, "mobile_unavailable", "Phone publishing is temporarily unavailable. Your draft is still saved.", request.method);
+    }
   }
   let upstream;
   try {
@@ -126,6 +195,9 @@ async function proxyMobile(request, url, env) {
   for (const name of ["authorization", "origin", "x-croptop-pairing", "content-type"]) {
     if (request.headers.has(name)) headers.set(name, request.headers.get(name));
   }
+  // The client never possesses this service-to-service secret. Incoming copies
+  // are ignored; only an operator-configured value can authenticate this hop.
+  if (proxySecret(env)) headers.set("X-Croptop-Mobile-Proxy", proxySecret(env));
   const signal = AbortSignal.timeout(API_TIMEOUT_MS);
   let result;
   try {

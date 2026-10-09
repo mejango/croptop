@@ -2,7 +2,7 @@
 
 The mobile website, iPhone companion with Share extension, and Android companion with share receiver use one keyless publishing service. After a one-time connection to an existing site, a phone can select a screenshot, preview it, add optional text, and publish while the desktop is asleep. Native sharing can save an image before connection is set up.
 
-This is implementation/pilot documentation, not a statement that the hosted service or store releases are live. The original desktop checkout remains untouched; this build lives in the isolated `app-mobile` source snapshot. The signed publication format and the desktop publishing path are retained.
+This is implementation/pilot documentation, not a statement that phone publishing or store releases are live. An isolated Railway service and a disabled dedicated Cloudflare Worker have been provisioned; the application deployment and public end-to-end publication smoke test are pending. The original desktop checkout remains untouched; this build lives in the isolated `app-mobile` source snapshot. The signed publication format and the desktop publishing path are retained.
 
 ## Release boundaries
 
@@ -21,48 +21,72 @@ The existing site root key stays on the phone. Browser keys are nonexportable We
 
 The service receives private image/text drafts and renders proposed site versions. It cannot publish without a fresh device signature, but rendering is still trusted: clients validate protocol bindings and the normalized preview, not every file in the proposed website. This is keyless hosting, not a trustless renderer.
 
-Use a dedicated HTTPS composer origin that has **never served author-controlled content**. Reserving a route now does not remove a malicious service worker installed there previously. In particular, historical generic routing could resolve `app.crop.top` through `app.eth`; prove this did not occur or select a fresh dedicated origin. Do not turn on browser key storage until this gate is resolved.
+Use a dedicated HTTPS composer origin that has **never served author-controlled content**. Reserving a route now does not remove a malicious service worker installed there previously. The pilot therefore uses the fresh `https://croptop-phone-923c1bafd14ea328.croptop.workers.dev` origin, outside the public gateway namespace. It does not enable or reuse `app.crop.top`, whose historical generic routing could resolve `app.eth`.
 
 The whole composer origin is reserved even when disabled. It never falls through to site HTML, IPFS gateways, arbitrary files, or ENS resolution. API requests use bearer tokens, no cookies; cross-origin browser requests are rejected. Do not add analytics or third-party scripts on the key-holding origin.
 
-Unpublished blocks use temporary offline, non-listening IPFS engines, separate from the public host node. The service retains bounded private operation files, reconciles uncertain commits before cleanup, and keeps published receipt IDs for duplicate prevention. Pairing relays ciphertext only, expires after ten minutes, and requires matching codes plus confirmation on both devices. The pairing link contains a temporary capability, never the site key.
+The dedicated service's base IPFS engine and temporary per-operation engines are private, offline and non-listening. It runs no public host gateway, swarm listeners, DHT bootstrapping, followers or desktop console. The service retains bounded private operation files, reconciles uncertain commits before cleanup, and keeps published receipt IDs for duplicate prevention. Pairing relays ciphertext only, expires after ten minutes, and requires matching codes plus confirmation on both devices. The pairing link contains a temporary capability, never the site key.
 
 ## Configure the service
 
-Choose the origin before distributing clients. `https://composer.example` below is a placeholder, not a configured deployment.
+Run the pilot as a separate service, not as a replacement for the existing crop.top host. Inject `CROPTOP_MOBILE_PROXY_SECRET` through the platform secret store before starting; its value must match the dedicated Worker's `MOBILE_PROXY_SECRET`. Never commit or log it. Public configuration and the start command are:
 
 ```sh
 go build -o croptop ./cmd/croptop
-./croptop host --domain crop.top --listen 127.0.0.1:8090 \
-  --data /path/to/private/croptop-data \
-  --mobile-origin https://composer.example \
-  --mobile-host https://crop.top
+CROPTOP_MOBILE_ORIGIN=https://croptop-phone-923c1bafd14ea328.croptop.workers.dev \
+CROPTOP_MOBILE_HOST=https://crop.top \
+CROPTOP_MOBILE_REQUIRE_HOSTED_SITE=true \
+CROPTOP_MOBILE_MAX_OPEN_OPERATIONS=20 \
+./croptop mobile --listen 0.0.0.0:8090 --data /data
 ```
 
-The host needs the embedded engine. Terminate HTTPS in a trusted reverse proxy. Route the configured composer origin and `/v0/mobile/*` to this process. `--mobile-origin` is intentionally empty by default, so the service is not enabled accidentally. Environment equivalents are `CROPTOP_MOBILE_ORIGIN` and `CROPTOP_MOBILE_HOST`. The publishing host is a fixed operator setting, never a user-supplied URL. One process exclusively owns the private mobile data directory; do not run replicas against it.
+`croptop mobile` requires an explicit composer origin and starts only the trusted composer/API. The publishing host is a fixed operator setting, never a user-supplied URL. Every backend API request requires the edge secret when configured, except `GET`/`HEAD /v0/mobile/health`; readiness returns only `{"status":"ready"}` after initialization and becomes unavailable on shutdown. It does not assert publication-host reachability. Direct requests to the Railway API without the secret are denied, including `/config`; author/gateway paths return 404 on every hostname.
 
-The Dockerfile includes a pinned patched HEIF decoder. Run its actual-image test target before building/releasing the production container:
+Enrollment is automatic for an eligible site's proven owner: a one-time Ed25519 signature is verified before a bounded fetch checks the signed crop.top head, explicit hosted-storage policy, compatible template and conflict-safe host capability. Enrollment does not enable phone-publishing consent. Arbitrary new keys cannot allocate durable sessions merely by signing a challenge. `CROPTOP_MOBILE_ALLOW_SITES` / `--mobile-allow-sites` is an optional emergency restriction, left empty for this pilot: kmac does not need manual site registration.
+
+The global 20-open-operation cap includes all sites and concurrent incoming uploads, survives restart, and rejects excess uploads before reading their bodies. Published receipts and definitively expired drafts do not consume this cap. Existing operation status, prepare and commit remain available at capacity; keep the same operation ID. The existing per-site limit, four upload slots and single image-normalization slot remain in force. One process exclusively owns the private data directory; do not run replicas against it.
+
+The Dockerfile includes pinned libheif 1.23.6 and the Little CMS color helper. Run the actual-image/color test target for the production architecture before releasing:
 
 ```sh
-docker build --target mobile-media-test -t croptop-mobile-media-test:local .
-docker build -t croptop-mobile:local .
+docker build --platform linux/amd64 --target mobile-media-test -t croptop-mobile-media-test:local .
+docker build --platform linux/amd64 -t croptop-mobile:local .
 ```
 
-Use persistent private storage for `/data`, encrypted at rest and in backups. Start the pilot with one normalization slot (implemented) and at least 2 GiB process/container memory, then measure. Keep decoder dependencies patched. [Media bounds and the HDR/color-fidelity gate](design/mobile-media.md) explain why successful HEIF decoding alone is insufficient for a public iPhone release.
+The provisioned Railway pilot has one replica, a private persistent `/data` volume, 2 GiB memory and 2 vCPU caps. Use encrypted storage/backups and monitor actual volume consumption; the provisioned 50 GB capacity ceiling is not a 50 GB draft budget. Keep decoder dependencies patched. SDR Display-P3/other supported RGB ICC profiles are converted to sRGB; recognized unsupported HDR/high-bit-depth input fails with export guidance rather than losing its color declaration. [Media bounds and remaining device-fidelity checks](design/mobile-media.md) document the supported behavior and limitations; HDR tone mapping is not included.
 
 ### Cloudflare Worker
 
-The Worker reserves `app.<DOMAIN>` before all author routing. `MOBILE_ENABLED` defaults to `"false"`. Set `MOBILE_ORIGIN` to the selected fresh HTTPS composer origin **outside the public gateway domain** and attach an explicit Worker route for that hostname. Custom gateway subdomains are rejected: after a later origin migration they could revert to author content. The legacy default remains reserved but inert if a different origin is configured. Set `MOBILE_NODE` to the fixed HTTPS API process origin, or omit it to use existing `NODE`. The Go service's `--mobile-origin` must match exactly.
+The dedicated entry point is `worker/src/mobile-only.js`, configured by `worker/wrangler.mobile.toml`; do not deploy the generic gateway entry point to this origin. It has no author storage, registry, gateway routes or scheduled triggers. `MOBILE_ENABLED` remains `"false"` until the verified backend is ready. Its fixed settings are:
 
-Before enabling, bundle without deployment, confirm all static/API paths stay isolated, and verify that config reports the expected origin, host, limits and HEIF capability. Add edge rate limits for challenge/session/pairing/upload endpoints, a private-volume quota, monitoring without request bodies/tokens, and operational backup/restore. In-process request/identity limits are not a substitute for network-level abuse protection.
+- `MOBILE_ORIGIN=https://croptop-phone-923c1bafd14ea328.croptop.workers.dev`, exactly matching the Go service.
+- `MOBILE_NODE=https://croptop-mobile-pilot-production.up.railway.app`, with no fallback to the existing public host node.
+- Secret `MOBILE_PROXY_SECRET`, injected by the Worker on upstream requests. Caller-supplied proxy headers are never forwarded.
+- Required rate-limit bindings: `MOBILE_API_LIMITER` 240/minute, `MOBILE_AUTH_LIMITER` 30/minute, `MOBILE_PAIRING_LIMITER` 120/minute, and `MOBILE_UPLOAD_LIMITER` 12/minute per client IP. These Cloudflare counters are per location and eventually consistent abuse controls, not exact global quotas.
+
+Missing secret, missing rate-limit bindings or a failed limiter makes the dedicated Worker fail closed. Keep the existing gateway Worker's mobile setting disabled; this pilot neither migrates gateway routes nor enables the legacy `app.crop.top` surface. Before enabling the dedicated Worker, confirm all static/API paths remain isolated and config reports the intended origin, host and media capability. Monitor without request bodies, tokens, key material or pairing URLs; retain operational backup/restore procedures.
 
 ```sh
 cd worker
 node --experimental-loader ./text-loader.mjs --test test/*.test.mjs
-npx --yes wrangler@4.86.0 deploy --dry-run
+npx --yes wrangler@4.86.0 deploy --dry-run --config wrangler.mobile.toml
 ```
 
-No deployment command is required for local verification. Production routing, DNS, TLS, rate-limit configuration and enabling `MOBILE_ENABLED` are explicit release operations.
+### Production targets and rollback
+
+| Target | Pilot resource |
+|---|---|
+| Trusted composer | `https://croptop-phone-923c1bafd14ea328.croptop.workers.dev` |
+| Dedicated backend | `https://croptop-mobile-pilot-production.up.railway.app` |
+| Railway service | `croptop-mobile-pilot` (`a3e07070-2013-441a-b1a6-a9eccd42eea9`) |
+| Backend command | `croptop mobile --listen 0.0.0.0:8090 --data /data` |
+| Backend readiness | `/v0/mobile/health` |
+
+Railway uses explicitly configured service settings for this pilot. Exclude the original `railway.toml` from the mobile deployment archive: its public-host health path must not override the dedicated configuration. The Docker image's default command is still the public host command, so the explicit start-command override is required. `railway.mobile.toml` is a reference for platforms accepting a custom config-as-code file, not proof that Railway selected it.
+
+Record the exact source revision, container deployment and Worker version before enabling. If validation fails, set `MOBILE_ENABLED="false"` on the **dedicated** Worker and redeploy that configuration while retaining its hostname and trusted code; never delete/reassign the key-holding origin or fall through to author content. Preserve the private backend volume and publication receipts. Roll back only the dedicated service to a known-good immutable build; do not restore stale journals over newer commits. Reconcile uncertain operations before re-enabling. Never change the stable crop.top host, stable desktop appcast, existing site storage policies or production site heads as a rollback step.
+
+Infrastructure and the disabled Worker are provisioned. A deployed application, enabled composer and successful public publication/recovery smoke test must be recorded separately before handing out a working pilot link.
 
 ## Connect an existing site
 
@@ -98,12 +122,13 @@ Never treat a lost response as a failed publication or automatically generate a 
 | Real host | Stopped-desktop publication, retained old files, lost receipt, newer head, service restart and exactly-once recovery pass |
 | Draft privacy | Prepared blocks absent from public node before signed commit; normal and crash cleanup plus exclusive-owner tests pass |
 | Browser | 14 tests pass: Chromium/WebKit flows plus signing, pairing and exact offline-shell integrity fixtures |
-| Worker | 52 tests pass; production/staging Wrangler dry-runs build without deployment |
+| Worker | 64 tests pass, including dedicated-origin isolation, trusted proxy, required edge limits and fail-closed configuration; bundles verify without enabling the pilot |
 | iOS | 22 simulator XCTest tests pass; app and Share extension compile; locally ad-hoc signed simulator app launches with shared storage |
-| macOS | Existing native app builds with Connect phone action |
+| macOS | 78 tests pass; native app builds with Connect phone action |
 | Android | 53 JVM tests pass; debug APK assembles and signature verifies; lint has zero errors and five version/SDK warnings |
-| Linux media | Pinned libheif 1.23.6; real HEIC/rotation and kernel-limit tests pass in an isolated Linux/arm64 container with 2 GiB memory and networking disabled |
+| Linux media | Production Linux/amd64 color/HEIF gate passes with libheif 1.23.6, lcms2 2.19 and libpng 1.6.59; real HEIC/rotation, Display-P3 transform, alpha/metadata, unsupported-color rejection and kernel-limit checks pass |
 | CLI | Native Darwin/arm64 and Windows/amd64 binaries compile |
+| Dedicated service | Race-tested private-engine publication/restart, automatic hosted-site enrollment, optional allowlist, proxy-secret protection and global/concurrent draft admission; actual local CLI returns health200, direct API403, trusted API200, gateway404 and exits cleanly |
 
 Artifacts in this workspace:
 
@@ -114,4 +139,4 @@ Artifacts in this workspace:
 - Browser screenshots: `/private/tmp/croptop-mobile-web-check/`; iOS launch: `/tmp/croptop-ios-first-launch-signed.png`.
 - Local media-test Docker image: `croptop-mobile-media-test:local`.
 
-Independent reviews covered service/origin security, browser recovery and native storage/signing. Findings were fixed and regression-tested. Local tests and simulator success do not remove the physical-device, HDR/color-fidelity, origin-history or distribution gates above. No production posts, deployments or app-store submissions were made.
+Independent reviews covered service/origin security, browser recovery, native storage/signing and the production media path. Findings were fixed and regression-tested. Local tests and simulator success do not replace physical iPhone/Android sharing, Safari/Chrome screenshot-fidelity and lifecycle acceptance, or signed native distribution. HDR tone mapping remains unsupported. Production infrastructure and a disabled dedicated Worker have been provisioned; application deployment, enabling the composer and the public publication/recovery smoke test remain pending. No app-store release is implied.

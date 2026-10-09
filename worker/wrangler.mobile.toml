@@ -1,0 +1,44 @@
+# Dedicated, never-author-controlled pilot. Do not reuse the gateway Worker,
+# attach gateway routes, or add SITES/REGISTRY bindings or scheduled triggers.
+name = "croptop-phone-923c1bafd14ea328"
+main = "src/mobile-only.js"
+account_id = "837607fff176f49aad6c91aca2f347a6"
+compatibility_date = "2026-09-01"
+workers_dev = true
+preview_urls = false
+
+rules = [
+  { type = "Text", globs = ["**/web/mobile/*.html", "**/web/mobile/*.js", "**/web/mobile/*.css", "**/web/mobile/*.svg", "**/web/mobile/*.webmanifest"], fallthrough = false },
+  { type = "Data", globs = ["**/templates/croptop/assets/SimplonNorm-*-WebXL.woff2"], fallthrough = false },
+]
+
+[vars]
+DOMAIN = "crop.top"
+MOBILE_ENABLED = "false"
+MOBILE_ORIGIN = "https://croptop-phone-923c1bafd14ea328.croptop.workers.dev"
+MOBILE_NODE = "https://croptop-mobile-pilot-production.up.railway.app"
+# MOBILE_PROXY_SECRET is a Worker secret, never a checked-in [vars] value.
+# It must match CROPTOP_MOBILE_PROXY_SECRET on the isolated mobile node.
+
+# Cloudflare's built-in counters are per location and eventually consistent.
+# These are abuse controls, not exact quotas; retain backend resource limits.
+# Namespace IDs are account-unique and intentionally shared across deployments.
+[[ratelimits]]
+name = "MOBILE_API_LIMITER"
+namespace_id = "2026100901"
+simple = { limit = 240, period = 60 }
+
+[[ratelimits]]
+name = "MOBILE_AUTH_LIMITER"
+namespace_id = "2026100902"
+simple = { limit = 30, period = 60 }
+
+[[ratelimits]]
+name = "MOBILE_PAIRING_LIMITER"
+namespace_id = "2026100903"
+simple = { limit = 120, period = 60 }
+
+[[ratelimits]]
+name = "MOBILE_UPLOAD_LIMITER"
+namespace_id = "2026100904"
+simple = { limit = 12, period = 60 }

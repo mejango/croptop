@@ -3,13 +3,13 @@
 // sw-cache.test.mjs gates these hashes against source files. Changing an asset
 // changes this worker, and therefore installs a new complete shell version.
 const ASSET_DIGESTS = {
-  "/": "682a1eb55905b4e3b22fac6d7876041bd3e3a5beac19d420bf18e6eeaec40ae2",
-  "/index.html": "682a1eb55905b4e3b22fac6d7876041bd3e3a5beac19d420bf18e6eeaec40ae2",
+  "/": "72c715c2ef930b7dfa71a0e103a2a18daff81f9e3644041ec0404ab94df5b374",
+  "/index.html": "72c715c2ef930b7dfa71a0e103a2a18daff81f9e3644041ec0404ab94df5b374",
   "/app.js": "dabc92ac8cb7bfaec89523d7d86fbc4f74e3a39834c3e85bfcc15121d259e945",
   "/protocol.js": "b73300818584399fb4d6c3add1a698617f372561d015dbbe4a1ccc1b785d18a9",
   "/pairing.js": "11f81ce49dbac529bb51f5a7d21f483d1c4d5a983998135886d3e4fffe472d32",
   "/storage.js": "b0d3818b48a88ef36e1547293b72aba0967c4bcb3416abc4dc0e40ba413c4375",
-  "/style.css": "52d3b646ac2bc3821e581c3d34461224d76928fe8a5bc1b471c07e673fd0bbd4",
+  "/style.css": "b2b70c16d8167baa29b493798f6f82c1e8ac7fc87bb11a953d01279e496c80ca",
   "/manifest.webmanifest": "a49c2c000ea4c58f5210f36ff0c65f9ff85cb1c083a3238714b9b64b18bb1949",
   "/icon.svg": "44a5b58f704312588bd0e299cb0451ea91c8b5d86e1a1f8a580008e1aeba57cf",
   "/fonts/SimplonNorm-Regular-WebXL.woff2": "3817b6d37af258364078193bab70803aa7518ccfb23263459c33b15507a1687d",

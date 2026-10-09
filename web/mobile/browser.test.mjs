@@ -127,6 +127,10 @@ for (const browserName of (process.env.MOBILE_BROWSERS || 'chromium,webkit').spl
     const browser = await playwright[browserName].launch({ headless: true, ...options });
     t.after(() => browser.close());
     const { page, context, failures } = await open(browser, service.origin);
+    assert.equal(await page.locator('#pilot-download').getAttribute('href'), 'https://github.com/mejango/croptop/releases/tag/phone-pilot-20261009-1160');
+    assert.equal(await page.locator('#pilot-download').getAttribute('rel'), 'noopener noreferrer');
+    assert.match(await page.locator('#setup').textContent(), /On your Mac, update once/);
+    assert.match(await page.locator('#setup').textContent(), /Confirm the connection on both devices, then allow phone posting here/);
     await capture(page, browserName, 'first-open');
     await pick(page);
     await page.locator('#caption').fill('A little moment, kept.');

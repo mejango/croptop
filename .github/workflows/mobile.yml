@@ -24,6 +24,8 @@ jobs:
           go-version: "1.27"
       - name: Operation recovery, pairing and desktop connection race checks
         run: go test -race ./internal/mobile ./internal/server
+      - name: Isolated pilot packaging and signing cleanup guards
+        run: python3 -m unittest discover -s installer -p 'test_pilot_macos.py' -v
       - name: Patched Linux decoder and real HEIC geometry
         run: docker build --target mobile-media-test -t croptop-mobile-media-test:ci .
 
@@ -53,13 +55,14 @@ jobs:
       - name: Worker security boundary and existing host regressions
         working-directory: worker
         run: node --experimental-loader ./text-loader.mjs --test test/*.test.mjs
-      - name: Bundle the production and staging Workers without deploying
+      - name: Bundle the production, staging and isolated mobile Workers without deploying
         working-directory: worker
         env:
           WRANGLER_SEND_METRICS: "false"
         run: |
-          npx --yes wrangler@4.86.0 deploy --dry-run --outdir "$RUNNER_TEMP/croptop-worker-production"
-          npx --yes wrangler@4.86.0 deploy --dry-run --config wrangler.test.toml --outdir "$RUNNER_TEMP/croptop-worker-staging"
+          npx --yes wrangler@4.145.0 deploy --dry-run --outdir "$RUNNER_TEMP/croptop-worker-production"
+          npx --yes wrangler@4.145.0 deploy --dry-run --config wrangler.test.toml --outdir "$RUNNER_TEMP/croptop-worker-staging"
+          npx --yes wrangler@4.145.0 deploy --dry-run --config wrangler.mobile.toml --outdir "$RUNNER_TEMP/croptop-worker-mobile"
 
   ios:
     runs-on: macos-15
