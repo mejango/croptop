@@ -64,6 +64,17 @@ class PairingProtocolTest {
         rejected { claim(protocol, claimJSON().put("ipns", info.getString("ipns").dropLast(1) + "a")) }
     }
 
+    @Test fun closedReceiverCannotReclaimOrDecryptAfterCancellation() {
+        val protocol = receiver()
+        claim(protocol)
+        protocol.close()
+        rejected { claim(protocol) }
+        rejected { protocol.decrypt(response()) }
+        val unopened = receiver()
+        unopened.close()
+        rejected { claim(unopened) }
+    }
+
     @Test fun claimRejectsAnotherOriginIdReceiverOrState() {
         for ((field, value) in listOf(
             "origin" to "https://other.example", "id" to "B" + "A".repeat(42),

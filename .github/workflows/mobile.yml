@@ -80,6 +80,23 @@ jobs:
           submodules: true
       - name: Shared signing, pairing, and durable draft tests
         run: swift test
+      - name: Verify bundled icon and origin-derived release settings
+        run: |
+          swift Scripts/generate-app-icon.swift --check
+          swift Scripts/generate-release-settings.swift --check
+      - name: Real iPhone intake providers and platform lifecycle tests
+        run: >-
+          xcodebuild -project Croptop.xcodeproj -scheme Croptop
+          -destination 'platform=iOS Simulator,name=iPhone 17 Pro,OS=26.1'
+          -derivedDataPath "$RUNNER_TEMP/croptop-ios-derived"
+          CODE_SIGNING_ALLOWED=NO test
+      - name: iPhone draft setup and abrupt-relaunch UI recovery
+        run: |
+          CROPTOP_TEST_SIMULATOR=$(xcrun simctl create 'Croptop CI' com.apple.CoreSimulator.SimDeviceType.iPhone-17-Pro com.apple.CoreSimulator.SimRuntime.iOS-26-1)
+          xcrun simctl boot "$CROPTOP_TEST_SIMULATOR"
+          xcrun simctl bootstatus "$CROPTOP_TEST_SIMULATOR" -b
+          xcrun simctl addmedia "$CROPTOP_TEST_SIMULATOR" Assets.xcassets/AppIcon.appiconset/AppIcon.png
+          xcodebuild -project Croptop.xcodeproj -scheme CroptopUI -configuration Debug -destination "platform=iOS Simulator,id=$CROPTOP_TEST_SIMULATOR" -derivedDataPath "$RUNNER_TEMP/croptop-ios-derived" CODE_SIGNING_ALLOWED=YES CODE_SIGN_IDENTITY=- test
       - name: Build the iPhone app and Share extension without signing
         run: >-
           xcodebuild -project Croptop.xcodeproj -scheme Croptop
@@ -90,7 +107,7 @@ jobs:
 
   android:
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 45
     defaults:
       run:
         working-directory: apps/android
@@ -105,6 +122,42 @@ jobs:
           cache: gradle
       - uses: android-actions/setup-android@v3
         with:
-          packages: platform-tools platforms;android-35 build-tools;35.0.0
-      - name: Build and test the Android companion
-        run: ./gradlew --no-daemon assembleDebug testDebugUnitTest lintDebug
+          packages: platform-tools platforms;android-36 build-tools;35.0.0
+      - name: Test and package debug plus unsigned pilot releases
+        run: ./gradlew --no-daemon testDebugUnitTest lintDebug assembleDebug assembleDebugAndroidTest assembleRelease bundleRelease
+      - name: Release signing must fail closed
+        run: bash scripts/check-release-signing.sh
+      - name: Enable the disposable runner's emulator acceleration
+        run: sudo chmod 0666 /dev/kvm
+      - name: Android 16 share, setup, and process-death recovery
+        uses: reactivecircus/android-emulator-runner@a421e43855164a8197daf9d8d40fe71c6996bb0d # v2
+        env:
+          CROPTOP_TEST_EMULATOR_SERIAL: emulator-5554
+          CROPTOP_TEST_AVD_NAME: croptop-ci-android36
+          CROPTOP_TEST_OUTPUT_DIR: ${{ runner.temp }}/croptop-android-device-tests
+        with:
+          api-level: 36
+          target: default
+          arch: x86_64
+          avd-name: croptop-ci-android36
+          emulator-port: 5554
+          working-directory: apps/android
+          script: |
+            adb -s emulator-5554 install -r app/build/outputs/apk/debug/app-debug.apk
+            adb -s emulator-5554 install -r app/build/outputs/apk/androidTest/debug/app-debug-androidTest.apk
+            bash scripts/emulator-smoke.sh
+      - name: Retain Android emulator evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: croptop-android-device-evidence
+          path: ${{ runner.temp }}/croptop-android-device-tests
+          if-no-files-found: warn
+      - name: Retain unsigned pilot artifacts (not a Play upload)
+        uses: actions/upload-artifact@v4
+        with:
+          name: croptop-android-unsigned-pilot
+          path: |
+            apps/android/app/build/outputs/apk/release/app-release-unsigned.apk
+            apps/android/app/build/outputs/bundle/release/app-release.aab
+          if-no-files-found: error

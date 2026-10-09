@@ -21,7 +21,7 @@ interface MobileTransport {
     fun upload(draft: Draft, source: File): JSONObject
 }
 
-class MobileApi(private val keys: SiteSigner) : MobileTransport {
+class MobileApi(private val keys: SiteSigner, private val connect: (URL) -> HttpURLConnection = { it.openConnection() as HttpURLConnection }) : MobileTransport {
     private var token = ""
     private var tokenExpiry = 0L
     private var tokenIdentity = ""
@@ -35,16 +35,20 @@ class MobileApi(private val keys: SiteSigner) : MobileTransport {
     override fun site(): JSONObject = json("GET", "/site")
     fun consent(enabled: Boolean): JSONObject = json("PUT", "/connection", JSONObject().put("enabled", enabled))
 
-    private fun session() {
-        val connection = connection()
-        if (token.isNotEmpty() && tokenExpiry > Instant.now().epochSecond + 30 && tokenIdentity == connection.ipns + connection.origin) return
-        val challenge = json("POST", "/challenge", JSONObject().put("ipns", connection.ipns), false)
+    private fun session(expected: ConnectionSnapshot) {
+        keys.requireCurrent(expected)
+        val connection = expected.connection ?: error("Connect your site to continue.")
+        val identity = connection.ipns + connection.origin + expected.generation
+        if (token.isNotEmpty() && tokenExpiry > Instant.now().epochSecond + 30 && tokenIdentity == identity) return
+        val challenge = json("POST", "/challenge", JSONObject().put("ipns", connection.ipns), false, expected)
         val payload = Protocol.challenge(connection.origin, connection.ipns, challenge)
-        val signature = keys.withKey { Protocol.sign(it, payload) }
-        val session = json("POST", "/session", JSONObject().put("id", challenge.getString("id")).put("signature", signature), false)
+        keys.requireCurrent(expected)
+        val signature = keys.withKey { keys.requireCurrent(expected); require(Protocol.identity(it) == connection.ipns) { "The signing key changed during connection setup." }; Protocol.sign(it, payload) }
+        val session = json("POST", "/session", JSONObject().put("id", challenge.getString("id")).put("signature", signature), false, expected)
+        keys.requireCurrent(expected)
         token = session.getString("token")
         tokenExpiry = session.getLong("expiresAt")
-        tokenIdentity = connection.ipns + connection.origin
+        tokenIdentity = identity
     }
 
     override fun operation(id: String): JSONObject = json("GET", "/operations/$id")
@@ -70,25 +74,31 @@ class MobileApi(private val keys: SiteSigner) : MobileTransport {
         return JSONObject(String(bytes, Charsets.UTF_8))
     }
 
-    private fun json(method: String, path: String, body: JSONObject? = null, auth: Boolean = true): JSONObject {
+    private fun json(method: String, path: String, body: JSONObject? = null, auth: Boolean = true, expected: ConnectionSnapshot = keys.snapshot()): JSONObject {
         val bytes = body?.toString()?.toByteArray(Charsets.UTF_8)
-        return JSONObject(String(request(method, path, auth, body = bytes?.let { { http ->
+        return JSONObject(String(request(method, path, auth, expected = expected, body = bytes?.let { { http ->
             http.setFixedLengthStreamingMode(it.size)
             http.outputStream.use { output -> output.write(it) }
         } }), Charsets.UTF_8))
     }
 
-    private fun request(method: String, path: String, auth: Boolean = true, contentType: String = "application/json", maxBytes: Long = 1024 * 1024, body: ((HttpURLConnection) -> Unit)? = null, reauthenticate: Boolean = true): ByteArray {
-        if (auth) session()
-        val http = URL(connection().origin + "/v0/mobile" + path).openConnection() as HttpURLConnection
+    private fun request(method: String, path: String, auth: Boolean = true, contentType: String = "application/json", maxBytes: Long = 1024 * 1024, body: ((HttpURLConnection) -> Unit)? = null, reauthenticate: Boolean = true, expected: ConnectionSnapshot = keys.snapshot()): ByteArray {
+        keys.requireCurrent(expected)
+        val connection = expected.connection ?: error("Connect your site to continue.")
+        PublishingService.requireOrigin(connection.origin)
+        if (auth) session(expected)
+        keys.requireCurrent(expected)
+        val http = connect(URL(connection.origin + "/v0/mobile" + path))
         try {
             http.requestMethod = method
             http.instanceFollowRedirects = false
+            http.useCaches = false
             http.connectTimeout = 20_000
             http.readTimeout = 60_000
             http.setRequestProperty("Accept", "application/json")
             http.setRequestProperty("Cache-Control", "no-store")
             if (auth) http.setRequestProperty("Authorization", "Bearer $token")
+            keys.requireCurrent(expected)
             if (body != null) {
                 http.doOutput = true
                 http.setRequestProperty("Content-Type", contentType)
@@ -97,7 +107,7 @@ class MobileApi(private val keys: SiteSigner) : MobileTransport {
             val status = http.responseCode
             if (status == 401 && auth && reauthenticate) {
                 token = ""
-                return request(method, path, auth, contentType, maxBytes, body, false)
+                return request(method, path, auth, contentType, maxBytes, body, false, expected)
             }
             val bytes = (if (status in 200..299) http.inputStream else http.errorStream)?.use { readBounded(it, maxBytes) } ?: ByteArray(0)
             if (status !in 200..299) {
@@ -145,6 +155,7 @@ class Publisher(private val keys: SiteSigner, private val store: DraftStore, pri
         store.verifySource(original)
         var draft = original
         fun upload(): JSONObject {
+            checkedConnection(draft)
             Protocol.validateText(draft, config)
             try { return api.upload(draft, store.source(draft.id)) }
             catch (error: ApiError) {
@@ -176,10 +187,12 @@ class Publisher(private val keys: SiteSigner, private val store: DraftStore, pri
         if (draft.state == "failed" && original.state != "failed") return draft // Show a newly reported failure before the user chooses retry or edit.
         if (draft.state == "failed" || (draft.state == "needs_signature" && (JSONObject(draft.operation).getJSONObject("proposal").getLong("expiresAt") <= Instant.now().epochSecond || !Protocol.matchesParent(JSONObject(draft.operation), requireReady())))) {
             requireReady()
+            checkedConnection(draft)
             draft = saveOperation(draft, api.prepare(draft.id))
         }
         if (draft.state == "needs_signature") {
             val normalized = api.preview(draft.id, maxOf(config.getLong("maxImageBytes") * 4, 1024 * 1024))
+            checkedConnection(draft)
             Protocol.validateProposal(draft, JSONObject(draft.operation), normalized, config.getString("host"))
             validateImage(normalized, config.getLong("maxImagePixels"))
             store.savePreview(draft.id, normalized)
@@ -197,10 +210,12 @@ class Publisher(private val keys: SiteSigner, private val store: DraftStore, pri
         require(site.getBoolean("ready") && site.getBoolean("enabled") && Protocol.matchesParent(fresh, site)) { "Your site changed after preparing this screenshot. Check status to prepare it again, keeping the other publication." }
         val image = store.preview(draft.id).readBytes()
         validateImage(image, config.getLong("maxImagePixels"))
+        checkedConnection(draft)
         val authorized = draft.copy(authorized = true)
         store.save(authorized) // Never offer editable replacement after any signing attempt.
-        val signatures = keys.withKey { Protocol.signProposal(it, draft, fresh, image, config.getString("host")) }
+        val signatures = keys.withKey { checkedConnection(draft); Protocol.signProposal(it, draft, fresh, image, config.getString("host")) }
         // Keep the last validated proposal if the response is lost. Recovery GET precedes retry.
+        checkedConnection(draft)
         return saveOperation(authorized, api.commit(draft.id, signatures))
     }
 

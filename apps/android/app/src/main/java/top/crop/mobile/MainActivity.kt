@@ -18,6 +18,7 @@ import android.text.InputType
 import android.text.TextWatcher
 import android.view.View
 import android.view.WindowManager
+import android.view.WindowInsets
 import android.widget.Button
 import android.widget.EditText
 import android.widget.ImageView
@@ -42,16 +43,19 @@ class MainActivity : Activity() {
     private lateinit var publisher: Publisher
     private lateinit var content: LinearLayout
     private val handler = Handler(Looper.getMainLooper())
+    private val workRefresh = Runnable { if (!destroyed) render() }
     private var selected: String? = null
     private var status = ""
     private var destroyed = false
+    @Volatile private var resumed = false
     private var showingSetup = false
     private var site: JSONObject? = null
     private var config: JSONObject? = null
     private var caption: EditText? = null
     private var title: EditText? = null
     private var keyInput: EditText? = null
-    private var serviceInput: EditText? = null
+    private var pairing: PairingFlow? = null
+    private var pairingInputDialog: AlertDialog? = null
     private val preferences by lazy { getSharedPreferences("composer", MODE_PRIVATE) }
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -62,17 +66,23 @@ class MainActivity : Activity() {
         publisher = Publisher(keys, store, api)
         selected = savedInstanceState?.getString("draft") ?: preferences.getString("draft", null)
         window.decorView.setOnApplyWindowInsetsListener { view, insets ->
-            view.setPadding(insets.systemWindowInsetLeft, insets.systemWindowInsetTop, insets.systemWindowInsetRight, insets.systemWindowInsetBottom)
-            insets.consumeSystemWindowInsets()
+            if (android.os.Build.VERSION.SDK_INT >= 30) {
+                val safe = insets.getInsets(WindowInsets.Type.systemBars() or WindowInsets.Type.displayCutout() or WindowInsets.Type.ime())
+                view.setPadding(safe.left, safe.top, safe.right, safe.bottom)
+            } else {
+                @Suppress("DEPRECATION") view.setPadding(insets.systemWindowInsetLeft, insets.systemWindowInsetTop, insets.systemWindowInsetRight, insets.systemWindowInsetBottom)
+            }
+            insets
         }
         render()
-        if (savedInstanceState == null) receive(intent)
+        if (savedInstanceState == null) receive(intent) else discardIncomingIntent(intent)
     }
 
+    override fun onResume() { super.onResume(); resumed = true }
     override fun onNewIntent(intent: Intent) { super.onNewIntent(intent); setIntent(intent); receive(intent) }
     override fun onSaveInstanceState(outState: Bundle) { persistText(); outState.putString("draft", selected); super.onSaveInstanceState(outState) }
-    override fun onPause() { persistText(); super.onPause() }
-    override fun onDestroy() { destroyed = true; handler.removeCallbacksAndMessages(null); super.onDestroy() }
+    override fun onPause() { resumed = false; persistText(); keyInput?.text?.clear(); pairingInputDialog?.dismiss(); pairingInputDialog = null; pairing?.cancel(); pairing = null; super.onPause() }
+    override fun onDestroy() { destroyed = true; pairing?.cancel(); pairing = null; handler.removeCallbacksAndMessages(null); super.onDestroy() }
 
     private fun current(): Draft? = selected?.let { runCatching { store.get(it) }.getOrNull() }
     private fun connection(): Connection? = runCatching { keys.connection() }.getOrElse {
@@ -92,8 +102,21 @@ class MainActivity : Activity() {
     }
 
     private fun receive(incoming: Intent) {
-        try { receiveIntent(incoming) }
+        // Retain only the values needed for intake. Capability-bearing URLs and
+        // provider URIs must not remain in Activity state across recreation.
+        val transient = Intent(incoming)
+        discardIncomingIntent(incoming)
+        try { receiveIntent(transient) }
         catch (error: Exception) { status = error.message ?: "This shared item could not be opened. Your saved drafts are retained."; render() }
+        finally { transient.data = null; transient.clipData = null; transient.replaceExtras(null as Bundle?) }
+    }
+
+    private fun discardIncomingIntent(incoming: Intent) {
+        incoming.data = null
+        incoming.clipData = null
+        incoming.replaceExtras(null as Bundle?)
+        incoming.action = Intent.ACTION_MAIN
+        setIntent(Intent(this, MainActivity::class.java).setAction(Intent.ACTION_MAIN))
     }
 
     private fun receiveIntent(incoming: Intent) {
@@ -145,13 +168,11 @@ class MainActivity : Activity() {
         }
     }
 
-    private fun background(message: String, task: () -> Unit) {
-        runBackground(message, false, task)
-    }
+    private fun background(message: String, task: () -> Unit): Boolean = runBackground(message, false, task)
 
-    private fun runBackground(message: String, allowQueue: Boolean, task: () -> Unit) {
+    private fun runBackground(message: String, allowQueue: Boolean, task: () -> Unit): Boolean {
         if (allowQueue) Work.pending.incrementAndGet()
-        else if (!Work.pending.compareAndSet(0, 1)) return
+        else if (!Work.pending.compareAndSet(0, 1)) return false
         persistText()
         status = message
         render()
@@ -164,9 +185,12 @@ class MainActivity : Activity() {
                 handler.post { if (!destroyed) render() }
             }
         }
+        return true
     }
 
     private fun render() {
+        // An old progress refresh must not rebuild idle fields or dismiss their keyboard.
+        handler.removeCallbacks(workRefresh)
         selected = preferences.getString("draft", selected)
         caption = null; title = null
         val scroll = ScrollView(this).apply { isFillViewport = true }
@@ -178,7 +202,7 @@ class MainActivity : Activity() {
         if (status.isNotEmpty()) label(status, 15).apply { accessibilityLiveRegion = View.ACCESSIBILITY_LIVE_REGION_POLITE }
         if (Work.pending.get() > 0) {
             label("You can reopen Croptop to recover a pending publication.", 14)
-            handler.postDelayed({ if (!destroyed) render() }, 1000)
+            handler.postDelayed(workRefresh, 1000)
             return
         }
         val connection = connection()
@@ -205,38 +229,55 @@ class MainActivity : Activity() {
                 action("${saved.title.ifBlank { "Screenshot" }} · ${stateLabel(saved.state)}") { persistText(); choose(saved); status = ""; showingSetup = false; render() }
             }
         }
+        action("Privacy and storage") {
+            AlertDialog.Builder(this).setTitle("Privacy and storage")
+                .setMessage(getString(R.string.privacy_and_storage)).setPositiveButton("Done", null).show()
+        }
     }
 
     private fun setup() {
         label("Connect your site", 23, bold = true)
         label("Connect from your existing Croptop publisher or import its site key. Your screenshot stays saved during setup.", 15)
         action("Open connection link") {
-            val input = EditText(this).apply { hint = "Paste the Connect phone link"; inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_URI }
-            AlertDialog.Builder(this).setTitle("Connect phone").setView(input).setPositiveButton("Continue") { _, _ -> openPairing(input.text.toString()) }.setNegativeButton("Cancel", null).show()
+            val input = EditText(this).apply {
+                hint = "Paste the Connect phone link"
+                inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_PASSWORD
+                imeOptions = android.view.inputmethod.EditorInfo.IME_FLAG_NO_PERSONALIZED_LEARNING
+                importantForAutofill = View.IMPORTANT_FOR_AUTOFILL_NO
+                isSaveEnabled = false
+            }
+            pairingInputDialog = AlertDialog.Builder(this).setTitle("Connect phone").setView(input)
+                .setPositiveButton("Continue") { _, _ -> val link = input.text.toString(); input.text.clear(); openPairing(link) }
+                .setNegativeButton("Cancel", null).create().apply {
+                    setOnDismissListener { input.text.clear(); if (pairingInputDialog === this) pairingInputDialog = null }
+                    show()
+                }
         }
-        serviceInput = input("Publishing service", "https://app.crop.top", false)
         keyInput = input("Site key (PKCS8 PEM)", "", true).apply {
             inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_FLAG_MULTI_LINE or InputType.TYPE_TEXT_VARIATION_PASSWORD
             minLines = 3
             importantForAutofill = View.IMPORTANT_FOR_AUTOFILL_NO
+            imeOptions = android.view.inputmethod.EditorInfo.IME_FLAG_NO_PERSONALIZED_LEARNING
+            isSaveEnabled = false
         }
         action("Choose key file") { startActivityForResult(Intent(Intent.ACTION_OPEN_DOCUMENT).addCategory(Intent.CATEGORY_OPENABLE).setType("*/*"), 101) }
         label("The site key grants full control of your site. Croptop encrypts it on this phone. Keep your original key backup.", 14)
         action("Import site key") {
             val pem = keyInput!!.text.toString()
-            val origin = serviceInput!!.text.toString()
-            val existing = connection()
-            if (existing != null) {
+            val origin = PublishingService.origin
+            val existing = keys.snapshot()
+            if (existing.connection != null) {
                 AlertDialog.Builder(this).setTitle("Replace this phone’s connection?").setMessage("Existing drafts keep their original destination. Keep a backup of your original site's key.")
-                    .setPositiveButton("Replace") { _, _ -> importSite(pem, origin) }.setNegativeButton("Cancel", null).show()
-            } else importSite(pem, origin)
+                    .setPositiveButton("Replace") { _, _ -> importSite(pem, origin, existing) }.setNegativeButton("Cancel", null).show()
+            } else importSite(pem, origin, existing)
         }
     }
 
-    private fun importSite(pem: String, origin: String) {
+    private fun importSite(pem: String, origin: String, expected: ConnectionSnapshot) {
         keyInput?.text?.clear()
         background("Checking your site…") {
-            keys.import(pem, origin)
+            require(resumed && !destroyed && !isFinishing) { "Connection setup was closed. Your draft is still saved." }
+            keys.import(pem, origin, expected)
             site = null
             config = null
             showingSetup = false
@@ -247,16 +288,17 @@ class MainActivity : Activity() {
     }
 
     private fun siteSettings() {
+        val expected = keys.snapshot()
         val actions = arrayOf("Check site readiness", "Enable phone publishing", "Stop phone publishing", "Connect another site", "Remove site from this phone")
         AlertDialog.Builder(this).setTitle("Site settings").setItems(actions) { _, index ->
             when (index) {
                 0 -> background("Checking your site…") { config = api.config(); site = api.site(); status = site!!.optString("reason").ifBlank { if (site!!.getBoolean("ready")) "Your site is ready." else "Publish a compatible hosted version from your existing Croptop publisher." } }
                 1 -> AlertDialog.Builder(this).setTitle("Enable phone publishing?").setMessage("This hosted service prepares your posts. Your key stays on this phone and signs each publication after you review it.")
-                    .setPositiveButton("Enable") { _, _ -> background("Enabling phone publishing…") { config = api.config(); site = api.consent(true); status = "Phone publishing enabled." } }.setNegativeButton("Cancel", null).show()
-                2 -> background("Stopping phone publishing…") { site = api.consent(false); status = "New publications are stopped. Already published posts remain online." }
+                    .setPositiveButton("Enable") { _, _ -> background("Enabling phone publishing…") { keys.requireCurrent(expected); config = api.config(); site = api.consent(true); status = "Phone publishing enabled." } }.setNegativeButton("Cancel", null).show()
+                2 -> background("Stopping phone publishing…") { keys.requireCurrent(expected); site = api.consent(false); status = "New publications are stopped. Already published posts remain online." }
                 3 -> { showingSetup = true; render() }
                 4 -> AlertDialog.Builder(this).setTitle("Remove local connection?").setMessage("This deletes the key from this phone. Drafts stay saved. Other copies of the site key remain valid.")
-                    .setPositiveButton("Remove") { _, _ -> keys.remove(); site = null; config = null; status = "Local connection removed."; render() }.setNegativeButton("Cancel", null).show()
+                    .setPositiveButton("Remove") { _, _ -> background("Removing the local connection…") { keys.remove(expected); site = null; config = null; status = "Local connection removed. Saved drafts remain on this phone." } }.setNegativeButton("Cancel", null).show()
             }
         }.show()
     }
@@ -339,7 +381,13 @@ class MainActivity : Activity() {
 
     private fun openPairing(link: String) {
         // Pairing is handled by the same authenticated encryption protocol as the website.
-        try { PairingFlow(this, keys, { message -> status = message; site = null; config = null; showingSetup = false; render() }, ::background).open(link) }
+        try {
+            val parsed = PairingLink.parse(link, PublishingService.origin)
+            require(pairing?.isActive() != true) { "Connection setup is already open. Finish or cancel it before opening another link." }
+            require(Work.pending.get() == 0) { "Finish the current operation, then open the connection link again. Your draft remains saved." }
+            pairing = PairingFlow(this, keys, { message -> status = message; site = null; config = null; showingSetup = false; render() }, ::background)
+            pairing!!.open(parsed)
+        }
         catch (error: Exception) { status = error.message ?: "Create a fresh Connect phone link on your existing publisher."; render() }
     }
 

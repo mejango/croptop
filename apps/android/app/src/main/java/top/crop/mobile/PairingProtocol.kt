@@ -37,8 +37,10 @@ class PairingProtocol internal constructor(private val receiver: KeyPair, privat
     private var claimed: Envelope? = null
     private var claimResult: Claim? = null
     private var encryptionKey: ByteArray? = null
+    private var closed = false
 
     @Synchronized fun claim(origin: String, id: String, response: JSONObject): Claim {
+        require(!closed) { "Connection setup was closed. Create a fresh Connect phone link." }
         val expectedOrigin = Protocol.origin(origin)
         require(origin == expectedOrigin && validIdentifier(id)) { "Invalid phone connection link." }
         require(response.getString("state") == "claimed") { "This phone connection is not ready for confirmation." }
@@ -72,6 +74,7 @@ class PairingProtocol internal constructor(private val receiver: KeyPair, privat
     }
 
     @Synchronized fun decrypt(response: JSONObject): String {
+        require(!closed) { "Connection setup was closed. Create a fresh Connect phone link." }
         val expected = requireNotNull(claimed) { "Confirm the connection before importing its site key." }
         require(response.getString("state") == "consumed" && envelope(response) == expected) { "The encrypted phone connection changed." }
         validateExpiry(expected.expiresAt)
@@ -94,6 +97,14 @@ class PairingProtocol internal constructor(private val receiver: KeyPair, privat
             der.fill(0)
         }
         return pem
+    }
+
+    @Synchronized fun close() {
+        closed = true
+        encryptionKey?.fill(0)
+        encryptionKey = null
+        claimed = null
+        claimResult = null
     }
 
     private fun envelope(response: JSONObject): Envelope {

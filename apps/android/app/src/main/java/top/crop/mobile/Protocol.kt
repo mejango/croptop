@@ -40,7 +40,7 @@ object Protocol {
 
     fun origin(value: String): String {
         val uri = URI(value.trim().trimEnd('/'))
-        require(uri.scheme == "https" && !uri.host.isNullOrEmpty() && uri.rawUserInfo == null && uri.rawQuery == null && uri.rawFragment == null && uri.rawPath.isNullOrEmpty()) { "Use an HTTPS service address, such as https://app.crop.top." }
+        require(uri.scheme == "https" && !uri.host.isNullOrEmpty() && uri.rawUserInfo == null && uri.rawQuery == null && uri.rawFragment == null && uri.rawPath.isNullOrEmpty()) { "Use an HTTPS publishing service address without a path or query." }
         return uri.toASCIIString()
     }
 
