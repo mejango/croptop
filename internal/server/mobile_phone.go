@@ -202,73 +202,106 @@ func (s *Server) openPhoneConnection(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	if s.Node == nil || s.Pub == nil || !s.Node.Keystore().Has(site.ID) {
-		writeErr(w, 409, errors.New("connect from the publisher that has this site's key"))
-		return
-	}
-	if publish.HostOf(site) != publish.DefaultHost {
-		writeErr(w, 409, errors.New("phone posting currently supports sites hosted on crop.top"))
-		return
-	}
-	if !site.HostingEnabled() && !in.EnableHosting {
-		writeJSON(w, 409, map[string]string{"error": "Allow crop.top to host this site so your phone can publish while this computer sleeps.", "code": "hosting_required"})
-		return
-	}
 	ctx, cancel := context.WithTimeout(r.Context(), 5*time.Minute)
 	defer cancel()
+	connection, err := s.preparePhoneConnection(ctx, site, in.EnableHosting)
+	if err != nil {
+		writePhoneProblem(w, err)
+		return
+	}
+	writeJSON(w, 201, connection)
+}
+
+type phoneProblem struct {
+	Status int
+	Code   string
+	Err    error
+}
+
+func (e *phoneProblem) Error() string { return e.Err.Error() }
+func (e *phoneProblem) Unwrap() error { return e.Err }
+
+func phoneFailure(status int, err error) *phoneProblem {
+	return &phoneProblem{Status: status, Err: err}
+}
+
+func writePhoneProblem(w http.ResponseWriter, err error) {
+	var problem *phoneProblem
+	if errors.As(err, &problem) {
+		body := map[string]string{"error": problem.Error()}
+		if problem.Code != "" {
+			body["code"] = problem.Code
+		}
+		writeJSON(w, problem.Status, body)
+		return
+	}
+	writeErr(w, 500, err)
+}
+
+type phoneConnectionResult struct {
+	ID        string `json:"id"`
+	URL       string `json:"url"`
+	ExpiresAt int64  `json:"expiresAt"`
+	State     string `json:"state"`
+	IPNS      string `json:"ipns"`
+	Name      string `json:"name"`
+}
+
+// preparePhoneConnection is shared by connection transports. Its caller holds
+// the console gate until this operation completes.
+func (s *Server) preparePhoneConnection(ctx context.Context, site *store.Site, enableHosting bool) (*phoneConnectionResult, error) {
+	if s.Node == nil || s.Pub == nil || !s.Node.Keystore().Has(site.ID) {
+		return nil, phoneFailure(409, errors.New("connect from the publisher that has this site's key"))
+	}
+	if publish.HostOf(site) != publish.DefaultHost {
+		return nil, phoneFailure(409, errors.New("phone posting currently supports sites hosted on crop.top"))
+	}
+	if !site.HostingEnabled() && !enableHosting {
+		return nil, &phoneProblem{Status: 409, Code: "hosting_required", Err: errors.New("Allow crop.top to host this site so your phone can publish while this computer sleeps.")}
+	}
 	var config struct {
 		Enabled bool   `json:"enabled"`
 		Origin  string `json:"origin"`
 		Version int    `json:"version"`
 	}
 	if err := s.phoneAPI(ctx, "GET", "/config", "", nil, &config); err != nil {
-		writeErr(w, 502, err)
-		return
+		return nil, phoneFailure(502, err)
 	}
 	origin, _ := s.mobileOrigin()
 	if !config.Enabled || config.Version != 1 || config.Origin != origin {
-		writeErr(w, 503, errors.New("phone posting is not enabled at this service yet"))
-		return
+		return nil, phoneFailure(503, errors.New("phone posting is not enabled at this service yet"))
 	}
 	if !site.HostingEnabled() {
 		if err := site.SetStorage(store.StorageHosted); err != nil {
-			writeErr(w, 500, err)
-			return
+			return nil, phoneFailure(500, err)
 		}
 		if err := s.Store.SaveSite(site); err != nil {
-			writeErr(w, 500, err)
-			return
+			return nil, phoneFailure(500, err)
 		}
 	}
 	// Bootstrap the signed compatibility descriptor and hosted policy using the
 	// existing publisher; normal conflict/catch-up behavior remains its owner.
 	published, err := s.Pub.Publish(ctx, site.ID, false)
 	if err != nil {
-		writeErr(w, 502, fmt.Errorf("publish this site before connecting your phone: %w", err))
-		return
+		return nil, phoneFailure(502, fmt.Errorf("publish this site before connecting your phone: %w", err))
 	}
 	site, err = s.Store.Site(site.ID)
 	if err != nil {
-		writeErr(w, 500, err)
-		return
+		return nil, phoneFailure(500, err)
 	}
 	token, err := s.phoneSession(ctx, site)
 	if err != nil {
-		writeErr(w, 502, err)
-		return
+		return nil, phoneFailure(502, err)
 	}
 	if err := s.waitPhoneReady(ctx, site.IPNS, token, published); err != nil {
-		writeErr(w, 409, err)
-		return
+		return nil, phoneFailure(409, err)
 	}
 	if err := s.phoneAPI(ctx, "PUT", "/connection", token, map[string]bool{"enabled": true}, nil); err != nil {
-		writeErr(w, 502, err)
-		return
+		return nil, phoneFailure(502, err)
 	}
 	private, err := ecdh.P256().GenerateKey(rand.Reader)
 	if err != nil {
-		writeErr(w, 500, err)
-		return
+		return nil, phoneFailure(500, err)
 	}
 	pub := base64.StdEncoding.EncodeToString(private.PublicKey().Bytes())
 	var pairing struct {
@@ -276,12 +309,10 @@ func (s *Server) openPhoneConnection(w http.ResponseWriter, r *http.Request) {
 		Capability string `json:"capability"`
 	}
 	if err := s.phoneAPI(ctx, "POST", "/pairings", token, map[string]string{"senderPublicKey": pub}, &pairing); err != nil {
-		writeErr(w, 502, err)
-		return
+		return nil, phoneFailure(502, err)
 	}
 	if !phonePairingInfoValid(pairing.PairingInfo, origin, site.IPNS, pub) || !phoneOpaqueToken(pairing.Capability) {
-		writeErr(w, 502, errors.New("invalid phone connection response"))
-		return
+		return nil, phoneFailure(502, errors.New("invalid phone connection response"))
 	}
 	link := origin + "/#pair=" + pairing.ID + "." + pairing.Capability
 	connection := &phoneConnection{SiteID: site.ID, Name: site.Name, Token: token, URL: link, Info: pairing.PairingInfo, Private: private}
@@ -300,7 +331,7 @@ func (s *Server) openPhoneConnection(w http.ResponseWriter, r *http.Request) {
 		delete(pending.entries, id)
 		pending.mu.Unlock()
 	})
-	writeJSON(w, 201, map[string]any{"id": pairing.ID, "url": link, "expiresAt": pairing.ExpiresAt, "state": pairing.State, "ipns": site.IPNS, "name": site.Name})
+	return &phoneConnectionResult{ID: pairing.ID, URL: link, ExpiresAt: pairing.ExpiresAt, State: pairing.State, IPNS: site.IPNS, Name: site.Name}, nil
 }
 
 // Publish can finish while a large first host upload continues in the
