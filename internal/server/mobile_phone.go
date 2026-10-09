@@ -22,6 +22,7 @@ import (
 
 	"github.com/mejango/croptop/internal/mobile"
 	"github.com/mejango/croptop/internal/publish"
+	"github.com/mejango/croptop/internal/render"
 	"github.com/mejango/croptop/internal/store"
 	qrcode "github.com/skip2/go-qrcode"
 )
@@ -36,15 +37,20 @@ type phoneConnection struct {
 	SiteID, Name, Token, URL string
 	Info                     mobile.PairingInfo
 	Private                  *ecdh.PrivateKey
+	Context                  context.Context
+	Cancel                   context.CancelFunc
 }
 
 type phoneConnections struct {
-	mu      sync.Mutex
-	entries map[string]*phoneConnection
+	mu           sync.Mutex
+	entries      map[string]*phoneConnection
+	preparations map[string]*phonePreparation
 }
 
 func (s *Server) phoneConnections() *phoneConnections {
-	s.phoneOnce.Do(func() { s.phone = &phoneConnections{entries: make(map[string]*phoneConnection)} })
+	s.phoneOnce.Do(func() {
+		s.phone = &phoneConnections{entries: make(map[string]*phoneConnection), preparations: make(map[string]*phonePreparation)}
+	})
 	return s.phone
 }
 
@@ -80,8 +86,20 @@ func (s *Server) routesMobilePhone(mux *http.ServeMux) {
 		mux.HandleFunc("GET /"+name, func(w http.ResponseWriter, r *http.Request) { http.ServeFileFS(w, r, s.UI, name) })
 	}
 	mux.HandleFunc("POST /v0/croptop/sites/{id}/phone", s.openPhoneConnection)
+	mux.HandleFunc("POST /v0/croptop/sites/{id}/phone/preparations", s.startPhonePreparation)
+	mux.HandleFunc("GET /v0/croptop/sites/{id}/phone/preparations/{prepid}", s.phonePreparationStatus)
+	mux.HandleFunc("DELETE /v0/croptop/sites/{id}/phone/preparations/{prepid}", s.cancelPhonePreparation)
 	mux.HandleFunc("GET /v0/croptop/sites/{id}/phone/{pairid}", s.phoneConnectionStatus)
-	mux.HandleFunc("GET /v0/croptop/sites/{id}/phone/{pairid}/qr", s.phoneConnectionQR)
+	mux.HandleFunc("DELETE /v0/croptop/sites/{id}/phone/{pairid}", s.cancelPhoneConnection)
+	// A generic final segment lets the more-specific preparations route own
+	// its namespace without an ambiguous /preparations/qr ServeMux overlap.
+	mux.HandleFunc("GET /v0/croptop/sites/{id}/phone/{pairid}/{action}", func(w http.ResponseWriter, r *http.Request) {
+		if r.PathValue("action") != "qr" {
+			http.NotFound(w, r)
+			return
+		}
+		s.phoneConnectionQR(w, r)
+	})
 	mux.HandleFunc("POST /v0/croptop/sites/{id}/phone/{pairid}/confirm", s.confirmPhoneConnection)
 }
 
@@ -142,7 +160,7 @@ func (s *Server) phoneAPI(ctx context.Context, method, path, token string, in, o
 		if problem.Error == "" {
 			problem.Error = "phone service could not complete this request"
 		}
-		return errors.New(problem.Error)
+		return &phoneServiceError{Status: response.StatusCode, Code: problem.Code, Message: problem.Error}
 	}
 	if out == nil {
 		_, err = io.Copy(io.Discard, reader)
@@ -150,6 +168,13 @@ func (s *Server) phoneAPI(ctx context.Context, method, path, token string, in, o
 	}
 	return json.NewDecoder(reader).Decode(out)
 }
+
+type phoneServiceError struct {
+	Status        int
+	Code, Message string
+}
+
+func (e *phoneServiceError) Error() string { return e.Message }
 
 func (s *Server) phoneSession(ctx context.Context, site *store.Site) (string, error) {
 	origin, err := s.mobileOrigin()
@@ -167,6 +192,9 @@ func (s *Server) phoneSession(ctx context.Context, site *store.Site) (string, er
 	now := time.Now().Unix()
 	if !phoneOpaqueToken(challenge.ID) || challenge.Message != expected || challenge.ExpiresAt <= now || challenge.ExpiresAt > now+600 {
 		return "", errors.New("phone service returned an invalid connection challenge")
+	}
+	if _, err := s.currentPhoneSite(ctx, site, site.HostingEnabled()); err != nil {
+		return "", err
 	}
 	signature, err := s.Node.Keystore().Sign(site.ID, []byte(expected))
 	if err != nil {
@@ -196,15 +224,13 @@ func (s *Server) openPhoneConnection(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, 400, errors.New("invalid connection request"))
 		return
 	}
-	s.mu.Lock()
-	defer s.mu.Unlock()
 	site, ok := s.site(w, r)
 	if !ok {
 		return
 	}
 	ctx, cancel := context.WithTimeout(r.Context(), 5*time.Minute)
 	defer cancel()
-	connection, err := s.preparePhoneConnection(ctx, site, in.EnableHosting)
+	connection, err := s.preparePhone(ctx, site.ID, phonePreparationOptions{EnableHosting: in.EnableHosting, AllowPublish: true, Legacy: true}, func(string) {})
 	if err != nil {
 		writePhoneProblem(w, err)
 		return
@@ -222,7 +248,20 @@ func (e *phoneProblem) Error() string { return e.Err.Error() }
 func (e *phoneProblem) Unwrap() error { return e.Err }
 
 func phoneFailure(status int, err error) *phoneProblem {
-	return &phoneProblem{Status: status, Err: err}
+	problem := &phoneProblem{Status: status, Err: err}
+	var local *phoneProblem
+	if errors.As(err, &local) {
+		problem.Status, problem.Code = local.Status, local.Code
+		return problem
+	}
+	var service *phoneServiceError
+	if errors.As(err, &service) {
+		problem.Code = service.Code
+		if service.Status == 429 {
+			problem.Status = 429
+		}
+	}
+	return problem
 }
 
 func writePhoneProblem(w http.ResponseWriter, err error) {
@@ -247,18 +286,29 @@ type phoneConnectionResult struct {
 	Name      string `json:"name"`
 }
 
-// preparePhoneConnection is shared by connection transports. Its caller holds
-// the console gate until this operation completes.
-func (s *Server) preparePhoneConnection(ctx context.Context, site *store.Site, enableHosting bool) (*phoneConnectionResult, error) {
+type phonePreparationOptions struct{ EnableHosting, AllowPublish, Legacy bool }
+
+// preparePhone is the single owner for native, browser and legacy transports.
+// Only a required publication holds the render gate. Existing eligible hosted
+// content connects without publishing this computer's pending changes.
+func (s *Server) preparePhone(ctx context.Context, siteID string, options phonePreparationOptions, progress func(string)) (*phoneConnectionResult, error) {
+	site, err := s.Store.Site(siteID)
+	if err != nil {
+		return nil, phoneFailure(404, errors.New("site not found"))
+	}
 	if s.Node == nil || s.Pub == nil || !s.Node.Keystore().Has(site.ID) {
 		return nil, phoneFailure(409, errors.New("connect from the publisher that has this site's key"))
 	}
 	if publish.HostOf(site) != publish.DefaultHost {
-		return nil, phoneFailure(409, errors.New("phone posting currently supports sites hosted on crop.top"))
+		return nil, &phoneProblem{Status: 409, Code: "unsupported_host", Err: errors.New("phone posting currently supports sites hosted on crop.top")}
 	}
-	if !site.HostingEnabled() && !enableHosting {
+	if site.IsArchived() {
+		return nil, phoneFailure(409, errors.New("restore this archived site before connecting a phone"))
+	}
+	if !site.HostingEnabled() && !options.EnableHosting {
 		return nil, &phoneProblem{Status: 409, Code: "hosting_required", Err: errors.New("Allow crop.top to host this site so your phone can publish while this computer sleeps.")}
 	}
+	progress("service")
 	var config struct {
 		Enabled bool   `json:"enabled"`
 		Origin  string `json:"origin"`
@@ -271,30 +321,69 @@ func (s *Server) preparePhoneConnection(ctx context.Context, site *store.Site, e
 	if !config.Enabled || config.Version != 1 || config.Origin != origin {
 		return nil, phoneFailure(503, errors.New("phone posting is not enabled at this service yet"))
 	}
-	if !site.HostingEnabled() {
-		if err := site.SetStorage(store.StorageHosted); err != nil {
-			return nil, phoneFailure(500, err)
+	progress("checking")
+	var token string
+	needsPublication := options.Legacy || !site.HostingEnabled()
+	if !needsPublication {
+		token, err = s.phoneSession(ctx, site)
+		if err == nil {
+			var ready phoneReadiness
+			err = s.phoneAPI(ctx, "GET", "/site", token, nil, &ready)
+			if err == nil {
+				if ready.IPNS != site.IPNS || ready.CID == "" {
+					return nil, phoneFailure(502, errors.New("phone service returned a different or unidentified publication"))
+				}
+				if _, seqErr := strconv.ParseUint(ready.Sequence, 10, 64); seqErr != nil {
+					return nil, phoneFailure(502, errors.New("phone service returned an invalid publication sequence"))
+				}
+				if !ready.Ready {
+					err = &phoneServiceError{Status: 409, Code: "site_not_ready", Message: ready.Reason}
+				}
+			}
 		}
-		if err := s.Store.SaveSite(site); err != nil {
-			return nil, phoneFailure(500, err)
+		if err != nil {
+			var service *phoneServiceError
+			if !errors.As(err, &service) || service.Code != "site_not_ready" {
+				return nil, phoneFailure(502, err)
+			}
+			// Older services wrap upstream failures in site_not_ready too. Verify
+			// the published head independently before classifying a bootstrap;
+			// a timeout or unavailable host never authorizes publishing edits.
+			needsPublication, err = s.phoneNeedsPublication(ctx, site)
+			if err != nil {
+				return nil, phoneFailure(502, err)
+			}
+			if !needsPublication {
+				return nil, phoneFailure(409, service)
+			}
 		}
 	}
-	// Bootstrap the signed compatibility descriptor and hosted policy using the
-	// existing publisher; normal conflict/catch-up behavior remains its owner.
-	published, err := s.Pub.Publish(ctx, site.ID, false)
-	if err != nil {
-		return nil, phoneFailure(502, fmt.Errorf("publish this site before connecting your phone: %w", err))
+	if needsPublication {
+		if !options.AllowPublish {
+			return nil, &phoneProblem{Status: 409, Code: "publication_required", Err: errors.New("This published site needs a hosting or compatibility update. Allow publishing this computer's current site, including saved changes, to continue.")}
+		}
+		progress("waiting")
+		if err := s.lockPhoneContext(ctx); err != nil {
+			return nil, err
+		}
+		published, current, publishErr := s.publishForPhone(ctx, site, options, progress)
+		s.mu.Unlock()
+		if publishErr != nil {
+			return nil, publishErr
+		}
+		site = current
+		progress("hosting")
+		token, err = s.phoneSessionAfterPublication(ctx, site)
+		if err != nil {
+			return nil, phoneFailure(502, err)
+		}
+		if err := s.waitPhoneReady(ctx, site.IPNS, token, published); err != nil {
+			return nil, phoneFailure(409, err)
+		}
 	}
-	site, err = s.Store.Site(site.ID)
-	if err != nil {
-		return nil, phoneFailure(500, err)
-	}
-	token, err := s.phoneSession(ctx, site)
-	if err != nil {
-		return nil, phoneFailure(502, err)
-	}
-	if err := s.waitPhoneReady(ctx, site.IPNS, token, published); err != nil {
-		return nil, phoneFailure(409, err)
+	progress("pairing")
+	if _, err := s.currentPhoneSite(ctx, site, true); err != nil {
+		return nil, err
 	}
 	if err := s.phoneAPI(ctx, "PUT", "/connection", token, map[string]bool{"enabled": true}, nil); err != nil {
 		return nil, phoneFailure(502, err)
@@ -308,6 +397,9 @@ func (s *Server) preparePhoneConnection(ctx context.Context, site *store.Site, e
 		mobile.PairingInfo
 		Capability string `json:"capability"`
 	}
+	if _, err := s.currentPhoneSite(ctx, site, true); err != nil {
+		return nil, err
+	}
 	if err := s.phoneAPI(ctx, "POST", "/pairings", token, map[string]string{"senderPublicKey": pub}, &pairing); err != nil {
 		return nil, phoneFailure(502, err)
 	}
@@ -315,12 +407,16 @@ func (s *Server) preparePhoneConnection(ctx context.Context, site *store.Site, e
 		return nil, phoneFailure(502, errors.New("invalid phone connection response"))
 	}
 	link := origin + "/#pair=" + pairing.ID + "." + pairing.Capability
-	connection := &phoneConnection{SiteID: site.ID, Name: site.Name, Token: token, URL: link, Info: pairing.PairingInfo, Private: private}
+	if _, err := s.currentPhoneSite(ctx, site, true); err != nil {
+		return nil, err
+	}
+	pairContext, pairCancel := context.WithCancel(context.Background())
+	connection := &phoneConnection{SiteID: site.ID, Name: site.Name, Token: token, URL: link, Info: pairing.PairingInfo, Private: private, Context: pairContext, Cancel: pairCancel}
 	pending := s.phoneConnections()
 	pending.mu.Lock()
 	for id, p := range pending.entries {
 		if p.Info.ExpiresAt <= time.Now().Unix() {
-			delete(pending.entries, id)
+			pending.removeConnection(id)
 		}
 	}
 	pending.entries[pairing.ID] = connection
@@ -328,10 +424,125 @@ func (s *Server) preparePhoneConnection(ctx context.Context, site *store.Site, e
 	id := pairing.ID
 	time.AfterFunc(time.Until(time.Unix(pairing.ExpiresAt, 0)), func() {
 		pending.mu.Lock()
-		delete(pending.entries, id)
+		pending.removeConnection(id)
 		pending.mu.Unlock()
 	})
 	return &phoneConnectionResult{ID: pairing.ID, URL: link, ExpiresAt: pairing.ExpiresAt, State: pairing.State, IPNS: site.IPNS, Name: site.Name}, nil
+}
+
+type phoneReadiness struct {
+	IPNS     string `json:"ipns"`
+	Ready    bool   `json:"ready"`
+	Reason   string `json:"reason"`
+	CID      string `json:"cid"`
+	Sequence string `json:"sequence"`
+}
+
+func (s *Server) phoneNeedsPublication(ctx context.Context, site *store.Site) (bool, error) {
+	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
+	defer cancel()
+	head, err := s.Pub.InspectSite(ctx, publish.DefaultHost, site.IPNS)
+	if errors.Is(err, publish.ErrHostNotFound) {
+		return true, nil
+	}
+	if err != nil {
+		return false, fmt.Errorf("The hosted site could not be verified; no desktop changes were published. Retry when hosting is available: %w", err)
+	}
+	if head.Site == nil || head.Site.IPNS != site.IPNS {
+		return false, errors.New("hosted site identity changed")
+	}
+	if !head.AcceptsParent {
+		return false, errors.New("The hosting service needs an update before it can accept phone posts safely.")
+	}
+	if publish.HostOf(head.Site) != publish.DefaultHost {
+		return false, errors.New("The published site's hosting destination differs from the phone service.")
+	}
+	if !head.Site.HostingEnabled() {
+		return true, nil
+	}
+	var descriptor render.MobileDescriptor
+	if json.Unmarshal(head.Site.Raw[render.MobileDescriptorKey], &descriptor) != nil || descriptor.Version != 1 {
+		return true, nil
+	}
+	// A descriptor mismatch may be a custom template, not an outdated site.
+	// Do not publish local edits automatically to repair an unknown mismatch.
+	return false, nil
+}
+
+func (s *Server) currentPhoneSite(ctx context.Context, original *store.Site, hosted bool) (*store.Site, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	current, err := s.Store.Site(original.ID)
+	if err != nil || current.IPNS != original.IPNS || current.IsArchived() || publish.HostOf(current) != publish.DefaultHost || (hosted && !current.HostingEnabled()) || !s.Node.Keystore().Has(original.ID) {
+		return nil, &phoneProblem{Status: 409, Code: "site_changed", Err: errors.New("This site's identity or hosting settings changed. Start Connect phone again.")}
+	}
+	return current, nil
+}
+
+func (s *Server) publishForPhone(ctx context.Context, original *store.Site, options phonePreparationOptions, progress func(string)) (publish.Result, *store.Site, error) {
+	current, err := s.currentPhoneSite(ctx, original, false)
+	if err != nil {
+		return publish.Result{}, nil, err
+	}
+	if current.HostingEnabled() != original.HostingEnabled() {
+		return publish.Result{}, nil, phoneFailure(409, errors.New("Hosting settings changed. Start Connect phone again."))
+	}
+	if !current.HostingEnabled() {
+		if !options.EnableHosting || !options.AllowPublish {
+			return publish.Result{}, nil, phoneFailure(409, errors.New("Hosting and publication require your permission."))
+		}
+		if err := current.SetStorage(store.StorageHosted); err != nil {
+			return publish.Result{}, nil, err
+		}
+		if err := s.Store.SaveSite(current); err != nil {
+			return publish.Result{}, nil, err
+		}
+	}
+	progress("publishing")
+	result, err := s.Pub.PublishHosted(ctx, current.ID, func(stage publish.HostedStage) {
+		if stage == publish.HostedUploading || stage == publish.HostedVerifying {
+			progress("hosting")
+		} else {
+			progress("publishing")
+		}
+	})
+	if err != nil {
+		problem := phoneFailure(502, fmt.Errorf("The hosted site could not be prepared: %w", err))
+		switch {
+		case errors.Is(err, publish.ErrHostedBootstrapNeedsPublish):
+			problem.Code = "hosted_publication_required"
+		case errors.Is(err, publish.ErrHostedParentUnsupported):
+			problem.Code = "hosting_update_required"
+		case errors.Is(err, publish.ErrHostedOutcomeUnknown):
+			problem.Code = "publication_outcome_unknown"
+		case errors.Is(err, publish.ErrPublishedElsewhere), errors.Is(err, publish.ErrSiteBusy):
+			problem.Code = "publication_conflict"
+		}
+		return result, nil, problem
+	}
+	current, err = s.currentPhoneSite(ctx, current, true)
+	return result, current, err
+}
+
+func (s *Server) phoneSessionAfterPublication(ctx context.Context, site *store.Site) (string, error) {
+	ctx, cancel := context.WithTimeout(ctx, 45*time.Second)
+	defer cancel()
+	for {
+		token, err := s.phoneSession(ctx, site)
+		if err == nil {
+			return token, nil
+		}
+		var service *phoneServiceError
+		if !errors.As(err, &service) || service.Code != "site_not_ready" {
+			return "", err
+		}
+		select {
+		case <-ctx.Done():
+			return "", fmt.Errorf("The publication reached hosting, but the phone service has not verified it yet. Keep this computer awake and retry Connect phone: %w", ctx.Err())
+		case <-time.After(1500 * time.Millisecond):
+		}
+	}
 }
 
 // Publish can finish while a large first host upload continues in the
@@ -399,7 +610,7 @@ func (s *Server) phonePending(w http.ResponseWriter, r *http.Request) (*phoneCon
 	defer pending.mu.Unlock()
 	p := pending.entries[r.PathValue("pairid")]
 	if p != nil && p.Info.ExpiresAt <= time.Now().Unix() {
-		delete(pending.entries, p.Info.ID)
+		pending.removeConnection(p.Info.ID)
 		p = nil
 	}
 	if p == nil || p.SiteID != strings.ToUpper(r.PathValue("id")) {
@@ -408,6 +619,35 @@ func (s *Server) phonePending(w http.ResponseWriter, r *http.Request) (*phoneCon
 	}
 	copy := *p
 	return &copy, true
+}
+
+// Caller holds the pending map lock. Cancelling the lifetime also invalidates
+// copies already returned by phonePending, not only future lookups.
+func (p *phoneConnections) removeConnection(id string) {
+	if connection := p.entries[id]; connection != nil {
+		if connection.Cancel != nil {
+			connection.Cancel()
+		}
+		connection.Private = nil
+		delete(p.entries, id)
+	}
+}
+
+func (s *Server) cancelPhoneConnection(w http.ResponseWriter, r *http.Request) {
+	if !mobilePhoneAllowed(w, r) {
+		return
+	}
+	pending := s.phoneConnections()
+	pending.mu.Lock()
+	defer pending.mu.Unlock()
+	if p := pending.entries[r.PathValue("pairid")]; p != nil {
+		if p.SiteID != strings.ToUpper(r.PathValue("id")) {
+			writeErr(w, 404, errors.New("connection not found"))
+			return
+		}
+		pending.removeConnection(p.Info.ID)
+	}
+	writeJSON(w, 200, map[string]string{"state": "cancelled"})
 }
 
 func (s *Server) phonePairingStatus(ctx context.Context, p *phoneConnection) (mobile.PairingInfo, error) {
@@ -443,7 +683,7 @@ func (s *Server) phoneConnectionStatus(w http.ResponseWriter, r *http.Request) {
 		pending := s.phoneConnections()
 		pending.mu.Lock()
 		if info.State == "consumed" {
-			delete(pending.entries, p.Info.ID)
+			pending.removeConnection(p.Info.ID)
 		} else if stored := pending.entries[p.Info.ID]; stored != nil {
 			stored.Private = nil
 		}
@@ -457,6 +697,16 @@ func (s *Server) confirmPhoneConnection(w http.ResponseWriter, r *http.Request) 
 	if !ok {
 		return
 	}
+	ctx, cancel := context.WithTimeout(r.Context(), 45*time.Second)
+	defer cancel()
+	if p.Context != nil {
+		stop := context.AfterFunc(p.Context, cancel)
+		defer stop()
+		if err := p.Context.Err(); err != nil {
+			writeErr(w, 409, errors.New("connection cancelled; start again"))
+			return
+		}
+	}
 	var in struct {
 		Code string `json:"code"`
 	}
@@ -465,7 +715,7 @@ func (s *Server) confirmPhoneConnection(w http.ResponseWriter, r *http.Request) 
 		writeErr(w, 400, errors.New("enter the code shown on your phone"))
 		return
 	}
-	info, err := s.phonePairingStatus(r.Context(), p)
+	info, err := s.phonePairingStatus(ctx, p)
 	if err != nil {
 		writeErr(w, 502, err)
 		return
@@ -486,6 +736,17 @@ func (s *Server) confirmPhoneConnection(w http.ResponseWriter, r *http.Request) 
 	entered := strings.ReplaceAll(strings.TrimSpace(in.Code), " ", "")
 	if subtle.ConstantTimeCompare([]byte(entered), []byte(code)) != 1 {
 		writeErr(w, 409, errors.New("the codes do not match; check your phone or start a new connection"))
+		return
+	}
+	// Recheck the actual saved policy and cancellation immediately before any
+	// private material is read. A completed or already-dispatched transfer is
+	// not revocable by closing the sheet.
+	if p.Context != nil && p.Context.Err() != nil {
+		writeErr(w, 409, errors.New("connection cancelled; start again"))
+		return
+	}
+	if _, err := s.currentPhoneSite(ctx, &store.Site{ID: p.SiteID, IPNS: p.Info.IPNS}, true); err != nil {
+		writePhoneProblem(w, err)
 		return
 	}
 	pem, err := s.Node.Keystore().ExportPEM(p.SiteID)
@@ -509,7 +770,15 @@ func (s *Server) confirmPhoneConnection(w http.ResponseWriter, r *http.Request) 
 		writeErr(w, 500, errors.New("could not encrypt this connection"))
 		return
 	}
-	if err := s.phoneAPI(r.Context(), "POST", "/pairings/"+info.ID+"/complete", p.Token, map[string]string{"nonce": nonce, "ciphertext": ciphertext}, nil); err != nil {
+	if _, err := s.currentPhoneSite(ctx, &store.Site{ID: p.SiteID, IPNS: p.Info.IPNS}, true); err != nil {
+		writePhoneProblem(w, err)
+		return
+	}
+	if p.Context != nil && p.Context.Err() != nil {
+		writeErr(w, 409, errors.New("connection cancelled; start again"))
+		return
+	}
+	if err := s.phoneAPI(ctx, "POST", "/pairings/"+info.ID+"/complete", p.Token, map[string]string{"nonce": nonce, "ciphertext": ciphertext}, nil); err != nil {
 		writeErr(w, 502, err)
 		return
 	}

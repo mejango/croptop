@@ -111,6 +111,12 @@ func TestPhoneConnectionUnavailableServiceDoesNotChangeStorage(t *testing.T) {
 
 func TestPhonePairingConfirmationEncryptsAndQRIsPrivate(t *testing.T) {
 	s, site, handler := phoneTestServer(t)
+	if err := site.SetStorage(store.StorageHosted); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.Store.SaveSite(site); err != nil {
+		t.Fatal(err)
+	}
 	var relay *mobile.PairingRelay
 	var completionBodies [][]byte
 	service := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
