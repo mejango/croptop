@@ -64,8 +64,13 @@ func HostOf(site *store.Site) string {
 func NameOf(site *store.Site) string { return rawString(site, NameKey) }
 
 // SetHost chooses a custom host. An empty value restores DefaultHost.
+// A claimed name belongs to its effective host, not to a new destination.
 func SetHost(site *store.Site, base string) {
+	previous := HostOf(site)
 	setRaw(site, HostKey, strings.TrimSuffix(strings.TrimSpace(base), "/"))
+	if HostOf(site) != previous {
+		delete(site.Raw, NameKey)
+	}
 }
 
 func hostDomain(base string) (string, error) {

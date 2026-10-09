@@ -31,6 +31,33 @@ func offlineNode(t *testing.T) *ipfs.Embedded {
 	return e
 }
 
+func TestPreparePostRestoresNameAfterBindingSourceHost(t *testing.T) {
+	f := newPreparedFixture(t)
+	entry, err := hostEntry(f.ctx, f.hostURL, f.ipns)
+	if err != nil {
+		t.Fatal(err)
+	}
+	entry.Name = "source-name"
+	// A published site can name a previous endpoint. Binding the source host
+	// must happen before restoring the name returned by that source's registry.
+	target, err := url.Parse(f.hostURL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	source := httptest.NewServer(httputil.NewSingleHostReverseProxy(target))
+	t.Cleanup(source.Close)
+	prepared, err := f.service.preparePost(f.ctx, f.service.Node.(postEngine), source.URL, f.ipns, NewPost{Title: "New post"}, t.TempDir(), entry)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := HostOf(prepared.site); got != source.URL {
+		t.Errorf("prepared host = %q, want %q", got, source.URL)
+	}
+	if got := NameOf(prepared.site); got != entry.Name {
+		t.Errorf("source host's restored name = %q, want %q", got, entry.Name)
+	}
+}
+
 // A machine with only the key and an empty data directory adds posts to a
 // site a laptop published to a host: the new version keeps every old file,
 // and the post's page shows the site's navigation.

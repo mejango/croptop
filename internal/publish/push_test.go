@@ -56,6 +56,67 @@ func TestHostDefaultsAndCustomHost(t *testing.T) {
 	}
 }
 
+func TestSetHostBindsClaimedNameToEffectiveHost(t *testing.T) {
+	for _, tc := range []struct {
+		name, saved, next, wantHost string
+		keepName                    bool
+	}{
+		{"implicit default stays default", `{}`, "", DefaultHost, true},
+		{"implicit default made explicit", `{}`, " https://crop.top/ ", DefaultHost, true},
+		{"empty default made explicit", `{"croptopHost":""}`, DefaultHost, DefaultHost, true},
+		{"whitespace default made explicit", `{"croptopHost":" \t "}`, DefaultHost, DefaultHost, true},
+		{"null default made explicit", `{"croptopHost":null}`, DefaultHost, DefaultHost, true},
+		{"explicit default made implicit", `{"croptopHost":" https://crop.top/ "}`, " \t ", DefaultHost, true},
+		{"implicit default to custom", `{}`, "https://other.example", "https://other.example", false},
+		{"explicit default to custom", `{"croptopHost":"https://crop.top"}`, "https://other.example/", "https://other.example", false},
+		{"custom to implicit default", `{"croptopHost":"https://host.example"}`, "", DefaultHost, false},
+		{"custom to explicit default", `{"croptopHost":" https://host.example/ "}`, " https://crop.top/ ", DefaultHost, false},
+		{"custom to different custom", `{"croptopHost":"https://host.example"}`, "https://other.example", "https://other.example", false},
+		{"custom unchanged", `{"croptopHost":"https://host.example"}`, "https://host.example", "https://host.example", true},
+		{"custom normalized", `{"croptopHost":" https://host.example/ "}`, " \thttps://host.example/ ", "https://host.example", true},
+		{"custom path unchanged", `{"croptopHost":"https://host.example/croptop/"}`, "https://host.example/croptop", "https://host.example/croptop", true},
+		{"custom path changed", `{"croptopHost":"https://host.example/croptop"}`, "https://host.example/other", "https://host.example/other", false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var site store.Site
+			if err := json.Unmarshal([]byte(tc.saved), &site); err != nil {
+				t.Fatal(err)
+			}
+			setRaw(&site, NameKey, "claimed-name")
+			// A destination change only invalidates that host's name claim.
+			// Hosting consent and unrelated address preferences stay intact.
+			untouched := map[string]string{
+				store.StorageKey:      store.StorageP2P,
+				"croptopCustomDomain": "personal.example",
+				"croptopGateway":      "https://gateway.example",
+				"domain":              "personal.eth",
+			}
+			for key, value := range untouched {
+				setRaw(&site, key, value)
+			}
+			SetHost(&site, tc.next)
+			if got := HostOf(&site); got != tc.wantHost {
+				t.Fatalf("HostOf = %q, want %q", got, tc.wantHost)
+			}
+			wantName := ""
+			if tc.keepName {
+				wantName = "claimed-name"
+			}
+			if got := NameOf(&site); got != wantName {
+				t.Errorf("NameOf = %q, want %q", got, wantName)
+			}
+			if _, present := site.Raw[NameKey]; present != tc.keepName {
+				t.Errorf("name key present = %v, want %v", present, tc.keepName)
+			}
+			for key, value := range untouched {
+				if got := rawString(&site, key); got != value {
+					t.Errorf("unrelated %s changed to %q, want %q", key, got, value)
+				}
+			}
+		})
+	}
+}
+
 type hostTransport func(*http.Request) (*http.Response, error)
 
 func (f hostTransport) RoundTrip(r *http.Request) (*http.Response, error) { return f(r) }

@@ -165,10 +165,12 @@ func (p *Publisher) preparePost(ctx context.Context, eng postEngine, hostURL, ip
 	if err != nil {
 		return preparedPost{}, err
 	}
-	if NameOf(site) == "" && entry.Name != "" { // sites published before planet.json carried it
+	SetHost(site, hostURL)
+	// Restore the source host's claim after binding its endpoint, including
+	// older published metadata that did not carry the host or claimed name.
+	if NameOf(site) == "" && entry.Name != "" {
 		setRaw(site, NameKey, entry.Name)
 	}
-	SetHost(site, hostURL)
 	if err := st.SaveSite(site); err != nil {
 		return preparedPost{}, err
 	}
