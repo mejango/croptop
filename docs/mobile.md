@@ -115,7 +115,7 @@ If the site uses an unsupported template or another publishing host, connection 
 
 Shared contracts: [API](design/mobile-api.md), [pairing](design/mobile-pairing.md), `docs/design/mobile-protocol-fixture.json`, and `testdata/mobile-pairing-v1.json`. Fixtures contain deterministic test-only keys. Never use them for a real site.
 
-Run `go vet ./...` and `go test ./...`; run the mobile service with `go test -race ./internal/mobile`. `.github/workflows/mobile.yml` gates browser protocol/pairing, Worker behavior/bundling, iOS shared tests plus unsigned app/extension compilation, and Android unit tests plus APK compilation. Native app READMEs contain their platform build and signing instructions.
+Run `go vet ./...` and `go test ./...`; run the mobile service with `go test -race ./internal/mobile`. `.github/workflows/mobile.yml` gates browser protocol/pairing and Worker behavior/bundling. Native CI is configured to execute iOS core, real provider-intake and UI tests, verify generated assets/origin settings, and compile the app/extension; Android runs unit tests, lint, emulator sharing/process-death recovery, signing-configuration rejection checks, and debug/unsigned release packaging. Local equivalents are verified below; configuring these jobs is not a claim that the new workflow has already run on GitHub. Native app READMEs contain the exact platform commands and distribution gates.
 
 The scoped pilot is for device acceptance. Before a broad release, test on real iPhone and Android devices:
 
@@ -138,9 +138,9 @@ Never treat a lost response as a failed publication or automatically generate a 
 | Draft privacy | Prepared blocks absent from public node before signed commit; normal and crash cleanup plus exclusive-owner tests pass |
 | Browser | 16 tests pass: Chromium/WebKit flows, open-tab pairing and draft preservation, signing, pairing and exact offline-shell integrity fixtures |
 | Worker | 64 tests pass, including dedicated-origin isolation, trusted proxy, required edge limits and fail-closed configuration; bundles verify without enabling the pilot |
-| iOS | 22 simulator XCTest tests pass; app and Share extension compile; locally ad-hoc signed simulator app launches with shared storage |
-| macOS | 78 tests pass; native app builds with Connect phone action |
-| Android | 53 JVM tests pass; debug APK assembles and signature verifies; lint has zero errors and five version/SDK warnings |
+| iOS | 33 core and eight real-provider intake tests pass on the simulator; two UI tests pass, including photo/caption retention after abrupt termination and relaunch; app and Share extension compile |
+| macOS | 88 tests pass; stable 0.13.20/build 1161 is signed, notarized and live in the normal updater |
+| Android | 65 JVM and eight Android 16 emulator tests pass, including first-share setup, retained image/caption, repeated intents and real force-stop recovery; lint has zero errors and three dependency-version warnings; debug APK and unsigned release APK/AAB build |
 | Linux media | Production Linux/amd64 color/HEIF gate passes with libheif 1.23.6, lcms2 2.19 and libpng 1.6.59; real HEIC/rotation, Display-P3 transform, alpha/metadata, unsupported-color rejection and kernel-limit checks pass |
 | CLI | Native Darwin/arm64 and Windows/amd64 binaries compile |
 | Dedicated service | Race-tested private-engine publication/restart, automatic hosted-site enrollment, optional allowlist, proxy-secret protection and global/concurrent draft admission; actual local CLI returns health200, direct API403, trusted API200, gateway404 and exits cleanly |
@@ -148,13 +148,17 @@ Never treat a lost response as a failed publication or automatically generate a 
 Artifacts in this workspace:
 
 - CLI: `dist/mobile/croptop`; cross-build: `dist/mobile/croptop-windows-amd64.exe`.
-- Android debug APK: `apps/android/app/build/outputs/apk/debug/app-debug.apk` (SHA-256 `48e3f4eeeaafbee0e51c6f928a56ec470ef4020f3aa6997c2333fd58a8e88f52`). This is not a release-signed Play artifact.
-- iOS simulator bundle: `/tmp/croptop-ios-derived/Build/Products/Debug-iphonesimulator/Croptop.app`, including `PlugIns/CroptopShare.appex`. This cannot be installed directly onto an iPhone; use the signing instructions in the iOS README.
-- iOS test report: `/tmp/croptop-ios-derived/Logs/Test/Test-Croptop-2026.10.09_12-16-58--0300.xcresult`.
-- Browser screenshots: `/private/tmp/croptop-mobile-web-check/`; iOS launch: `/tmp/croptop-ios-first-launch-signed.png`.
+- Android debug APK: `apps/android/app/build/outputs/apk/debug/app-debug.apk` (SHA-256 `d4f41f026648cc401a4a17c452dd51a0260a29b05ede82a443c8a640a9ca045f`). This is development-signed, not a Play release.
+- Android unsigned APK: `apps/android/app/build/outputs/apk/release/app-release-unsigned.apk` (SHA-256 `68ae3d16c2e60f90bc35a1c8d9d027e482d5b959e0e22fd79eb5e567971b17bc`); unsigned AAB: `apps/android/app/build/outputs/bundle/release/app-release.aab` (SHA-256 `14ccfb28bfbc31a5c9529e94f663edba78dd92ecf139ae0881a50ee65f27339c`). Both are byte-identical across two forced builds; neither is a signed distribution artifact.
+- iOS simulator bundle: `/tmp/croptop-ios-native-release/Build/Products/Debug-iphonesimulator/Croptop.app`, including `PlugIns/CroptopShare.appex`. Locally ad-hoc signed and launch-tested; not installable directly onto an iPhone.
+- iOS unsigned arm64 device archive: `/tmp/Croptop-iOS-0.1.0-unsigned.xcarchive`, version 0.1.0/build 1, with both bundles' configuration/privacy manifests and the app icon verified. It still requires authorized provisioning/signing, not merely an IPA filename.
+- iOS test reports: `/tmp/croptop-ios-native-release/Logs/Test/Test-Croptop-2026.10.09_14-33-00--0300.xcresult` (41 core/provider tests) and `Test-CroptopUI-2026.10.09_14-32-03--0300.xcresult` in the same directory (two UI tests).
+- Browser screenshots: `/private/tmp/croptop-mobile-web-check/`; current iOS screenshots: `/tmp/croptop-ios-release-screenshots/`.
 - Local media-test Docker image: `croptop-mobile-media-test:local`.
 
 Independent reviews covered service/origin security, browser recovery, native storage/signing and the production media path. Findings were fixed and regression-tested. Local tests and simulator success do not replace physical iPhone/Android sharing, Safari/Chrome screenshot-fidelity and lifecycle acceptance, or signed native distribution. HDR tone mapping remains unsupported. Live Chromium and WebKit show clean360px layouts and11/11 offline-shell assets matching integrity hashes; Chromium offline reload passes. WebKit's automation offline mode fails with an engine error, so iPhone airplane-mode behavior is explicitly unverified. No app-store release is implied.
+
+Native release preparation is committed locally at `99afeb6` (iOS) and `5b3715c` (Android and native CI). It closes stale-connection signing, pairing-failure recovery, capability persistence and delayed photo-selection races. Final pinned source and release metadata/privacy received independent reviews. The current source is ready for the next signing/device-test stage, not a TestFlight or Play release. Apple identifier/App Group/app-record registration still needs explicit authority and a matching local iOS signing identity/profiles; Android needs an approved release-signing/distribution identity. Both need an operator-approved hosted privacy policy, accurate store disclosures, verified domain association files and physical-device acceptance. No store registrations, uploads or invitations were made, and no native test published to a production site. See [iOS](../apps/ios/README.md) and [Android](../apps/android/README.md) for reproducible commands and the remaining checks.
 
 ### Live acceptance — 2026-10-09
 
