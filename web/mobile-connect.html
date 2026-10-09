@@ -16,10 +16,14 @@
     <p class="intro">Connect your site once. Post from your phone anywhere, even while this computer sleeps.</p>
     <section id="setup" aria-labelledby="setup-title">
       <h2 id="setup-title">Connect phone</h2>
-      <p>This publishes your current site and enables phone posting through crop.top. Your phone receives a full copy of the site’s publishing key through an encrypted connection.</p>
+      <p>Connect your already-published site to your phone. Saved changes on this computer stay unpublished unless you approve an update below. Your phone receives a full copy of the site’s publishing key through an encrypted connection.</p>
       <div id="hosting" hidden>
         <label><input id="enable-hosting" type="checkbox"> Allow crop.top to host this site</label>
         <p class="hint">Keeps your published site available when this computer is asleep. Your private publishing key stays on your devices.</p>
+      </div>
+      <div id="publication" hidden>
+        <label><input id="allow-publish" type="checkbox"> Publish this computer’s current site to connect</label>
+        <p class="hint">This makes all saved site changes public, not just phone setup. If you are not ready to publish them, return to Croptop and review your site first. A publication already sent may finish even if you cancel.</p>
       </div>
       <button id="start" type="button">Create connection link</button>
     </section>
@@ -38,7 +42,10 @@
       <button id="restart" type="button" class="text-button">Start a new connection</button>
     </section>
     <p id="status" role="status" aria-live="polite"></p>
+    <p id="timing" class="hint"></p>
     <p id="error" role="alert" hidden></p>
+    <button id="retry" type="button" class="secondary" hidden>Check again</button>
+    <button id="cancel" type="button" class="text-button" hidden>Cancel connection</button>
     <p class="footnote">Keep this computer’s key backup. Removing the site from your phone removes its local key; it does not revoke other copies.</p>
   </main>
 </body>
