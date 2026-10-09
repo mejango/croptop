@@ -230,7 +230,7 @@ test("normalized duplicate object waits for its previous write while other objec
   }
 });
 
-test("6,482 files and 680 existing blocks retain exact counts with bounded storage work", { timeout: 30000 }, async () => {
+test("synthetic multipart batches retain exact counts for 6,482 files and 680 existing blocks", { timeout: 30000 }, async () => {
   const h = stagingHarness(), cid = "bafyrealisticstagingcount";
   const fileCount = 6482, blockCount = 680, entries = [], blockKeys = new Set();
   for (let i = 0; i < fileCount; i++) entries.push([`file:post-${i}/index.html`, `tiny page ${i}`]);
@@ -266,9 +266,10 @@ test("6,482 files and 680 existing blocks retain exact counts with bounded stora
     }
     return put(key, body, options);
   };
-  // A large Go publication uses sequential multipart requests; every folder
-  // block accompanies the final one. Keep that shape without allocating the
-  // live site's media bytes or a huge synthetic Node FormData parse.
+  // Exercise sequential requests with all folder blocks on the final request.
+  // The 256-file boundaries are synthetic: Go batches by 16 MiB, not file count.
+  // Blocks are preseeded, and this in-memory harness enforces no provider quota;
+  // this test covers staging/commit behavior, not a live upload's request shape.
   const batchSize = 256, batches = Math.ceil(fileCount / batchSize);
   let acknowledgedFiles = 0;
   for (let i = 0; i < batches; i++) {
