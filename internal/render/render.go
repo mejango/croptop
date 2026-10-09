@@ -23,6 +23,7 @@ import (
 
 	_ "golang.org/x/image/webp"
 
+	"github.com/mejango/croptop/internal/ctxlock"
 	"github.com/mejango/croptop/internal/store"
 )
 
@@ -62,7 +63,9 @@ func (r *Renderer) log(format string, a ...any) {
 
 // Render writes the whole site into Store.PublicDir(siteID).
 func (r *Renderer) Render(ctx context.Context, siteID string) error {
-	r.mu.Lock()
+	if err := ctxlock.Lock(ctx, &r.mu); err != nil {
+		return err
+	}
 	defer r.mu.Unlock()
 	site, err := r.Store.Site(siteID)
 	if err != nil {
@@ -74,6 +77,9 @@ func (r *Renderer) Render(ctx context.Context, siteID string) error {
 	}
 	tfs, err := r.templateFor(site)
 	if err != nil {
+		return err
+	}
+	if err := ctx.Err(); err != nil {
 		return err
 	}
 	meta, err := LoadMeta(tfs)
@@ -100,6 +106,9 @@ func (r *Renderer) Render(ctx context.Context, siteID string) error {
 		return err
 	}
 	settings := meta.SettingsWithDefaults(stored)
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	if err := writeSwiftJSON(filepath.Join(pub, "templateSettings.json"), settings); err != nil {
 		return err
 	}
@@ -111,6 +120,9 @@ func (r *Renderer) Render(ctx context.Context, siteID string) error {
 	articles := make([]map[string]any, 0, len(posts))
 	pubPosts := make([]PublicPost, 0, len(posts))
 	for _, p := range posts {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
 		var pp PublicPost
 		if r.Only == "" || r.Only == p.ID {
 			if pp, err = r.renderPost(ctx, eng, site, p, meta, base); err != nil {
@@ -127,6 +139,9 @@ func (r *Renderer) Render(ctx context.Context, siteID string) error {
 	}
 
 	// planet.json with articles inline
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	planet := site.Public()
 	planetMap := map[string]any{}
 	for k, v := range planet {
@@ -173,6 +188,9 @@ func (r *Renderer) Render(ctx context.Context, siteID string) error {
 			}
 		}
 		for key, list := range byTag {
+			if err := ctx.Err(); err != nil {
+				return err
+			}
 			name := TagPage(key)
 			if name == "" {
 				continue
@@ -200,6 +218,9 @@ func (r *Renderer) Render(ctx context.Context, siteID string) error {
 			}
 			os.WriteFile(filepath.Join(pub, "tags.html"), []byte(html), 0o644)
 		}
+	}
+	if err := ctx.Err(); err != nil {
+		return err
 	}
 	robots := ""
 	if v, ok := site.Raw["doNotIndex"]; ok && string(v) == "true" {
@@ -312,6 +333,9 @@ func (r *Renderer) baseContext(site *store.Site, posts []*store.Post, meta *Meta
 }
 
 func (r *Renderer) renderPost(ctx context.Context, eng *engine, site *store.Site, p *store.Post, meta *Meta, base map[string]any) (PublicPost, error) {
+	if err := ctx.Err(); err != nil {
+		return PublicPost{}, err
+	}
 	dir := filepath.Join(r.Store.PublicDir(site.ID), p.ID)
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return PublicPost{}, err
@@ -319,6 +343,9 @@ func (r *Renderer) renderPost(ctx context.Context, eng *engine, site *store.Site
 	dirty := false
 	src := r.Store.PostDir(site.ID, p.ID)
 	for _, a := range p.Attachments {
+		if err := ctx.Err(); err != nil {
+			return PublicPost{}, err
+		}
 		if _, err := os.Stat(filepath.Join(src, a)); err == nil {
 			if err := copyFile(filepath.Join(src, a), filepath.Join(dir, a)); err != nil {
 				return PublicPost{}, err
@@ -370,6 +397,9 @@ func (r *Renderer) renderPost(ctx context.Context, eng *engine, site *store.Site
 		p.CIDs = map[string]string{}
 	}
 	for _, a := range p.Attachments {
+		if err := ctx.Err(); err != nil {
+			return PublicPost{}, err
+		}
 		path := filepath.Join(dir, a)
 		if _, err := os.Stat(path); err != nil {
 			continue
@@ -398,6 +428,9 @@ func (r *Renderer) renderPost(ctx context.Context, eng *engine, site *store.Site
 	}
 
 	// markdown
+	if err := ctx.Err(); err != nil {
+		return PublicPost{}, err
+	}
 	html := Markdown(p.Content)
 	if p.ContentRendered == nil || *p.ContentRendered != html {
 		p.ContentRendered = &html
@@ -432,6 +465,9 @@ func (r *Renderer) renderPost(ctx context.Context, eng *engine, site *store.Site
 		"social_image_url":  firstNonEmpty(deref(pp.HeroImageURL), SiteURL(site)+"avatar.png"),
 	})
 	for tmpl, out := range map[string]string{"blog.html": "index.html", "simple.html": "simple.html"} {
+		if err := ctx.Err(); err != nil {
+			return pp, err
+		}
 		if !eng.has(tmpl) {
 			continue
 		}
@@ -451,6 +487,9 @@ func (r *Renderer) renderPost(ctx context.Context, eng *engine, site *store.Site
 		}
 	}
 	if dirty {
+		if err := ctx.Err(); err != nil {
+			return pp, err
+		}
 		if err := r.Store.SavePost(site.ID, p); err != nil {
 			return pp, err
 		}
