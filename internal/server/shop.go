@@ -7,7 +7,6 @@ import (
 	"errors"
 	"net"
 	"net/http"
-	"net/url"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -19,25 +18,7 @@ import (
 )
 
 func shopRequestAllowed(r *http.Request) bool {
-	// Cross-origin forms, public site previews and opaque origins cannot start or
-	// mutate sessions. Native clients have no Origin/Fetch Metadata headers.
-	if r.Header.Get("Sec-Fetch-Site") == "cross-site" || r.Header.Get("Sec-Fetch-Site") == "same-site" {
-		return false
-	}
-	if origin := r.Header.Get("Origin"); origin != "" {
-		u, err := url.Parse(origin)
-		if err != nil || u.Host != r.Host || (u.Scheme != "http" && u.Scheme != "https") {
-			return false
-		}
-	}
-	if ref := r.Referer(); ref != "" {
-		u, e := url.Parse(ref)
-		if e != nil || u.Host != r.Host || (u.Path != "/" && u.Path != "/shop" && u.Path != "/shop-connect" && u.Path != "/shop-setup") {
-			return false
-		}
-	}
-	// A custom header also forces preflight for requests from unrelated websites.
-	return r.Header.Get("X-Croptop-Shop") == "1"
+	return consoleRequestAllowed(r, "X-Croptop-Shop", "/", "/shop", "/shop-connect", "/shop-setup")
 }
 func (s *Server) shopDir() string { return filepath.Join(s.Store.Root, "shop-sessions") }
 func (s *Server) routesShop(mux *http.ServeMux) {
