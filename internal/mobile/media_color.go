@@ -251,61 +251,74 @@ func validRGBICC(p []byte) bool {
 }
 
 func heifColorProfile(data []byte) ([]byte, error) {
-	var profile []byte
-	var nonSRGB bool
-	err := walkHEIFBoxes(data, func(tag string, body []byte) error {
-		switch tag {
-		case "pixi":
-			if len(body) < 5 || len(body) != 5+int(body[4]) {
-				return ErrImageColor
-			}
-			for _, depth := range body[5:] {
-				if depth != 8 {
-					return ErrImageColor
-				}
-			}
-		case "hvcC":
-			// HEVCDecoderConfigurationRecord carries bit depths separately
-			// from pixi; inspect both rather than trusting a possibly missing pixi.
-			if len(body) < 23 || body[17]&7 != 0 || body[18]&7 != 0 {
-				return ErrImageColor
-			}
-		case "auxC":
-			if bytes.Contains(body, []byte("hdrgainmap")) || bytes.Contains(body, []byte("21496")) {
-				return ErrImageColor
-			}
-		case "colr":
-			if len(body) < 4 {
-				return ErrImageColor
-			}
-			switch string(body[:4]) {
-			case "prof", "rICC":
-				if profile != nil || !validRGBICC(body[4:]) {
-					return ErrImageColor
-				}
-				profile = body[4:]
-			case "nclx":
-				if len(body) != 11 {
-					return ErrImageColor
-				}
-				primaries, transfer := binary.BigEndian.Uint16(body[4:6]), binary.BigEndian.Uint16(body[6:8])
-				if transfer == 16 || transfer == 18 {
-					return ErrImageColor
-				}
-				// Unspecified SDR color is treated like an unprofiled raster.
-				if (primaries != 1 && primaries != 2) || (transfer != 13 && transfer != 2) {
-					nonSRGB = true
-				}
-			default:
+	var metadata heifColorMetadata
+	err := walkHEIFBoxes(data, metadata.consume)
+	if err != nil {
+		return metadata.profile, err
+	}
+	return metadata.result()
+}
+
+type heifColorMetadata struct {
+	profile []byte
+	nonSRGB bool
+}
+
+func (m *heifColorMetadata) consume(tag string, body []byte) error {
+	switch tag {
+	case "pixi":
+		if len(body) < 5 || len(body) != 5+int(body[4]) {
+			return ErrImageColor
+		}
+		for _, depth := range body[5:] {
+			if depth != 8 {
 				return ErrImageColor
 			}
 		}
-		return nil
-	})
-	if err == nil && nonSRGB && len(profile) == 0 {
-		err = ErrImageColor
+	case "hvcC":
+		// HEVCDecoderConfigurationRecord carries bit depths separately
+		// from pixi; inspect both rather than trusting a possibly missing pixi.
+		if len(body) < 23 || body[17]&7 != 0 || body[18]&7 != 0 {
+			return ErrImageColor
+		}
+	case "auxC":
+		if bytes.Contains(body, []byte("hdrgainmap")) || bytes.Contains(body, []byte("21496")) {
+			return ErrImageColor
+		}
+	case "colr":
+		if len(body) < 4 {
+			return ErrImageColor
+		}
+		switch string(body[:4]) {
+		case "prof", "rICC":
+			if m.profile != nil || !validRGBICC(body[4:]) {
+				return ErrImageColor
+			}
+			m.profile = body[4:]
+		case "nclx":
+			if len(body) != 11 {
+				return ErrImageColor
+			}
+			primaries, transfer := binary.BigEndian.Uint16(body[4:6]), binary.BigEndian.Uint16(body[6:8])
+			if transfer == 16 || transfer == 18 {
+				return ErrImageColor
+			}
+			// Unspecified SDR color is treated like an unprofiled raster.
+			if (primaries != 1 && primaries != 2) || (transfer != 13 && transfer != 2) {
+				m.nonSRGB = true
+			}
+		default:
+			return ErrImageColor
+		}
 	}
-	return profile, err
+	return nil
+}
+
+func (m *heifColorMetadata) result() ([]byte, error) {
+	if m.nonSRGB && len(m.profile) == 0 {
+		return m.profile, ErrImageColor
+	}
+	return m.profile, nil
 }
 
 // Converted PNGs can be much larger than uploads. Only color-related chunks
