@@ -9,6 +9,7 @@ import (
 	"crypto/rand"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -298,13 +299,13 @@ func TestPhoneReadyRequiresHostedBootstrapContentOrNewerHead(t *testing.T) {
 		{"exact bootstrap", bootstrapCID, "2", site.IPNS, "", true, ""},
 		{"same content newer sequence", bootstrapCID, "3", site.IPNS, "", true, ""},
 		{"newer ready publication", "bafy-newer-content", "3", site.IPNS, "", true, ""},
-		{"older compatible publication", "bafy-older-content", "1", site.IPNS, "", true, "still uploading"},
-		{"conflicting same sequence", "bafy-conflicting-content", "2", site.IPNS, "", true, "still uploading"},
+		{"older compatible publication", "bafy-older-content", "1", site.IPNS, "", true, "phone service has not verified"},
+		{"conflicting same sequence", "bafy-conflicting-content", "2", site.IPNS, "", true, "phone service has not verified"},
 		{"wrong site with matching content", bootstrapCID, "2", "another-site", "", true, "different site"},
 		{"matching content is not ready", bootstrapCID, "1", site.IPNS, "Hosting is disabled.", false, "Hosting is disabled."},
 		{"newer publication is not ready", "bafy-newer-content", "3", site.IPNS, "Template is unsupported.", false, "Template is unsupported."},
-		{"matching content malformed sequence", bootstrapCID, "invalid", site.IPNS, "", true, "still uploading"},
-		{"newer sequence without content identity", "", "3", site.IPNS, "", true, "still uploading"},
+		{"matching content malformed sequence", bootstrapCID, "invalid", site.IPNS, "", true, "phone service has not verified"},
+		{"newer sequence without content identity", "", "3", site.IPNS, "", true, "phone service has not verified"},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			service := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -323,5 +324,23 @@ func TestPhoneReadyRequiresHostedBootstrapContentOrNewerHead(t *testing.T) {
 				t.Fatalf("error %v, want %q", err, test.wantError)
 			}
 		})
+	}
+}
+
+func TestPhoneReadyTimeoutPreservesVerificationPhaseAndDeadlineCause(t *testing.T) {
+	s, site, _ := phoneTestServer(t)
+	service := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		writeJSON(w, 200, map[string]any{"ipns": site.IPNS, "ready": true, "cid": "bafy-old-hosted-content", "sequence": "1"})
+	}))
+	defer service.Close()
+	s.MobileOrigin = service.URL
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Millisecond)
+	defer cancel()
+	err := s.waitPhoneReady(ctx, site.IPNS, "session", publish.Result{CID: "bafy-new-hosted-content", Sequence: 2})
+	if !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("verification timeout lost its deadline cause: %v", err)
+	}
+	if !strings.Contains(err.Error(), "phone service has not verified") || strings.Contains(err.Error(), "still uploading") {
+		t.Fatalf("verification timeout claims an upload is pending: %v", err)
 	}
 }

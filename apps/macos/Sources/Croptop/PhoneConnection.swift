@@ -36,7 +36,7 @@ struct PhoneConnectionError: Error {
 }
 
 @MainActor protocol PhoneConnectionClient {
-    func prepare(siteID: String, id: String, enableHosting: Bool) async throws -> PhonePreparation
+    func prepare(siteID: String, id: String, enableHosting: Bool, allowPublish: Bool) async throws -> PhonePreparation
     func preparation(siteID: String, id: String) async throws -> PhonePreparation
     func cancel(siteID: String, id: String) async throws
     func status(siteID: String, pairingID: String) async throws -> PhonePairingStatus
@@ -46,10 +46,11 @@ struct PhoneConnectionError: Error {
 /// A site-scoped, memory-only handoff. No root key reaches this model.
 @MainActor final class PhoneConnectionModel: ObservableObject {
     enum Phase: Equatable {
-        case consent, preparing, scan, confirm, sent, delivered, expired, failed, stopping, closed
+        case consent, publicationRequired, preparing, scan, confirm, sent, delivered, expired, failed, stopping, closed
     }
     let site: Site
     @Published var consent = false
+    @Published private(set) var needsHostingConsent: Bool
     @Published var code = ""
     @Published private(set) var phase: Phase = .consent
     @Published private(set) var stage = "waiting"
@@ -72,12 +73,15 @@ struct PhoneConnectionError: Error {
     init(site: Site, client: PhoneConnectionClient? = nil,
          now: @escaping () -> Date = Date.init, clipboard: PhoneConnectionClipboard? = nil) {
         self.site = site
+        self.needsHostingConsent = site.storage != .hosted
         self.client = client ?? LocalPhoneConnectionClient()
         self.now = now
         self.clipboard = clipboard ?? PhoneConnectionClipboard()
     }
 
-    var canStart: Bool { consent && !busy && [.consent, .failed, .expired].contains(phase) }
+    private var hostingAllowed: Bool { !needsHostingConsent || consent }
+    var canStart: Bool { hostingAllowed && !busy && [.consent, .failed, .expired].contains(phase) }
+    var canPublish: Bool { hostingAllowed && !busy && phase == .publicationRequired }
     var normalizedCode: String { code.replacingOccurrences(of: " ", with: "").trimmingCharacters(in: .whitespacesAndNewlines) }
     var canConfirm: Bool {
         !busy && phase == .confirm && normalizedCode.utf8.count == 8
@@ -89,14 +93,21 @@ struct PhoneConnectionError: Error {
         case "service": return "Checking the phone service"
         case "checking": return "Checking your hosted site"
         case "publishing": return "Publishing your site"
+        case "uploading": return "Sending site to hosting"
+        case "verifying_host": return "Verifying hosted publication"
+        case "verifying_phone": return "Checking phone compatibility"
         case "hosting": return "Uploading and checking your site"
         case "pairing": return "Creating a secure connection"
-        default: return "Waiting for the publisher"
+        case "waiting": return "Waiting for the publisher"
+        default: return "Preparing phone connection"
         }
     }
     var stageDetail: String {
         switch stage {
         case "publishing": return "Your site needs an updated hosted copy. Larger sites can take a few minutes."
+        case "uploading": return "Preparing and sending site files, then waiting for the host to respond."
+        case "verifying_host": return "Checking which version the host accepted before continuing."
+        case "verifying_phone": return "Checking that the phone service can use the hosted version."
         case "hosting": return "Uploading and verifying your hosted site. Larger sites can take a few minutes."
         case "checking": return "An already compatible hosted site can connect without republishing."
         default: return "Keep Croptop open and this Mac awake until the QR code appears."
@@ -105,6 +116,18 @@ struct PhoneConnectionError: Error {
 
     @discardableResult func begin() -> Task<Void, Never>? {
         guard canStart else { return nil }
+        return start(allowPublish: false)
+    }
+
+    @discardableResult func publishAndConnect() -> Task<Void, Never>? {
+        guard canPublish else { return nil }
+        return start(allowPublish: true)
+    }
+
+    // Hosting consent is not publication consent. Capture each permission for
+    // this attempt; retrying a failed publication starts with a read-only check.
+    private func start(allowPublish: Bool) -> Task<Void, Never> {
+        let enableHosting = needsHostingConsent && consent
         let previousID = preparationID
         generation = UUID()
         let current = generation
@@ -116,7 +139,7 @@ struct PhoneConnectionError: Error {
         stage = "waiting"
         error = nil
         busy = true
-        action = Task { [self] in
+        let task = Task { [self] in
             defer { if current == generation { busy = false } }
             if let previousID, !(await stop(previousID)) {
                 guard current == generation else { return }
@@ -128,7 +151,8 @@ struct PhoneConnectionError: Error {
             guard current == generation, !Task.isCancelled else { return }
             preparationID = id
             do {
-                let value = try await client.prepare(siteID: site.id, id: id, enableHosting: true)
+                let value = try await client.prepare(siteID: site.id, id: id,
+                                                     enableHosting: enableHosting, allowPublish: allowPublish)
                 guard current == generation, !Task.isCancelled else {
                     try? await client.cancel(siteID: site.id, id: id)
                     return
@@ -136,11 +160,11 @@ struct PhoneConnectionError: Error {
                 try accept(value, id: id)
             } catch {
                 guard current == generation, !Task.isCancelled else { return }
-                phase = .failed
-                self.error = message(for: error)
+                preparationFailed(error)
             }
         }
-        return action
+        action = task
+        return task
     }
 
     func monitor() async {
@@ -191,7 +215,10 @@ struct PhoneConnectionError: Error {
             }
         } catch {
             guard current == generation, !Task.isCancelled else { return }
-            if let problem = error as? PhoneConnectionError, [404, 410].contains(problem.status) {
+            if phase == .preparing,
+               ["hosting_required", "publication_required"].contains((error as? PhoneConnectionError)?.code ?? "") {
+                preparationFailed(error)
+            } else if let problem = error as? PhoneConnectionError, [404, 410].contains(problem.status) {
                 expire()
             } else if ["identity_changed", "invalid_response"].contains((error as? PhoneConnectionError)?.code ?? "") {
                 clearSecrets(); phase = .failed; self.error = message(for: error)
@@ -294,11 +321,28 @@ struct PhoneConnectionError: Error {
             pairing = connection
             phase = .scan
         case "failed":
-            phase = .failed
-            error = message(for: PhoneConnectionError(status: 409, code: value.code))
+            preparationFailed(PhoneConnectionError(status: 409, code: value.code))
         case "cancelled": phase = .failed; error = "Connection preparation stopped. You can try again when your phone is ready."
         case "cancelling": phase = .stopping
         default: throw PhoneConnectionError(status: 409, code: "invalid_response")
+        }
+    }
+
+    private func preparationFailed(_ problem: Error) {
+        switch (problem as? PhoneConnectionError)?.code {
+        case "hosting_required":
+            // The server may have a newer storage choice than the captured
+            // site. Never silently restore hosting after it was switched off.
+            needsHostingConsent = true
+            consent = false
+            phase = .consent
+            error = nil
+        case "publication_required":
+            phase = .publicationRequired
+            error = nil
+        default:
+            phase = .failed
+            error = message(for: problem)
         }
     }
 

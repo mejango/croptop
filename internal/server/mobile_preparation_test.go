@@ -414,3 +414,60 @@ func TestPhoneBootstrapDoesNotEnrollAgainstOldHostedPolicy(t *testing.T) {
 		t.Fatal("enrollment started before bootstrap committed")
 	}
 }
+
+func TestPhoneReadyPreparationDoesNotReportPublicationPhases(t *testing.T) {
+	s, site, _ := phoneTestServer(t)
+	markPhoneHosted(t, s, site)
+	phoneHostedFixture(t, s, site, nil)
+	var stages []string
+	connection, err := s.preparePhone(context.Background(), site.ID, phonePreparationOptions{}, func(stage string) { stages = append(stages, stage) })
+	if err != nil || connection == nil {
+		t.Fatalf("ready site connection failed: %v", err)
+	}
+	if strings.Join(stages, ",") != "service,checking,pairing" {
+		t.Fatalf("ready site reported unnecessary publication work: %v", stages)
+	}
+}
+
+func TestPhonePreparationPhaseMessagesRemainDistinct(t *testing.T) {
+	for _, stage := range []string{"uploading", "verifying_host", "verifying_phone", "hosting"} {
+		message := phoneStageMessage(stage)
+		if message == phoneStageMessage("waiting") {
+			t.Fatalf("stage %s has no message", stage)
+		}
+		if stage == "verifying_host" || stage == "verifying_phone" {
+			if strings.Contains(strings.ToLower(message), "uploading") {
+				t.Fatalf("stage %s still claims upload is ongoing", stage)
+			}
+		}
+	}
+	if phoneStageMessage("verifying_host") == phoneStageMessage("verifying_phone") {
+		t.Fatal("host and phone verification are indistinguishable")
+	}
+	if phoneStageMessage("hosting") != "Uploading and verifying the hosted site. Keep this computer awake…" {
+		t.Fatal("legacy hosting message changed")
+	}
+}
+
+func TestPhonePreparationStageTimeoutDoesNotClaimOverallDeadline(t *testing.T) {
+	s, site, h := phoneTestServer(t)
+	markPhoneHosted(t, s, site)
+	release := make(chan struct{})
+	defer close(release)
+	phoneHostedFixture(t, s, site, func(w http.ResponseWriter, r *http.Request) bool {
+		if strings.HasSuffix(r.URL.Path, "/session") {
+			select {
+			case <-r.Context().Done():
+			case <-release:
+			}
+			return true
+		}
+		return false
+	})
+	s.MobileHTTP = &http.Client{Timeout: 250 * time.Millisecond}
+	phoneRequest(t, h, "POST", preparationPath(site), preparationBody(preparationTestID, false, false), nil)
+	status := awaitPreparation(t, h, site, preparationTestID, "failed")
+	if status.Code != "service_timeout" || status.Stage != "checking" || strings.Contains(status.Error, "five-minute") || status.Deadline-status.StartedAt != 300 {
+		t.Fatalf("upstream-stage timeout confused with overall deadline: state=%s stage=%s code=%s", status.State, status.Stage, status.Code)
+	}
+}

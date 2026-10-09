@@ -95,12 +95,26 @@ func TestPhonePreparationRealHostedLegacyBootstrapAndReadyFastPath(t *testing.T)
 			if err := h.Start(); err != nil {
 				t.Fatal(err)
 			}
-			var armUpload, blocked, committed atomic.Bool
+			var armUpload, blocked, committed, hostVerificationBlocked, sessionBlocked, readinessBlocked atomic.Bool
 			var sent, pushes, admitted atomic.Int64
 			uploadStarted, uploadRelease := make(chan struct{}), make(chan struct{})
-			var releaseOnce sync.Once
+			hostVerificationStarted, hostVerificationRelease := make(chan struct{}), make(chan struct{})
+			sessionStarted, sessionRelease := make(chan struct{}), make(chan struct{})
+			readinessStarted, readinessRelease := make(chan struct{}), make(chan struct{})
+			var releaseOnce, hostReleaseOnce, sessionReleaseOnce, readinessReleaseOnce sync.Once
 			releaseUpload := func() { releaseOnce.Do(func() { close(uploadRelease) }) }
+			releaseHostVerification := func() { hostReleaseOnce.Do(func() { close(hostVerificationRelease) }) }
+			releaseSession := func() { sessionReleaseOnce.Do(func() { close(sessionRelease) }) }
+			releaseReadiness := func() { readinessReleaseOnce.Do(func() { close(readinessRelease) }) }
 			hostServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if committed.Load() && r.Method == "GET" && strings.HasPrefix(r.URL.Path, "/v0/host/keys/") && hostVerificationBlocked.CompareAndSwap(false, true) {
+					close(hostVerificationStarted)
+					select {
+					case <-hostVerificationRelease:
+					case <-r.Context().Done():
+						return
+					}
+				}
 				if r.Method == "POST" && r.URL.Path == "/v0/host/push" {
 					pushes.Add(1)
 					body, err := io.ReadAll(r.Body)
@@ -134,6 +148,9 @@ func TestPhonePreparationRealHostedLegacyBootstrapAndReadyFastPath(t *testing.T)
 			}))
 			t.Cleanup(hostServer.Close)
 			t.Cleanup(releaseUpload)
+			t.Cleanup(releaseHostVerification)
+			t.Cleanup(releaseSession)
+			t.Cleanup(releaseReadiness)
 			hostURL, _ := url.Parse(hostServer.URL)
 			// The desktop deliberately accepts only its production host. Keep that
 			// policy and real signatures intact while routing *all* HTTP locally.
@@ -255,6 +272,14 @@ func TestPhonePreparationRealHostedLegacyBootstrapAndReadyFastPath(t *testing.T)
 			t.Cleanup(func() { _ = service.Close() })
 			serviceHTTP.Config.Handler = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				if r.URL.Path == "/v0/mobile/session" {
+					if committed.Load() && sessionBlocked.CompareAndSwap(false, true) {
+						close(sessionStarted)
+						select {
+						case <-sessionRelease:
+						case <-r.Context().Done():
+							return
+						}
+					}
 					answer := httptest.NewRecorder()
 					serviceHandler.ServeHTTP(answer, r)
 					if answer.Code == 200 {
@@ -269,6 +294,14 @@ func TestPhonePreparationRealHostedLegacyBootstrapAndReadyFastPath(t *testing.T)
 					w.WriteHeader(answer.Code)
 					_, _ = w.Write(answer.Body.Bytes())
 					return
+				}
+				if committed.Load() && r.URL.Path == "/v0/mobile/site" && readinessBlocked.CompareAndSwap(false, true) {
+					close(readinessStarted)
+					select {
+					case <-readinessRelease:
+					case <-r.Context().Done():
+						return
+					}
 				}
 				serviceHandler.ServeHTTP(w, r)
 			})
@@ -292,10 +325,37 @@ func TestPhonePreparationRealHostedLegacyBootstrapAndReadyFastPath(t *testing.T)
 				t.Fatalf("upload did not start: state=%s code=%s error=%s", status.State, status.Code, status.Error)
 			}
 			waiting := decodePreparation(t, phoneRequest(t, mux, "GET", preparationPath(site)+"/"+preparationID, "", nil))
-			if waiting.State != "preparing" || waiting.Stage != "hosting" || waiting.Connection != nil || admitted.Load() != 0 {
+			if waiting.State != "preparing" || waiting.Stage != "uploading" || waiting.Connection != nil || admitted.Load() != 0 {
 				t.Fatalf("not waiting on hosting before admission: state=%s stage=%s sessions=%d", waiting.State, waiting.Stage, admitted.Load())
 			}
 			releaseUpload()
+			assertPhase := func(started <-chan struct{}, want string) {
+				t.Helper()
+				select {
+				case <-started:
+				case <-ctx.Done():
+					t.Fatalf("%s phase did not start", want)
+				}
+				status := decodePreparation(t, phoneRequest(t, mux, "GET", preparationPath(site)+"/"+preparationID, "", nil))
+				if status.State != "preparing" || status.Stage != want || status.Message != phoneStageMessage(want) || status.Connection != nil || !committed.Load() || strings.Contains(strings.ToLower(status.Message), "uploading") {
+					t.Fatalf("post-upload phase was not truthful: state=%s stage=%s message=%s committed=%t", status.State, status.Stage, status.Message, committed.Load())
+				}
+			}
+			assertPhase(hostVerificationStarted, "verifying_host")
+			if admitted.Load() != 0 {
+				t.Fatal("session admitted before signed host verification")
+			}
+			releaseHostVerification()
+			assertPhase(sessionStarted, "verifying_phone")
+			if admitted.Load() != 0 {
+				t.Fatal("session was already admitted at enrollment barrier")
+			}
+			releaseSession()
+			assertPhase(readinessStarted, "verifying_phone")
+			if admitted.Load() == 0 {
+				t.Fatal("readiness verification started before session admission")
+			}
+			releaseReadiness()
 			await := func(id string) phonePreparationStatus {
 				t.Helper()
 				for {

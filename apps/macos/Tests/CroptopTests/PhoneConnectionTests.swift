@@ -8,7 +8,7 @@ import XCTest
 @MainActor
 private final class PhoneClientFixture: PhoneConnectionClient {
     let date: Date
-    var prepared: [(String, String, Bool)] = []
+    var prepared: [(String, String, Bool, Bool)] = []
     var cancelled: [(String, String)] = []
     var confirmed: [(String, String, String)] = []
     var prepareBody: ((String, String) async throws -> PhonePreparation)?
@@ -29,8 +29,8 @@ private final class PhoneClientFixture: PhoneConnectionClient {
             startedAt: date.timeIntervalSince1970, deadline: date.timeIntervalSince1970 + 300,
             connection: state == "ready" ? (connection ?? pair) : nil)
     }
-    func prepare(siteID: String, id: String, enableHosting: Bool) async throws -> PhonePreparation {
-        prepared.append((siteID, id, enableHosting))
+    func prepare(siteID: String, id: String, enableHosting: Bool, allowPublish: Bool) async throws -> PhonePreparation {
+        prepared.append((siteID, id, enableHosting, allowPublish))
         if let prepareBody { return try await prepareBody(siteID, id) }
         return result(siteID: siteID, id: id)
     }
@@ -60,11 +60,13 @@ final class PhoneConnectionTests: XCTestCase {
         }
     }
 
-    @MainActor private func fixture() -> (PhoneConnectionModel, PhoneClientFixture, NSPasteboard) {
+    @MainActor private func fixture(storage: String? = nil) -> (PhoneConnectionModel, PhoneClientFixture, NSPasteboard) {
         let date = Date()
         let client = PhoneClientFixture(date: date)
         let pasteboard = NSPasteboard(name: .init("CroptopPhoneTests." + UUID().uuidString))
-        let model = PhoneConnectionModel(site: PhoneClientFixture.site, client: client,
+        var site = PhoneClientFixture.site
+        site.croptopStorage = storage
+        let model = PhoneConnectionModel(site: site, client: client,
             now: { date }, clipboard: PhoneConnectionClipboard(pasteboard: pasteboard))
         return (model, client, pasteboard)
     }
@@ -79,6 +81,15 @@ final class PhoneConnectionTests: XCTestCase {
         return bitmap
     }
 
+    @MainActor private func visibleText(_ model: PhoneConnectionModel) throws -> [String] {
+        let bitmap = try render(model)
+        let request = VNRecognizeTextRequest()
+        request.recognitionLevel = .accurate
+        request.recognitionLanguages = ["en-US"]
+        try VNImageRequestHandler(cgImage: XCTUnwrap(bitmap.cgImage)).perform([request])
+        return (request.results ?? []).compactMap { $0.topCandidates(1).first?.string }
+    }
+
     @MainActor func testExplicitConsentAndSiteIdentityBeforePreparing() async {
         let (model, client, _) = fixture()
         XCTAssertFalse(model.canStart)
@@ -90,7 +101,205 @@ final class PhoneConnectionTests: XCTestCase {
         XCTAssertEqual(client.prepared.count, 1)
         XCTAssertEqual(client.prepared.first?.0, PhoneClientFixture.site.id)
         XCTAssertEqual(client.prepared.first?.2, true)
+        XCTAssertEqual(client.prepared.first?.3, false, "Hosting consent does not authorize publishing saved changes")
         XCTAssertNil(model.begin(), "A live pairing cannot start a duplicate preparation")
+    }
+
+    @MainActor func testSavedHostingPermissionConnectsWithoutNewConsentOrPublication() async {
+        let (model, client, _) = fixture(storage: SiteStorage.hosted.rawValue)
+        XCTAssertFalse(model.consent)
+        XCTAssertFalse(model.needsHostingConsent)
+        XCTAssertTrue(model.canStart)
+        XCTAssertFalse(model.canPublish)
+        XCTAssertNil(model.publishAndConnect())
+        await model.begin()?.value
+        XCTAssertEqual(model.phase, .scan)
+        XCTAssertEqual(client.prepared.count, 1)
+        XCTAssertEqual(client.prepared.first?.2, false, "Do not rewrite the site's saved hosting choice")
+        XCTAssertEqual(client.prepared.first?.3, false, "Connecting an existing hosted site must not publish local edits")
+    }
+
+    @MainActor func testMissingUnknownAndP2PStorageDoNotInferHostingConsent() async {
+        for storage in [nil, "", "unknown", SiteStorage.p2p.rawValue] as [String?] {
+            let (model, client, _) = fixture(storage: storage)
+            XCTAssertTrue(model.needsHostingConsent, storage ?? "missing")
+            XCTAssertFalse(model.canStart)
+            XCTAssertNil(model.begin())
+            XCTAssertNil(model.publishAndConnect())
+            XCTAssertTrue(client.prepared.isEmpty)
+            model.consent = true
+            await model.begin()?.value
+            XCTAssertEqual(client.prepared.first?.2, true)
+            XCTAssertEqual(client.prepared.first?.3, false)
+        }
+    }
+
+    @MainActor func testPublicationRequiresDistinctExplicitActionAndNewPreparationID() async {
+        for storage in [SiteStorage.hosted.rawValue, SiteStorage.p2p.rawValue] {
+            for delivery in ["prepare", "poll", "error", "pollError"] {
+                let (model, client, _) = fixture(storage: storage)
+                model.consent = model.needsHostingConsent
+                client.prepareBody = { siteID, id in
+                    if client.prepared.count > 1 { return client.result(siteID: siteID, id: id) }
+                    if delivery == "error" { throw PhoneConnectionError(status: 409, code: "publication_required") }
+                    var value = client.result(siteID: siteID, id: id, state: delivery.hasPrefix("poll") ? "preparing" : "failed")
+                    value.code = "publication_required"
+                    return value
+                }
+                client.preparationBody = { siteID, id in
+                    if delivery == "pollError", !client.cancelled.contains(where: { $0.1 == id }) {
+                        throw PhoneConnectionError(status: 409, code: "publication_required")
+                    }
+                    var value = client.result(siteID: siteID, id: id,
+                        state: client.cancelled.contains { $0.1 == id } ? "cancelled" : "failed")
+                    value.code = "publication_required"
+                    return value
+                }
+                await model.begin()?.value
+                if delivery.hasPrefix("poll") { await model.refresh() }
+                XCTAssertEqual(model.phase, .publicationRequired, "\(storage): \(delivery)")
+                XCTAssertNil(model.error, "A prerequisite is a choice, not a generic failure")
+                XCTAssertFalse(model.canStart)
+                XCTAssertTrue(model.canPublish)
+                XCTAssertNil(model.begin())
+                await model.refresh()
+                XCTAssertEqual(client.prepared.count, 1, "Never automatically publish after discovering the prerequisite")
+                XCTAssertEqual(client.prepared[0].3, false)
+                let firstID = client.prepared[0].1
+                await model.publishAndConnect()?.value
+                XCTAssertEqual(model.phase, .scan)
+                XCTAssertEqual(client.prepared.count, 2)
+                guard client.prepared.count == 2 else { continue }
+                XCTAssertNotEqual(client.prepared[1].1, firstID, "Changed consent requires a new idempotency identity")
+                XCTAssertEqual(client.prepared[1].2, storage == SiteStorage.p2p.rawValue)
+                XCTAssertTrue(client.prepared[1].3)
+                XCTAssertTrue(client.cancelled.contains { $0.1 == firstID })
+                XCTAssertNil(model.publishAndConnect(), "An active pairing cannot publish again")
+            }
+        }
+    }
+
+    @MainActor func testServerHostingRequirementDiscardsStalePermissionAndAsksAgain() async {
+        for delivery in ["prepare", "poll", "error", "pollError"] {
+            let (model, client, _) = fixture(storage: SiteStorage.hosted.rawValue)
+            model.consent = true // Even an old checked UI value is not permission to reverse a later opt-out.
+            client.prepareBody = { siteID, id in
+                if client.prepared.count > 1 { return client.result(siteID: siteID, id: id) }
+                if delivery == "error" { throw PhoneConnectionError(status: 409, code: "hosting_required") }
+                var value = client.result(siteID: siteID, id: id, state: delivery.hasPrefix("poll") ? "preparing" : "failed")
+                value.code = "hosting_required"
+                return value
+            }
+            client.preparationBody = { siteID, id in
+                if delivery == "pollError", !client.cancelled.contains(where: { $0.1 == id }) {
+                    throw PhoneConnectionError(status: 409, code: "hosting_required")
+                }
+                var value = client.result(siteID: siteID, id: id,
+                    state: client.cancelled.contains { $0.1 == id } ? "cancelled" : "failed")
+                value.code = "hosting_required"
+                return value
+            }
+            await model.begin()?.value
+            if delivery.hasPrefix("poll") { await model.refresh() }
+            XCTAssertTrue(model.needsHostingConsent, delivery)
+            XCTAssertFalse(model.consent)
+            XCTAssertFalse(model.canStart)
+            XCTAssertFalse(model.canPublish)
+            XCTAssertNil(model.begin())
+            XCTAssertEqual(client.prepared.count, 1)
+            XCTAssertEqual(client.prepared[0].2, false)
+            model.consent = true
+            await model.begin()?.value
+            XCTAssertEqual(model.phase, .scan)
+            XCTAssertEqual(client.prepared.last?.2, true)
+            XCTAssertEqual(client.prepared.last?.3, false)
+        }
+    }
+
+    @MainActor func testPublicationConsentDoesNotCarryIntoRetryAfterServiceFailure() async {
+        let (model, client, _) = fixture(storage: SiteStorage.hosted.rawValue)
+        client.prepareBody = { siteID, id in
+            var value = client.result(siteID: siteID, id: id, state: "failed")
+            value.code = client.prepared.count == 1 ? "publication_required" : "service_timeout"
+            return value
+        }
+        await model.begin()?.value
+        await model.publishAndConnect()?.value
+        XCTAssertEqual(model.phase, .failed)
+        XCTAssertFalse(model.canPublish)
+        XCTAssertTrue(model.canStart)
+        await model.begin()?.value
+        XCTAssertEqual(client.prepared.map { $0.3 }, [false, true, false])
+        XCTAssertEqual(Set(client.prepared.map { $0.1 }).count, 3)
+    }
+
+    @MainActor func testUnrelatedFailureCannotAuthorizePublication() async {
+        for code in ["site_not_ready", "service_timeout", "hosted_publication_required", "hosting_update_required", "site_changed"] {
+            let (model, client, _) = fixture(storage: SiteStorage.hosted.rawValue)
+            client.prepareBody = { siteID, id in
+                var value = client.result(siteID: siteID, id: id, state: "failed")
+                value.code = code
+                return value
+            }
+            await model.begin()?.value
+            XCTAssertEqual(model.phase, .failed, code)
+            XCTAssertFalse(model.canPublish, code)
+            XCTAssertNil(model.publishAndConnect(), code)
+            XCTAssertEqual(client.prepared.count, 1)
+            XCTAssertFalse(client.prepared[0].3)
+        }
+    }
+
+    @MainActor func testPublicationActionStillRequiresAnyMissingHostingPermission() async {
+        let (model, client, _) = fixture(storage: SiteStorage.p2p.rawValue)
+        model.consent = true
+        client.prepareBody = { siteID, id in
+            var value = client.result(siteID: siteID, id: id, state: "failed")
+            value.code = "publication_required"
+            return value
+        }
+        await model.begin()?.value
+        XCTAssertTrue(model.canPublish)
+        model.consent = false
+        XCTAssertFalse(model.canPublish)
+        XCTAssertNil(model.publishAndConnect())
+        XCTAssertEqual(client.prepared.count, 1)
+    }
+
+    @MainActor func testRenderedHostedSheetUsesShortCopyWithoutRedundantHostingPrompt() throws {
+        let (model, _, _) = fixture(storage: SiteStorage.hosted.rawValue)
+        let lines = try visibleText(model)
+        let text = lines.joined(separator: " ")
+        XCTAssertTrue(lines.contains("Post from your phone"), text)
+        XCTAssertTrue(lines.contains("Connect"), text)
+        XCTAssertFalse(text.contains("anywhere"), text)
+        XCTAssertFalse(text.contains("Connect your published site"), text)
+        XCTAssertFalse(text.contains("Allow crop.top"), text)
+        XCTAssertTrue(text.contains("publishing key"), "Keep the distinct phone-key disclosure: \(text)")
+    }
+
+    @MainActor func testRenderedUnhostedSheetOnlyAsksForHostingPermission() throws {
+        let (model, _, _) = fixture(storage: SiteStorage.p2p.rawValue)
+        let text = try visibleText(model).joined(separator: " ")
+        XCTAssertTrue(text.contains("Post from your phone"), text)
+        XCTAssertTrue(text.contains("Allow crop.top to host this site."), text)
+        XCTAssertFalse(text.contains("and publish it"), text)
+        XCTAssertFalse(text.contains("Connect your published site"), text)
+    }
+
+    @MainActor func testRenderedPublicationPromptSeparatesSavedChangesFromHostingConsent() async throws {
+        let (model, client, _) = fixture(storage: SiteStorage.hosted.rawValue)
+        client.prepareBody = { siteID, id in
+            var value = client.result(siteID: siteID, id: id, state: "failed")
+            value.code = "publication_required"
+            return value
+        }
+        await model.begin()?.value
+        let text = try visibleText(model).joined(separator: " ")
+        XCTAssertTrue(text.contains("Publish and connect"), text)
+        XCTAssertTrue(text.contains("saved changes"), text)
+        XCTAssertFalse(text.contains("Allow crop.top"), text)
+        _ = await model.close()
     }
 
     @MainActor func testMismatchedPreparationOrPairingCannotShowQR() async {
@@ -328,13 +537,19 @@ final class PhoneConnectionTests: XCTestCase {
         guard let directory = ProcessInfo.processInfo.environment["CROPTOP_PHONE_SNAPSHOT_DIR"] else { return }
         _ = NSApplication.shared
         try FileManager.default.createDirectory(atPath: directory, withIntermediateDirectories: true)
-        for phase in ["consent", "preparing", "confirm"] {
-            let (model, client, _) = fixture()
+        for phase in ["hosted", "unhosted", "publication", "preparing", "confirm"] {
+            let (model, client, _) = fixture(storage: phase == "unhosted" ? SiteStorage.p2p.rawValue : SiteStorage.hosted.rawValue)
             if phase == "preparing" {
                 client.prepareBody = { siteID, id in client.result(siteID: siteID, id: id, state: "preparing") }
             }
-            if phase != "consent" {
-                model.consent = true
+            if phase == "publication" {
+                client.prepareBody = { siteID, id in
+                    var value = client.result(siteID: siteID, id: id, state: "failed")
+                    value.code = "publication_required"
+                    return value
+                }
+            }
+            if !["hosted", "unhosted"].contains(phase) {
                 await model.begin()?.value
             }
             if phase == "confirm" { await model.refresh() }
@@ -385,24 +600,26 @@ final class PhoneConnectionTransportTests: XCTestCase {
     }
 
     @MainActor func testPreparationSendsExplicitPermissionsAndNativeSecurityHeader() async throws {
-        let id = UUID().uuidString
         let siteID = PhoneClientFixture.site.id
-        PhoneTestURLProtocol.handler = { request in
-            XCTAssertEqual(request.httpMethod, "POST")
-            XCTAssertEqual(request.url?.path, "/v0/croptop/sites/\(siteID)/phone/preparations")
-            XCTAssertEqual(request.value(forHTTPHeaderField: "X-Croptop-Phone"), "1")
-            XCTAssertEqual(request.value(forHTTPHeaderField: "Cache-Control"), "no-store")
-            XCTAssertEqual(request.value(forHTTPHeaderField: "Content-Type"), "application/json")
-            let body = try XCTUnwrap(JSONSerialization.jsonObject(with: PhoneTestURLProtocol.body(of: request)) as? [String: Any])
-            XCTAssertEqual(body["id"] as? String, id)
-            XCTAssertEqual(body["enableHosting"] as? Bool, true)
-            XCTAssertEqual(body["allowPublish"] as? Bool, true)
-            let response: [String: Any] = ["id": id, "siteID": siteID, "state": "preparing", "stage": "waiting", "startedAt": 10, "deadline": 310]
-            return (202, try JSONSerialization.data(withJSONObject: response))
-        }
         defer { PhoneTestURLProtocol.handler = nil }
-        let result = try await client().prepare(siteID: siteID, id: id, enableHosting: true)
-        XCTAssertEqual(result.id, id)
+        for (enableHosting, allowPublish) in [(false, false), (true, false), (false, true), (true, true)] {
+            let id = UUID().uuidString
+            PhoneTestURLProtocol.handler = { request in
+                XCTAssertEqual(request.httpMethod, "POST")
+                XCTAssertEqual(request.url?.path, "/v0/croptop/sites/\(siteID)/phone/preparations")
+                XCTAssertEqual(request.value(forHTTPHeaderField: "X-Croptop-Phone"), "1")
+                XCTAssertEqual(request.value(forHTTPHeaderField: "Cache-Control"), "no-store")
+                XCTAssertEqual(request.value(forHTTPHeaderField: "Content-Type"), "application/json")
+                let body = try XCTUnwrap(JSONSerialization.jsonObject(with: PhoneTestURLProtocol.body(of: request)) as? [String: Any])
+                XCTAssertEqual(body["id"] as? String, id)
+                XCTAssertEqual(body["enableHosting"] as? Bool, enableHosting)
+                XCTAssertEqual(body["allowPublish"] as? Bool, allowPublish, "Hosting and publication are independent permissions")
+                let response: [String: Any] = ["id": id, "siteID": siteID, "state": "preparing", "stage": "waiting", "startedAt": 10, "deadline": 310]
+                return (202, try JSONSerialization.data(withJSONObject: response))
+            }
+            let result = try await client().prepare(siteID: siteID, id: id, enableHosting: enableHosting, allowPublish: allowPublish)
+            XCTAssertEqual(result.id, id)
+        }
     }
 
     @MainActor func testRemotePlaintextOriginAndPathInjectionNeverSendRequests() async {

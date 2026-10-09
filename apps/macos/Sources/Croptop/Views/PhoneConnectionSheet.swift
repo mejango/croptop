@@ -58,7 +58,7 @@ struct PhoneConnectionSheet: View {
 
     @ViewBuilder private var content: some View {
         switch connection.phase {
-        case .consent, .failed, .expired:
+        case .consent, .publicationRequired, .failed, .expired:
             consent
         case .preparing:
             VStack(alignment: .leading, spacing: 16) {
@@ -67,8 +67,12 @@ struct PhoneConnectionSheet: View {
                     Text(connection.stageTitle).font(Theme.heading(20))
                 }
                 Text(connection.stageDetail).font(Theme.formText)
-                Text("\(connection.elapsed)s elapsed · Keep this Mac awake")
-                    .font(Theme.formHelp).foregroundColor(Theme.muted)
+                HStack(spacing: 12) {
+                    Text("\(connection.elapsed)s total")
+                    Text("Keep this Mac awake")
+                }
+                .font(Theme.formHelp).foregroundColor(Theme.muted)
+                .accessibilityElement(children: .combine)
                 Text("You can close this window to stop preparation. Hosting permission and any publication already sent are not undone.")
                     .font(Theme.formHelp).foregroundColor(Theme.muted)
             }
@@ -96,19 +100,29 @@ struct PhoneConnectionSheet: View {
                 Text("This connection expired").font(Theme.heading(20))
                 Text("Create a new private link when your phone is ready.").font(Theme.formText)
             } else {
-                Text("Post from your phone, anywhere").font(Theme.heading(20))
+                Text("Post from your phone").font(Theme.heading(20))
             }
-            Text("Connect your published site. If it needs hosting or a phone compatibility update, Croptop will publish your current desktop site first. Otherwise, unpublished desktop changes stay on this Mac.")
-                .font(Theme.formText).fixedSize(horizontal: false, vertical: true)
-            Toggle(isOn: $connection.consent) {
-                Text("Allow crop.top to host this site and publish it if needed for phone posting.")
+            if connection.needsHostingConsent {
+                Toggle(isOn: $connection.consent) {
+                    Text("Allow crop.top to host this site.")
+                        .font(Theme.formText).fixedSize(horizontal: false, vertical: true)
+                }.toggleStyle(.checkbox)
+            }
+            if connection.phase == .publicationRequired {
+                Text("This site needs an update for phone posting. Publishing will make all saved changes on this Mac public.")
                     .font(Theme.formText).fixedSize(horizontal: false, vertical: true)
-            }.toggleStyle(.checkbox)
+            }
             Text("Only connect a phone you trust: it receives a full copy of this site’s publishing key over an encrypted connection. You will confirm the phone’s code before the key is sent.")
                 .font(Theme.formHelp).fixedSize(horizontal: false, vertical: true)
-            Button(connection.phase == .consent ? "Create connection" : "Try again") { connection.begin() }
-                .buttonStyle(BorderedButton(kind: .hot)).disabled(!connection.canStart)
-                .keyboardShortcut(.defaultAction)
+            if connection.phase == .publicationRequired {
+                Button("Publish and connect") { connection.publishAndConnect() }
+                    .buttonStyle(BorderedButton(kind: .hot)).disabled(!connection.canPublish)
+                    .keyboardShortcut(.defaultAction)
+            } else {
+                Button("Connect") { connection.begin() }
+                    .buttonStyle(BorderedButton(kind: .hot)).disabled(!connection.canStart)
+                    .keyboardShortcut(.defaultAction)
+            }
         }
     }
 

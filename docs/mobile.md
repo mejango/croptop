@@ -4,6 +4,14 @@ The mobile website, iPhone companion with Share extension, and Android companion
 
 The phone website is live, and Croptop **0.13.21 (Mac build 1162)** is available through **Croptop → Check for Updates…** with native in-app phone setup. The isolated Railway service and dedicated Cloudflare composer let connected phones publish while the desktop sleeps. Native app-store releases remain separate. The original desktop checkout remains untouched; the released source is on `release/0.13.21` and tag `v0.13.21`, from the isolated `app-mobile` snapshot. The signed publication format and ordinary desktop publishing path are retained.
 
+## Unreleased follow-up
+
+Local changes after 0.13.21 reuse saved hosting permission, shorten the setup title to “Post from your phone”, and label its normal action “Connect”. Hosting permission does not authorize publishing saved desktop changes: setup checks the published site first and offers “Publish and connect” only when the service reports that an update is required. Preparation distinguishes sending files, checking the hosted publication and checking phone compatibility; the timer reports total time without a middot. The existing five-minute preparation deadline is unchanged.
+
+The hosting Worker now stages up to four independent objects concurrently, preserving duplicate-path ordering, resumability and the existing conditional commit. Tests cover 6,482 files plus 680 directory blocks across 26 batches. A synthetic 129-object fixture with 5 ms storage-read latency improved from 766 ms to 202 ms; this is not a measured production speedup or a guarantee that every large site completes within five minutes. The phone composer clears stale progress after an error and preserves the failed draft and uncertain-publication recovery controls.
+
+These changes are not deployed and are not in the normal updater yet. Image-format diagnostics and any required decoder change remain separate from these setup/presentation fixes.
+
 ## Release boundaries
 
 | Release | Delivered surface | Gate before external release |

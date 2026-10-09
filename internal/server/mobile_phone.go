@@ -372,7 +372,7 @@ func (s *Server) preparePhone(ctx context.Context, siteID string, options phoneP
 			return nil, publishErr
 		}
 		site = current
-		progress("hosting")
+		progress("verifying_phone")
 		token, err = s.phoneSessionAfterPublication(ctx, site)
 		if err != nil {
 			return nil, phoneFailure(502, err)
@@ -501,9 +501,12 @@ func (s *Server) publishForPhone(ctx context.Context, original *store.Site, opti
 	}
 	progress("publishing")
 	result, err := s.Pub.PublishHosted(ctx, current.ID, func(stage publish.HostedStage) {
-		if stage == publish.HostedUploading || stage == publish.HostedVerifying {
-			progress("hosting")
-		} else {
+		switch stage {
+		case publish.HostedUploading:
+			progress("uploading")
+		case publish.HostedVerifying:
+			progress("verifying_host")
+		default:
 			progress("publishing")
 		}
 	})
@@ -539,22 +542,24 @@ func (s *Server) phoneSessionAfterPublication(ctx context.Context, site *store.S
 		}
 		select {
 		case <-ctx.Done():
-			return "", fmt.Errorf("The publication reached hosting, but the phone service has not verified it yet. Keep this computer awake and retry Connect phone: %w", ctx.Err())
+			return "", phoneVerificationPending(ctx.Err())
 		case <-time.After(1500 * time.Millisecond):
 		}
 	}
 }
 
-// Publish can finish while a large first host upload continues in the
-// publisher's existing queue. Do not pair against an old compatible head or
-// claim the computer can sleep until the hosted service sees this publication.
-// An unchanged re-publish can advance the local sequence without advancing the
-// host's sequence: the host already has the exact content CID and settles the
-// queued push. Matching content is therefore sufficient, as is a newer head.
+func phoneVerificationPending(err error) error {
+	return fmt.Errorf("The site is hosted, but the phone service has not verified the published version yet. Retry Connect phone to check again: %w", err)
+}
+
+// PublishHosted verifies the signed hosted head before this separate phone
+// service check. Do not pair against an older compatible head or claim phone
+// posting is ready until the phone service sees this publication. Identical
+// content may have an older hosted sequence after a local renewal, so matching
+// content is sufficient, as is a newer compatible head.
 func (s *Server) waitPhoneReady(ctx context.Context, ipns, token string, published publish.Result) error {
 	ctx, cancel := context.WithTimeout(ctx, 90*time.Second)
 	defer cancel()
-	reason := "The hosted publication is still uploading. Keep this computer awake and try connecting again."
 	for {
 		var readiness struct {
 			IPNS     string `json:"ipns"`
@@ -583,7 +588,7 @@ func (s *Server) waitPhoneReady(ctx context.Context, ipns, token string, publish
 		}
 		select {
 		case <-ctx.Done():
-			return errors.New(reason)
+			return phoneVerificationPending(ctx.Err())
 		case <-time.After(1500 * time.Millisecond):
 		}
 	}

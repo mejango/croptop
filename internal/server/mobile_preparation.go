@@ -52,6 +52,12 @@ func phoneStageMessage(stage string) string {
 		return "Checking your published site; unpublished desktop edits stay on this computer…"
 	case "publishing":
 		return "Preparing the desktop site for its required phone update…"
+	case "uploading":
+		return "Uploading your site to hosting. Keep this computer awake…"
+	case "verifying_host":
+		return "Checking the hosted publication…"
+	case "verifying_phone":
+		return "The site is hosted. Waiting for the phone service to verify it…"
 	case "hosting":
 		return "Uploading and verifying the hosted site. Keep this computer awake…"
 	case "pairing":

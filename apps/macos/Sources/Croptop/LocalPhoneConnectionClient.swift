@@ -17,8 +17,8 @@ final class LocalPhoneConnectionClient: PhoneConnectionClient {
     }
     deinit { session.invalidateAndCancel() }
 
-    func prepare(siteID: String, id: String, enableHosting: Bool) async throws -> PhonePreparation {
-        try await request("POST", siteID: siteID, suffix: "/preparations", body: ["id": id, "enableHosting": enableHosting, "allowPublish": enableHosting])
+    func prepare(siteID: String, id: String, enableHosting: Bool, allowPublish: Bool) async throws -> PhonePreparation {
+        try await request("POST", siteID: siteID, suffix: "/preparations", body: ["id": id, "enableHosting": enableHosting, "allowPublish": allowPublish])
     }
     func preparation(siteID: String, id: String) async throws -> PhonePreparation {
         try await request("GET", siteID: siteID, suffix: "/preparations/" + id)
