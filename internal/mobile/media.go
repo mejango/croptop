@@ -469,6 +469,30 @@ func convertedPNGOrientation(f *os.File) int {
 // dimensions alone cannot establish the size a codec bitstream will allocate.
 func checkHEIFDimensions(data []byte) error {
 	count := 0
+	err := walkHEIFBoxes(data, func(tag string, body []byte) error {
+		if tag != "ispe" {
+			return nil
+		}
+		if len(body) != 12 {
+			return ErrInvalidImage
+		}
+		w, h := binary.BigEndian.Uint32(body[4:8]), binary.BigEndian.Uint32(body[8:12])
+		if err := checkImageDimensions(int(w), int(h)); err != nil {
+			return err
+		}
+		count++
+		return nil
+	})
+	if err != nil {
+		return err
+	}
+	if count == 0 {
+		return ErrInvalidImage
+	}
+	return nil
+}
+
+func walkHEIFBoxes(data []byte, visit func(string, []byte) error) error {
 	var walk func([]byte, int) error
 	walk = func(boxes []byte, depth int) error {
 		if depth > 4 {
@@ -491,7 +515,11 @@ func checkHEIFDimensions(data []byte) error {
 				return ErrInvalidImage
 			}
 			body := boxes[header:n]
-			switch string(boxes[4:8]) {
+			tag := string(boxes[4:8])
+			if err := visit(tag, body); err != nil {
+				return err
+			}
+			switch tag {
 			case "meta":
 				if len(body) < 4 {
 					return ErrInvalidImage
@@ -503,27 +531,12 @@ func checkHEIFDimensions(data []byte) error {
 				if err := walk(body, depth+1); err != nil {
 					return err
 				}
-			case "ispe":
-				if len(body) != 12 {
-					return ErrInvalidImage
-				}
-				w, h := binary.BigEndian.Uint32(body[4:8]), binary.BigEndian.Uint32(body[8:12])
-				if err := checkImageDimensions(int(w), int(h)); err != nil {
-					return err
-				}
-				count++
 			}
 			boxes = boxes[n:]
 		}
 		return nil
 	}
-	if err := walk(data, 0); err != nil {
-		return err
-	}
-	if count == 0 {
-		return ErrInvalidImage
-	}
-	return nil
+	return walk(data, 0)
 }
 
 func findHEIFConverter() (string, error) {
@@ -579,6 +592,20 @@ func convertHEIF(ctx context.Context, data []byte, outputDir string) (string, fu
 		// The pinned production decoder supports explicit bounded parallelism.
 		args = []string{"--codec-threads", "1", "--tile-threads", "1", in, out}
 	}
+	if err := runMediaConverter(ctx, converter, args, dir); err != nil {
+		return "", nil, err
+	}
+	info, err := os.Lstat(out)
+	if err != nil || !info.Mode().IsRegular() || info.Size() == 0 {
+		return "", nil, ErrInvalidImage
+	}
+	// libheif writes suffixed filenames for multi-image inputs. Requiring this
+	// exact output rejects those inputs instead of silently choosing one image.
+	success = true
+	return out, cleanup, nil
+}
+
+func runMediaConverter(ctx context.Context, converter string, args []string, dir string) error {
 	childCtx, cancel := context.WithCancel(ctx)
 	defer cancel()
 	cmd := exec.CommandContext(childCtx, converter, args...)
@@ -596,7 +623,7 @@ func convertHEIF(ctx context.Context, data []byte, outputDir string) (string, fu
 	// Discard it, avoiding both leakage and unbounded stderr accumulation.
 	cmd.Stdout, cmd.Stderr = io.Discard, io.Discard
 	if err := cmd.Start(); err != nil {
-		return "", nil, ErrHEIFUnavailable
+		return ErrHEIFUnavailable
 	}
 	// Clean up descendants even if the parent exited before cancellation.
 	defer func() { _ = cmd.Cancel() }()
@@ -614,31 +641,21 @@ func convertHEIF(ctx context.Context, data []byte, outputDir string) (string, fu
 			if err := checkConversionFiles(dir); err != nil {
 				cancel()
 				<-done
-				return "", nil, err
+				return err
 			}
 		case <-ctx.Done():
 			cancel()
 			<-done
-			return "", nil, ctx.Err()
+			return ctx.Err()
 		}
 	}
 	if err := ctx.Err(); err != nil {
-		return "", nil, err
+		return err
 	}
 	if runErr != nil {
-		return "", nil, ErrInvalidImage
+		return ErrInvalidImage
 	}
-	if err := checkConversionFiles(dir); err != nil {
-		return "", nil, err
-	}
-	info, err := os.Lstat(out)
-	if err != nil || !info.Mode().IsRegular() || info.Size() == 0 {
-		return "", nil, ErrInvalidImage
-	}
-	// libheif writes suffixed filenames for multi-image inputs. Requiring this
-	// exact output rejects those inputs instead of silently choosing one image.
-	success = true
-	return out, cleanup, nil
+	return checkConversionFiles(dir)
 }
 
 func checkConversionFiles(dir string) error {
