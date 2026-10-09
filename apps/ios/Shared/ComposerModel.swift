@@ -11,10 +11,13 @@ final class ComposerModel: ObservableObject {
     @Published var fatalStorageError: String?
     @Published var pairingCode: String?
     @Published var pairingIPNS: String?
+    @Published private(set) var hasPairing = false
+    @Published private(set) var incomingPairingReady = false
     @Published var previewImage: UIImage?
     private(set) var store: DraftStore?
     private var pairing: PairingReceiver?
     private var api: MobileAPI?
+    private var incomingPairing: PairingLink?
 
     var selected: LocalDraft? { drafts.first { $0.id == selectedID } }
 
@@ -33,19 +36,20 @@ final class ComposerModel: ObservableObject {
         updatePreview()
     }
 
-    func select(_ id: String) { selectedID = id; message = nil; updatePreview() }
+    func select(_ id: String) { guard !busy else { return }; selectedID = id; message = nil; updatePreview() }
 
-    func capture(_ data: Data) throws {
+    func capture(_ data: Data, selectAfterCapture: Bool = true) throws {
         guard let store else { throw MobileError.storage("Draft storage is unavailable.") }
         let type = try DeviceStorage.inspectImage(data)
         let draft = try store.create(image: data, contentType: type, destination: connection)
-        selectedID = draft.id; try reload(); message = "Saved on this phone."
+        if selectAfterCapture && !busy && !hasPairing && !incomingPairingReady { selectedID = draft.id }
+        try reload(); message = "Saved on this phone."
     }
 
-    func replaceImage(_ data: Data) throws {
-        guard let store, let selected else { return }
+    func replaceImage(_ data: Data, for draftID: String) throws {
+        guard let store else { return }
         let type = try DeviceStorage.inspectImage(data)
-        try store.replaceImage(data, contentType: type, for: selected.id)
+        try store.replaceImage(data, contentType: type, for: draftID)
         try reload()
     }
 
@@ -57,14 +61,16 @@ final class ComposerModel: ObservableObject {
         try reload()
     }
 
-    func importKey(pem: String, originText: String) async {
+    func importKey(pem: String) async {
+        do { try ConnectionActionPolicy.requireConnectionChange(isBusy: busy, hasPairing: hasPairing || incomingPairingReady) }
+        catch { message = error.localizedDescription; return }
         await perform {
-            guard let url = URL(string: originText) else { throw MobileError.invalid("Enter the publishing service's HTTPS address.") }
-            try await self.connect(identity: SiteIdentity(pem: pem), origin: url, fallbackName: "Your site")
+            try await self.connect(identity: SiteIdentity(pem: pem), origin: MobileEnvironment.productionOrigin, fallbackName: "Your site")
         }
     }
 
     private func connect(identity: SiteIdentity, origin: URL, fallbackName: String) async throws {
+        try MobileEnvironment.requireApprovedOrigin(origin)
         guard let store else { throw MobileError.storage("Draft storage is unavailable.") }
         if let current = connection, current.ipns != identity.ipns {
             throw MobileError.invalid("Remove the current connection before connecting another site. Existing drafts keep their destination.")
@@ -82,13 +88,46 @@ final class ComposerModel: ObservableObject {
     }
 
     func claimPairing(link: String) async {
+        let parsed: PairingLink
+        do {
+            try ConnectionActionPolicy.requireNewPairing(isBusy: busy, hasConnection: connection != nil, hasPairing: hasPairing || incomingPairingReady)
+            parsed = try PairingLink(link)
+        } catch { message = error.localizedDescription; return }
+        await claim(parsed)
+    }
+
+    func receivePairingURL(_ url: URL) -> Bool {
+        do {
+            try reload()
+            try ConnectionActionPolicy.requireNewPairing(isBusy: busy, hasConnection: connection != nil, hasPairing: hasPairing || incomingPairingReady)
+            incomingPairing = try PairingLink(url.absoluteString)
+            incomingPairingReady = true
+            message = "Connect this phone to your publisher. Your saved draft stays on this phone."
+            return true
+        } catch { message = error.localizedDescription; return false }
+    }
+
+    func claimIncomingPairing() async {
+        guard !busy, let parsed = incomingPairing else { return }
+        incomingPairing = nil; incomingPairingReady = false
+        await claim(parsed)
+    }
+
+    func cancelPairing() {
+        guard !busy else { return }
+        pairing = nil; hasPairing = false; incomingPairing = nil; incomingPairingReady = false
+        pairingCode = nil; pairingIPNS = nil
+    }
+
+    private func claim(_ parsed: PairingLink) async {
         await perform {
-            let receiver = try PairingReceiver(link: link)
+            try ConnectionActionPolicy.requireNewPairing(isBusy: false, hasConnection: self.connection != nil, hasPairing: self.hasPairing)
+            let receiver = PairingReceiver(link: parsed)
             let result = try await receiver.claim()
             if let current = self.connection, current.ipns != result.ipns {
                 throw MobileError.invalid("Remove the existing connection before connecting a different site.")
             }
-            self.pairing = receiver; self.pairingCode = result.code; self.pairingIPNS = result.ipns
+            self.pairing = receiver; self.hasPairing = true; self.pairingCode = result.code; self.pairingIPNS = result.ipns
             self.message = "Enter this code on your publisher. Then confirm here that the site and code match."
         }
     }
@@ -96,6 +135,7 @@ final class ComposerModel: ObservableObject {
     func confirmPairing() async {
         await perform {
             guard let pairing = self.pairing else { throw MobileError.invalid("Paste a new connection link.") }
+            guard self.connection == nil else { throw MobileError.invalid("A site was connected while this transfer was waiting. Cancel this transfer to keep that connection.") }
             let received = try await pairing.consumeConfirmed()
             // Securely retain the successfully transferred key before a network
             // readiness lookup; a transient error must not destroy a consumed transfer.
@@ -106,7 +146,7 @@ final class ComposerModel: ObservableObject {
             }
             try store.setConnection(SiteConnection(origin: received.origin, ipns: received.identity.ipns, name: received.name))
             try self.reload()
-            self.pairing = nil; self.pairingCode = nil; self.pairingIPNS = nil
+            self.pairing = nil; self.hasPairing = false; self.pairingCode = nil; self.pairingIPNS = nil
             try await self.connect(identity: received.identity, origin: received.origin, fallbackName: received.name)
         }
     }
@@ -124,8 +164,13 @@ final class ComposerModel: ObservableObject {
 
     func removeConnection() {
         do {
+            try ConnectionActionPolicy.requireConnectionChange(isBusy: busy, hasPairing: hasPairing || incomingPairingReady)
+            guard let store else { throw MobileError.storage("Draft storage is unavailable.") }
+            let lease = try store.acquireActivityLease()
+            defer { withExtendedLifetime(lease) {} }
+            try reload()
             if let connection { try DeviceStorage.removeIdentity(ipns: connection.ipns) }
-            try store?.setConnection(nil); api = nil; try reload()
+            try store.setConnection(nil); api = nil; try reload()
             message = "Connection removed from this phone. Drafts are retained; reconnect the same site to publish them."
         } catch { message = error.localizedDescription }
     }
@@ -241,6 +286,7 @@ final class ComposerModel: ObservableObject {
 
     private func client(for draft: LocalDraft? = nil) throws -> MobileAPI {
         guard let connection else { throw MobileError.invalid("Open Croptop and connect your site. This image is saved as a draft.") }
+        try MobileEnvironment.requireApprovedOrigin(connection.origin)
         if let destination = draft?.destination, destination.ipns != connection.ipns || destination.origin != connection.origin {
             throw MobileError.invalid("Reconnect this draft's original site to publish it.")
         }
@@ -256,11 +302,17 @@ final class ComposerModel: ObservableObject {
     }
 
     private func perform(_ body: () async throws -> Void) async {
-        guard !busy else { return }
+        guard !busy else { message = "Finish the current operation, then try again."; return }
         let operationDraftID = selectedID
         busy = true; message = nil
         defer { busy = false }
-        do { try await body() }
+        do {
+            guard let store else { throw MobileError.storage("Draft storage is unavailable.") }
+            let lease = try store.acquireActivityLease()
+            defer { withExtendedLifetime(lease) {} }
+            try reload()
+            try await body()
+        }
         catch {
             message = error.localizedDescription
             let code: String?

@@ -21,20 +21,6 @@
                ReferencedContainer = "container:Croptop.xcodeproj">
             </BuildableReference>
          </BuildActionEntry>
-         <BuildActionEntry
-            buildForTesting = "YES"
-            buildForRunning = "YES"
-            buildForProfiling = "YES"
-            buildForArchiving = "YES"
-            buildForAnalyzing = "YES">
-            <BuildableReference
-               BuildableIdentifier = "primary"
-               BlueprintIdentifier = "8810A06D942D96E61996A08B"
-               BuildableName = "CroptopShare.appex"
-               BlueprintName = "CroptopShare"
-               ReferencedContainer = "container:Croptop.xcodeproj">
-            </BuildableReference>
-         </BuildActionEntry>
       </BuildActionEntries>
    </BuildAction>
    <TestAction
@@ -58,20 +44,9 @@
             parallelizable = "NO">
             <BuildableReference
                BuildableIdentifier = "primary"
-               BlueprintIdentifier = "FC9D90CF105A7092BC17DC5A"
-               BuildableName = "CroptopCoreTests.xctest"
-               BlueprintName = "CroptopCoreTests"
-               ReferencedContainer = "container:Croptop.xcodeproj">
-            </BuildableReference>
-         </TestableReference>
-         <TestableReference
-            skipped = "NO"
-            parallelizable = "NO">
-            <BuildableReference
-               BuildableIdentifier = "primary"
-               BlueprintIdentifier = "DBA9142C7753E6378D1F87DF"
-               BuildableName = "CroptopIntakeTests.xctest"
-               BlueprintName = "CroptopIntakeTests"
+               BlueprintIdentifier = "3445F830928E43D68E226029"
+               BuildableName = "CroptopUITests.xctest"
+               BlueprintName = "CroptopUITests"
                ReferencedContainer = "container:Croptop.xcodeproj">
             </BuildableReference>
          </TestableReference>
@@ -99,8 +74,6 @@
             ReferencedContainer = "container:Croptop.xcodeproj">
          </BuildableReference>
       </BuildableProductRunnable>
-      <CommandLineArguments>
-      </CommandLineArguments>
    </LaunchAction>
    <ProfileAction
       buildConfiguration = "Release"

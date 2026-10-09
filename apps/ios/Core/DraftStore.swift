@@ -18,6 +18,12 @@ public final class DraftStore: @unchecked Sendable {
     public func imageURL(_ draft: LocalDraft) -> URL { root.appendingPathComponent(draft.imageFilename) }
     public func previewURL(_ draft: LocalDraft) -> URL { root.appendingPathComponent("\(draft.id).preview") }
 
+    /// Nonblocking app/extension activity lock held across awaits. Process death
+    /// releases it. Draft writes use the separate, short-lived metadata lock.
+    public func acquireActivityLease() throws -> MobileActivityLease {
+        try MobileActivityLease(url: root.appendingPathComponent(".activity-lock"))
+    }
+
     public func create(image: Data, contentType: String, destination: SiteConnection?) throws -> LocalDraft {
         try locked { try createUnlocked(image: image, contentType: contentType, destination: destination) }
     }
@@ -184,4 +190,19 @@ public final class DraftStore: @unchecked Sendable {
         defer { flock(descriptor, LOCK_UN) }
         return try body()
     }
+}
+
+public final class MobileActivityLease: @unchecked Sendable {
+    private let descriptor: Int32
+
+    fileprivate init(url: URL) throws {
+        descriptor = open(url.path, O_CREAT | O_RDWR, S_IRUSR | S_IWUSR)
+        guard descriptor >= 0 else { throw MobileError.storage("Could not coordinate app and share-sheet activity.") }
+        guard flock(descriptor, LOCK_EX | LOCK_NB) == 0 else {
+            close(descriptor)
+            throw MobileError.invalid("Croptop is already working in the app or share sheet. Finish that operation, then try again.")
+        }
+    }
+
+    deinit { flock(descriptor, LOCK_UN); close(descriptor) }
 }

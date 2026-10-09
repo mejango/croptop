@@ -88,10 +88,11 @@ struct ComposerView: View {
         .onChange(of: title) { _, _ in saveEdits() }
         .onChange(of: caption) { _, _ in saveEdits() }
         .onChange(of: replacementImage) { _, selected in
+            let originalDraftID = draft.id
             Task {
                 do {
-                    guard let data = try await selected?.loadTransferable(type: Data.self) else { return }
-                    try model.replaceImage(data); replacementImage = nil
+                    guard let image = try await selected?.loadTransferable(type: ScreenshotTransfer.self) else { return }
+                    try model.replaceImage(image.data, for: originalDraftID); replacementImage = nil
                 } catch { model.message = error.localizedDescription }
             }
         }

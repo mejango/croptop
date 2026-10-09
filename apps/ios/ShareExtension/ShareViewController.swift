@@ -14,36 +14,16 @@ final class ShareViewController: UIViewController {
         show(ShareMessageView(message: "Saving screenshot…", done: nil))
         let items = extensionContext?.inputItems.compactMap { $0 as? NSExtensionItem } ?? []
         let attachments = items.flatMap { $0.attachments ?? [] }
-        let images = attachments.filter { $0.hasItemConformingToTypeIdentifier(UTType.image.identifier) }
-        guard images.count == 1, attachments.count == 1 else {
-            showError("Share exactly one still image with Croptop. No images were discarded or published.")
-            return
-        }
-        let provider = images[0]
-        // Prefer the actual file format, preserving HEIF and screenshot quality.
-        let identifier = provider.registeredTypeIdentifiers.first { UTType($0)?.conforms(to: .image) == true } ?? UTType.image.identifier
-        provider.loadFileRepresentation(forTypeIdentifier: identifier) { [weak self] temporaryURL, error in
-            // The provider owns this URL only for this completion callback.
-            // Copy bytes now, then persist before displaying the composer.
-            let result: Result<Data, Error>
+        Task { @MainActor [weak self] in
+            guard let self else { return }
             do {
-                if let error { throw error }
-                guard let temporaryURL else { throw MobileError.invalid("The image could not be downloaded. Open it in Photos and share again.") }
-                let size = try temporaryURL.resourceValues(forKeys: [.fileSizeKey]).fileSize ?? 0
-                guard size > 0 && size <= DeviceStorage.maxCaptureImageBytes else { throw MobileError.invalid("This image is too large to save in the share sheet.") }
-                result = .success(try Data(contentsOf: temporaryURL))
-            } catch { result = .failure(error) }
-            Task { @MainActor [weak self] in
-                guard let self else { return }
-                do {
-                    let model = ComposerModel()
-                    let image = try result.get()
-                    try model.capture(image)
-                    guard let draft = model.selected else { throw MobileError.storage("The screenshot could not be saved.") }
-                    self.retainedModel = model
-                    self.show(ShareComposerHost(model: model, draftID: draft.id) { [weak self] in self?.finish() })
-                } catch { self.showError("Screenshot was not saved: \(error.localizedDescription)") }
-            }
+                let model = ComposerModel()
+                guard let store = model.store else { throw MobileError.storage("Shared draft storage is unavailable.") }
+                let draft = try await ImageIntake.persist(providers: attachments, store: store, destination: model.connection)
+                try model.reload(); model.select(draft.id)
+                self.retainedModel = model
+                self.show(ShareComposerHost(model: model, draftID: draft.id) { [weak self] in self?.finish() })
+            } catch { self.showError("Screenshot was not saved: \(error.localizedDescription)") }
         }
     }
 

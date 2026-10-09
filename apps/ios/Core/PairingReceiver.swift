@@ -30,17 +30,12 @@ public actor PairingReceiver {
     private var material: PairingMaterial?
 
     public init(link: String) throws {
-        guard let url = URL(string: link), let parts = URLComponents(url: url, resolvingAgainstBaseURL: false),
-              let fragment = parts.fragment, fragment.hasPrefix("pair="), parts.query == nil,
-              parts.path == "" || parts.path == "/" else { throw MobileError.invalid("Paste the complete Connect phone link from your publisher.") }
-        let pieces = fragment.dropFirst(5).split(separator: ".", omittingEmptySubsequences: false)
-        let allowed = CharacterSet(charactersIn: "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-_")
-        guard pieces.count == 2, pieces.allSatisfy({ $0.count == 43 && String($0).unicodeScalars.allSatisfy(allowed.contains) }) else {
-            throw MobileError.invalid("This connection link is incomplete.")
-        }
-        var originParts = parts; originParts.fragment = nil; originParts.path = ""
-        origin = try MobileAPI.validatedOrigin(originParts.url!)
-        id = String(pieces[0]); capability = String(pieces[1])
+        let parsed = try PairingLink(link)
+        origin = parsed.origin; id = parsed.id; capability = parsed.capability
+    }
+
+    public init(link: PairingLink) {
+        origin = link.origin; id = link.id; capability = link.capability
     }
 
     public func claim() async throws -> (ipns: String, code: String) {
