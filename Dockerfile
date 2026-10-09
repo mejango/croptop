@@ -1,10 +1,12 @@
 # croptop host in a container (Railway, Fly, any Docker host).
-FROM golang:alpine AS build
+FROM --platform=$BUILDPLATFORM golang:alpine AS build
+ARG TARGETOS
+ARG TARGETARCH
 WORKDIR /src
 COPY go.mod go.sum ./
 RUN go mod download
 COPY . .
-RUN CGO_ENABLED=0 go build -o /croptop ./cmd/croptop
+RUN CGO_ENABLED=0 GOOS=$TARGETOS GOARCH=$TARGETARCH go build -o /croptop ./cmd/croptop
 
 # libheif 1.23.6 fixes decoder security issues not yet covered by Alpine's
 # packaged 1.23.0. Pin the official release and GitHub release-asset SHA-256.
@@ -25,8 +27,16 @@ RUN cmake -S libheif-1.23.6 -B compiled \
     && cmake --build compiled --parallel 2 \
     && cmake --install compiled
 
+# Narrow color transform: only lcms2 and libpng, no auto-discovered codecs.
+FROM alpine:3.23 AS color-build
+RUN apk add --no-cache build-base lcms2-dev libpng-dev
+COPY internal/mobile/media_lcms/convert.c /build/convert.c
+RUN cc -O2 -Wall -Wextra -Werror /build/convert.c -o /croptop-color -llcms2 -lpng
+
 FROM alpine:3.23 AS runtime
-RUN apk add --no-cache ca-certificates libstdc++ libde265 libpng
+RUN apk add --no-cache ca-certificates libstdc++ libde265 libpng lcms2
+COPY --from=color-build /croptop-color /usr/local/bin/croptop-color
+COPY internal/mobile/media_lcms/NOTICE /usr/share/licenses/croptop-color/NOTICE
 COPY --from=heif-build /usr/local/bin/heif-dec /usr/local/bin/heif-dec
 COPY --from=heif-build /usr/local/lib/libheif.so* /usr/local/lib/
 RUN heif-dec --version
@@ -39,10 +49,10 @@ CMD ["sh", "-c", "exec croptop host --domain \"$CROPTOP_DOMAIN\" --root \"$CROPT
 # CI/deploy gate: docker build --target mobile-media-test .
 # Run the same compiled Go media tests against the production Linux decoder.
 FROM build AS mobile-media-test-build
-RUN CGO_ENABLED=0 go test -c -o /mobile-media.test ./internal/mobile
+RUN CGO_ENABLED=0 GOOS=$TARGETOS GOARCH=$TARGETARCH go test -c -o /mobile-media.test ./internal/mobile
 
 FROM runtime AS mobile-media-test
 COPY --from=mobile-media-test-build /mobile-media.test /usr/local/bin/mobile-media.test
-RUN /usr/local/bin/mobile-media.test -test.run 'Test(Normalize|HEIF|EXIF)' -test.v
+RUN CROPTOP_REQUIRE_COLOR_CONVERTER=1 /usr/local/bin/mobile-media.test -test.run 'Test(Normalize|HEIF|EXIF|ImageColor|Color)' -test.v
 
 FROM runtime AS final

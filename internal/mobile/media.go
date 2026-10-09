@@ -42,6 +42,8 @@ var (
 	ErrUnsupportedImage = errors.New("choose a PNG, JPEG, WebP, HEIC, or HEIF still image")
 	ErrInvalidImage     = errors.New("image is damaged or cannot be decoded")
 	ErrHEIFUnavailable  = errors.New("HEIC/HEIF conversion is unavailable; choose a PNG or JPEG image")
+	ErrImageColor       = errors.New("this image uses unsupported HDR or color encoding; export an SDR sRGB PNG or JPEG and try again")
+	ErrColorUnavailable = errors.New("color conversion is unavailable; export an SDR sRGB PNG or JPEG and try again")
 )
 
 type Media struct {
@@ -102,6 +104,10 @@ func NormalizeImage(ctx context.Context, inputPath, outputDir string) (Media, er
 	if animatedRaster(data, typ) {
 		return Media{}, errors.New("choose one still image; animated images are not supported")
 	}
+	profile, err := imageColorProfile(data, typ)
+	if err != nil {
+		return Media{}, err
+	}
 	if err := os.MkdirAll(outputDir, 0700); err != nil {
 		return Media{}, err
 	}
@@ -124,9 +130,22 @@ func NormalizeImage(ctx context.Context, inputPath, outputDir string) (Media, er
 		if _, err := f.Seek(0, io.SeekStart); err != nil {
 			return Media{}, err
 		}
-		return normalizeRaster(ctx, f, "png", orientation, outputDir)
+		// libheif preserves an ICC profile on its PNG, while ImageIO may change
+		// the color encoding. Inspect the actual converter output, never apply
+		// the input profile to pixels that a converter has already changed.
+		convertedProfile, err := convertedPNGColorProfile(f)
+		if err != nil {
+			return Media{}, err
+		}
+		if len(profile) != 0 && len(convertedProfile) == 0 {
+			return Media{}, ErrImageColor
+		}
+		if _, err := f.Seek(0, io.SeekStart); err != nil {
+			return Media{}, err
+		}
+		return normalizeColorRaster(ctx, f, "png", orientation, convertedProfile, outputDir)
 	}
-	return normalizeRaster(ctx, bytes.NewReader(data), typ, exifOrientation(data, typ), outputDir)
+	return normalizeColorRaster(ctx, bytes.NewReader(data), typ, exifOrientation(data, typ), profile, outputDir)
 }
 
 func imageType(data []byte) string {
@@ -190,6 +209,9 @@ func normalizeRaster(ctx context.Context, r io.ReadSeeker, typ string, orientati
 	}
 	if err = checkImageDimensions(config.Width, config.Height); err != nil {
 		return Media{}, err
+	}
+	if _, cmyk := config.ColorModel.Convert(color.Black).(color.CMYK); cmyk {
+		return Media{}, ErrImageColor
 	}
 	if _, err = r.Seek(0, io.SeekStart); err != nil {
 		return Media{}, err
@@ -391,6 +413,9 @@ func walkRasterChunks(data []byte, typ string, visit func(string, []byte) bool) 
 		if !visit(tag, data[p+8:p+8+int(n)]) {
 			return
 		}
+		if typ == "png" && tag == "IEND" {
+			return
+		}
 		p += overhead + int(n)
 		if typ == "webp" {
 			p += int(n) & 1
@@ -587,7 +612,7 @@ func convertHEIF(ctx context.Context, data []byte, outputDir string) (string, fu
 	}
 	args := []string{in, out}
 	if filepath.Base(converter) == "sips" {
-		args = []string{"--setProperty", "format", "png", "--optimizeColorForSharing", in, "--out", out}
+		args = []string{"--setProperty", "format", "png", in, "--out", out}
 	} else if filepath.Base(converter) == "heif-dec" {
 		// The pinned production decoder supports explicit bounded parallelism.
 		args = []string{"--codec-threads", "1", "--tile-threads", "1", in, out}
