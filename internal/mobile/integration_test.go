@@ -14,6 +14,8 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -24,6 +26,22 @@ import (
 	"github.com/mejango/croptop/internal/store"
 	"github.com/mejango/croptop/templates"
 )
+
+type observedPostInspection struct {
+	Publisher
+	errors chan error
+}
+
+func (p observedPostInspection) InspectPost(ctx context.Context, host, name, post string) (*publish.Posted, error) {
+	result, err := p.Publisher.InspectPost(ctx, host, name, post)
+	if err != nil {
+		select {
+		case p.errors <- err:
+		default:
+		}
+	}
+	return result, err
+}
 
 // This exercises the HTTP operation protocol against the real renderer, signed
 // IPNS records, incremental IPFS tree builder, and host. No internet, deployed
@@ -47,7 +65,46 @@ func TestMobilePublicationWithRealHostAndRestartRecovery(t *testing.T) {
 	if err := h.Start(); err != nil {
 		t.Fatal(err)
 	}
-	hostServer := httptest.NewServer(h)
+	// Hold a real accepted commit's answer while replaying one registry read
+	// captured before it. This models the host advancing between InspectSite's
+	// registry and signed-record reads without sleeps or an invalid signature.
+	var holdCID, oldRegistry atomic.Value
+	holdCID.Store("")
+	oldRegistry.Store([]byte(nil))
+	var replayRegistry atomic.Bool
+	committed, release := make(chan struct{}), make(chan struct{})
+	var committedOnce, releaseOnce sync.Once
+	releaseCommit := func() { releaseOnce.Do(func() { close(release) }) }
+	defer releaseCommit()
+	hostServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodGet && strings.HasPrefix(r.URL.Path, "/v0/host/keys/") && replayRegistry.CompareAndSwap(true, false) {
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write(oldRegistry.Load().([]byte))
+			return
+		}
+		if r.Method != http.MethodPost || r.URL.Path != "/v0/host/push" || r.Header.Get("X-Croptop-Cid") != holdCID.Load().(string) {
+			h.ServeHTTP(w, r)
+			return
+		}
+		answer := httptest.NewRecorder()
+		h.ServeHTTP(answer, r)
+		var receipt struct {
+			CID string `json:"cid"`
+		}
+		if answer.Code == 200 && json.Unmarshal(answer.Body.Bytes(), &receipt) == nil && receipt.CID == holdCID.Load().(string) {
+			committedOnce.Do(func() { close(committed) })
+			select {
+			case <-release:
+			case <-r.Context().Done():
+				return
+			}
+		}
+		for key, values := range answer.Header() {
+			w.Header()[key] = values
+		}
+		w.WriteHeader(answer.Code)
+		_, _ = w.Write(answer.Body.Bytes())
+	}))
 	t.Cleanup(hostServer.Close)
 	getPublic := func(path string) []byte {
 		t.Helper()
@@ -148,7 +205,8 @@ func TestMobilePublicationWithRealHostAndRestartRecovery(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	server := &Server{Publisher: NewPrivatePublisher(backend), DataDir: t.TempDir(), Origin: "https://app.crop.top", HostURL: hostServer.URL, TemplateDigest: templateDigest, Enabled: true, RequireHostedSite: true, MaxOpenOperations: 20}
+	inspectionErrors := make(chan error, 16)
+	server := &Server{Publisher: observedPostInspection{NewPrivatePublisher(backend), inspectionErrors}, DataDir: t.TempDir(), Origin: "https://app.crop.top", HostURL: hostServer.URL, TemplateDigest: templateDigest, Enabled: true, RequireHostedSite: true, MaxOpenOperations: 20}
 	f := &serviceFixture{server: server, handler: server.Handler(), key: deviceKey, name: name}
 	if err := server.Init(); err != nil {
 		t.Fatal(err)
@@ -166,6 +224,18 @@ func TestMobilePublicationWithRealHostAndRestartRecovery(t *testing.T) {
 		deadline := time.Now().Add(time.Minute)
 		for {
 			w := f.request(t, "GET", "/operations/"+id, nil, f.token)
+			if w.Code == http.StatusServiceUnavailable {
+				var problem struct {
+					Code string `json:"code"`
+				}
+				if json.Unmarshal(w.Body.Bytes(), &problem) == nil && problem.Code == "status_unavailable" && time.Now().Before(deadline) {
+					// A moving signed head is not proof of commit failure. Retry
+					// only this documented status on the same operation, bounded
+					// by the original deadline; never create or commit another post.
+					time.Sleep(25 * time.Millisecond)
+					continue
+				}
+			}
 			if w.Code != 200 && w.Code != 202 {
 				t.Fatal(w.Body.String())
 			}
@@ -247,10 +317,41 @@ func TestMobilePublicationWithRealHostAndRestartRecovery(t *testing.T) {
 	// Advance the real host, then emulate a lost completion journal for the
 	// earlier commit. Recovery must find its stable post identity in a later head.
 	later := prepare()
+	oldRegistry.Store(getPublic("/v0/host/keys/" + name))
+	holdCID.Store(later.Proposal.CID)
 	w = f.commit(t, later)
 	if w.Code != 202 && w.Code != 200 {
 		t.Fatal(w.Body.String())
 	}
+	select {
+	case <-committed:
+	case <-time.After(time.Minute):
+		t.Fatal("the real host did not accept the delayed commit")
+	}
+	for len(inspectionErrors) > 0 {
+		<-inspectionErrors
+	}
+	replayRegistry.Store(true)
+	w = f.request(t, "GET", "/operations/"+later.ID, nil, f.token)
+	if w.Code != http.StatusServiceUnavailable || !bytes.Contains(w.Body.Bytes(), []byte(`"code":"status_unavailable"`)) {
+		t.Fatalf("mismatched head was not conservatively rejected: %d %s", w.Code, w.Body)
+	}
+	select {
+	case err := <-inspectionErrors:
+		if err.Error() != "IPNS record does not authorize the proposed CID" {
+			t.Fatalf("unexpected status failure instead of the controlled head race: %v", err)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("status did not verify the newly signed record against the older registry read")
+	}
+	f.server.mu.Lock()
+	pending := f.server.operations[operationKey(name, later.ID)]
+	unconfirmed := pending.State == "committing" && pending.URL == ""
+	f.server.mu.Unlock()
+	if !unconfirmed {
+		t.Fatal("an unverifiable status rewrote the pending receipt")
+	}
+	releaseCommit()
 	waitFor(later.ID, "published")
 	f.server.mu.Lock()
 	retained := f.server.operations[operationKey(name, op.ID)]
