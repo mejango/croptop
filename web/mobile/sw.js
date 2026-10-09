@@ -3,8 +3,8 @@
 // sw-cache.test.mjs gates these hashes against source files. Changing an asset
 // changes this worker, and therefore installs a new complete shell version.
 const ASSET_DIGESTS = {
-  "/": "cccd4e0c97085b2c252789f4dbde167eb81763cc20715fe0862356a50c4c427f",
-  "/index.html": "cccd4e0c97085b2c252789f4dbde167eb81763cc20715fe0862356a50c4c427f",
+  "/": "0f73d240cef63fe37f4017e17226e9c8d046db8dc1ec2eab7994db24bc20d321",
+  "/index.html": "0f73d240cef63fe37f4017e17226e9c8d046db8dc1ec2eab7994db24bc20d321",
   "/app.js": "d7e035dd71b4c59cb8146d96961a0031eaa532d36b90680c9fe4606eaeb7b8ce",
   "/protocol.js": "b73300818584399fb4d6c3add1a698617f372561d015dbbe4a1ccc1b785d18a9",
   "/pairing.js": "11f81ce49dbac529bb51f5a7d21f483d1c4d5a983998135886d3e4fffe472d32",
