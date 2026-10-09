@@ -94,11 +94,17 @@ type Result struct {
 // pushed again, at most twice. Otherwise the version is announced first and
 // uploaded in the background.
 func (p *Publisher) Publish(ctx context.Context, siteID string, force bool) (Result, error) {
+	return p.publishRetry(ctx, siteID, force, p.publishOnce)
+}
+
+// publishRetry serializes publication and takes in competing host versions
+// before retrying the same publication strategy.
+func (p *Publisher) publishRetry(ctx context.Context, siteID string, force bool, once func(context.Context, string, bool, string) (Result, *ipfs.Record, error)) (Result, error) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	base := ""
 	for attempt := 0; ; attempt++ {
-		res, behind, err := p.publishOnce(ctx, siteID, force, base)
+		res, behind, err := once(ctx, siteID, force, base)
 		if behind == nil || err != nil {
 			return res, err
 		}
@@ -129,51 +135,11 @@ func (p *Publisher) Publish(ctx context.Context, siteID string, force bool) (Res
 // the next attempt. base is the version this machine builds on: its last
 // publish, or a version just taken in.
 func (p *Publisher) publishOnce(ctx context.Context, siteID string, force bool, base string) (Result, *ipfs.Record, error) {
-	site, err := p.Store.Site(siteID)
-	if err != nil {
-		return Result{}, nil, err
+	v, behind, err := p.prepareVersion(ctx, siteID, force, base)
+	if behind != nil || err != nil {
+		return Result{}, behind, err
 	}
-	if !p.Node.Keystore().Has(site.ID) {
-		return Result{}, nil, fmt.Errorf("no IPNS key for %s on this machine; run `croptop key import %s <file.pem>`", site.Name, site.ID)
-	}
-	p.log("rendering %s", site.Name)
-	if err := p.Render.Render(ctx, siteID); err != nil {
-		return Result{}, nil, fmt.Errorf("render: %w", err)
-	}
-	p.log("adding to IPFS")
-	cid, err := p.Node.AddDir(ctx, p.Store.PublicDir(siteID))
-	if err != nil {
-		return Result{}, nil, err
-	}
-	// render may have changed post files, not the site, but reload anyway
-	if site, err = p.Store.Site(siteID); err != nil {
-		return Result{}, nil, err
-	}
-	rec, netErr := p.latestRecord(ctx, site)
-	if netErr == nil {
-		p.log("network has sequence %d -> %s", rec.Sequence, rec.Value)
-	} else {
-		p.log("network record: %v", netErr)
-	}
-	if base == "" {
-		base = deref(site.LastPublishedCID)
-	}
-	if netErr == nil && ownVersion(site, strings.TrimPrefix(rec.Value, "/ipfs/")) {
-		// one of this machine's own versions (a host still holding an older one
-		// while a newer one uploads) is no news from elsewhere: only its
-		// sequence counts, and the next goes above it
-		rec = &ipfs.Record{Value: "/ipfs/" + base, Sequence: rec.Sequence}
-	}
-	seq, err := nextSequence(site.IPNSSequence, base, rec, netErr, force)
-	if err == ErrPublishedElsewhere && !force && rec != nil {
-		return Result{}, rec, nil // take it in, then try again
-	}
-	if err != nil {
-		if err == ErrPublishedElsewhere {
-			p.saveSite(site.ID, func(s *store.Site) { s.PublishedElsewhere = true })
-		}
-		return Result{}, nil, err
-	}
+	site, cid, seq, base := v.site, v.cid, v.seq, v.base
 	if !force && site.HostingEnabled() {
 		if res, behind, done, err := p.publishChanges(ctx, site, cid, seq, base); done || behind != nil || err != nil {
 			return res, behind, err
@@ -218,6 +184,64 @@ func (p *Publisher) publishOnce(ctx context.Context, siteID string, force bool, 
 		}
 	}
 	return Result{CID: cid, Sequence: seq}, nil, nil
+}
+
+type publicationVersion struct {
+	site *store.Site
+	cid  string
+	seq  uint64
+	base string
+}
+
+// prepareVersion owns rendering, content addressing and sequence/conflict
+// selection. It does not announce or upload the version.
+func (p *Publisher) prepareVersion(ctx context.Context, siteID string, force bool, base string) (publicationVersion, *ipfs.Record, error) {
+	site, err := p.Store.Site(siteID)
+	if err != nil {
+		return publicationVersion{}, nil, err
+	}
+	if !p.Node.Keystore().Has(site.ID) {
+		return publicationVersion{}, nil, fmt.Errorf("no IPNS key for %s on this machine; run `croptop key import %s <file.pem>`", site.Name, site.ID)
+	}
+	p.log("rendering %s", site.Name)
+	if err := p.Render.Render(ctx, siteID); err != nil {
+		return publicationVersion{}, nil, fmt.Errorf("render: %w", err)
+	}
+	p.log("adding to IPFS")
+	cid, err := p.Node.AddDir(ctx, p.Store.PublicDir(siteID))
+	if err != nil {
+		return publicationVersion{}, nil, err
+	}
+	// render may have changed post files, not the site, but reload anyway
+	if site, err = p.Store.Site(siteID); err != nil {
+		return publicationVersion{}, nil, err
+	}
+	rec, netErr := p.latestRecord(ctx, site)
+	if netErr == nil {
+		p.log("network has sequence %d -> %s", rec.Sequence, rec.Value)
+	} else {
+		p.log("network record: %v", netErr)
+	}
+	if base == "" {
+		base = deref(site.LastPublishedCID)
+	}
+	if netErr == nil && ownVersion(site, strings.TrimPrefix(rec.Value, "/ipfs/")) {
+		// one of this machine's own versions (a host still holding an older one
+		// while a newer one uploads) is no news from elsewhere: only its
+		// sequence counts, and the next goes above it
+		rec = &ipfs.Record{Value: "/ipfs/" + base, Sequence: rec.Sequence}
+	}
+	seq, err := nextSequence(site.IPNSSequence, base, rec, netErr, force)
+	if err == ErrPublishedElsewhere && !force && rec != nil {
+		return publicationVersion{}, rec, nil // take it in, then try again
+	}
+	if err != nil {
+		if err == ErrPublishedElsewhere {
+			p.saveSite(site.ID, func(s *store.Site) { s.PublishedElsewhere = true })
+		}
+		return publicationVersion{}, nil, err
+	}
+	return publicationVersion{site: site, cid: cid, seq: seq, base: base}, nil, nil
 }
 
 // pushJob is a version to upload in the background, with the signed record
