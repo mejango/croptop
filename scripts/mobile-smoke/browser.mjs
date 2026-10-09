@@ -128,6 +128,32 @@ export function isExpiredRetainedProposal(draft, expectedID, expectedIPNS, now =
     operation.proposal.expiresAt > 0 && operation.proposal.expiresAt <= now;
 }
 
+export async function waitForComposerConfig(page) {
+  // A retained published receipt hides the composer, including this text.
+  await page.locator('#image-help').filter({ hasText: '20 MB' }).waitFor({ state: 'attached' });
+}
+
+export async function prepareWithoutSigning(page) {
+  await page.waitForFunction(() => !document.getElementById('receipt').hidden || !document.getElementById('publish').disabled);
+  const publish = page.locator('#publish');
+  if (await page.locator('#receipt').isVisible() || await publish.textContent() === 'Publish this preview') return;
+  try {
+    // If the label changes during Playwright's actionability wait, this locator
+    // stops matching. The preparation click can never turn into a signing click.
+    await publish.filter({ hasNotText: /^Publish this preview$/ }).click({ timeout: 10000 });
+  } catch {
+    if (!(await page.locator('#receipt').isVisible()) && await publish.textContent() !== 'Publish this preview') {
+      throw new Error('Preparation did not become ready; retain the same directory/profile before retrying');
+    }
+  }
+}
+
+export function assertCommitRecoveryEvidence(initialState, acceptance) {
+  if (!['published', 'committing'].includes(initialState)) {
+    assert.equal(acceptance?.responseWithheld, true, 'A new commit must prove service acceptance and withheld response before claiming recovery');
+  }
+}
+
 export async function run(o) {
   const fixture = await jsonFile(join(o.dir, 'fixture.json'));
   assert.ok(fixture?.kind === fixtureKind && fixture.host === 'https://crop.top', 'Use only a dedicated fixture created by this smoke harness');
@@ -189,7 +215,7 @@ export async function run(o) {
     page.on('pageerror', () => { pageFailure = true; });
     page.setDefaultTimeout(120000);
     await page.goto(o.origin, { waitUntil: 'domcontentloaded' });
-    await page.locator('#image-help').filter({ hasText: '20 MB' }).waitFor();
+    await waitForComposerConfig(page);
     const connection = await page.evaluate(async () => {
       const connection = await (await import('./storage.js')).read('connection');
       return connection ? { ipns: connection.ipns, extractable: connection.key.extractable } : null;
@@ -242,8 +268,9 @@ export async function run(o) {
     runState = { ...runState, version: 1, origin: o.origin, ipns: fixture.ipns, browser: o.browser, operationID: draft.id };
     await saveJSON(runPath, runState); // durable identity BEFORE any upload
 
+    let acceptance;
     if (draft.operation?.state !== 'published') {
-      if ((await page.locator('#publish').textContent()) !== 'Publish this preview') await page.locator('#publish').click();
+      await prepareWithoutSigning(page);
       await page.waitForFunction(() => !document.getElementById('receipt').hidden || document.getElementById('publish').textContent === 'Publish this preview' || !document.getElementById('error').hidden);
       if (await page.locator('#error').isVisible()) throw safeError('Preparation failed; rerun with the same directory/profile after investigating service health');
       if (!(await page.locator('#receipt').isVisible())) {
@@ -253,11 +280,12 @@ export async function run(o) {
         // This second, explicit UI action signs only the reviewed preparation.
         commitGate = commitRecoveryGate(o.origin, runState.operationID);
         await page.locator('#publish').filter({ hasText: 'Publish this preview' }).click();
-        const acceptance = await commitGate.accepted;
+        acceptance = await commitGate.accepted;
         runState = { ...runState, commitResponseWithheld: acceptance.responseWithheld };
         await saveJSON(runPath, runState);
       }
     }
+    assertCommitRecoveryEvidence(draft.operation?.state, acceptance);
     // The commit was accepted before its response was withheld (or an earlier
     // run already published). Reload must recover the same public receipt.
     await page.reload({ waitUntil: 'domcontentloaded' });

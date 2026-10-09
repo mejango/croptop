@@ -4,7 +4,7 @@ import { generateKeyPairSync } from 'node:crypto';
 import { mkdtemp, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { parseArgs, privateKeyDetector, run, commitRecoveryGate, isExpiredRetainedProposal } from './browser.mjs';
+import { parseArgs, privateKeyDetector, run, commitRecoveryGate, isExpiredRetainedProposal, waitForComposerConfig, prepareWithoutSigning, assertCommitRecoveryEvidence } from './browser.mjs';
 
 test('browser smoke is read-only unless --publish is explicit', () => {
   const args = ['--dir', '/private/tmp/mobile-fixture', '--origin', 'https://phone.example'];
@@ -142,4 +142,47 @@ test('startup permits only the exact retained expired proposal to use normal re-
   for (const change of [{ submitted: false }, { operation: { ...draft.operation, state: 'committing' } }, { operation: { ...draft.operation, id: 'different-id' } }, { operation: { ...draft.operation, proposal: { expiresAt: '1000' } } }]) {
     assert.equal(isExpiredRetainedProposal({ ...draft, ...change }, operationID, ipns, 1001), false);
   }
+});
+
+test('a published receipt may hide the configured composer during startup', async () => {
+  const element = { text: 'One image, up to 20 MB.', attached: true, visible: false };
+  const page = { locator: selector => {
+    assert.equal(selector, '#image-help');
+    return { filter: ({ hasText }) => ({ waitFor: async ({ state = 'visible' } = {}) => {
+      if (!element.text.includes(hasText) || !element.attached || (state === 'visible' && !element.visible)) throw new Error('Configured composer is hidden by receipt');
+    } }) };
+  } };
+  await waitForComposerConfig(page);
+  element.text = 'Choose one image.';
+  await assert.rejects(waitForComposerConfig(page), /Configured composer/, 'Attached alone is not evidence config loaded');
+});
+
+test('a preparation click cannot sign when its label changes during actionability waiting', async () => {
+  let label = 'Check publication';
+  let signed = false;
+  const publish = {
+    textContent: async () => label,
+    filter: ({ hasNotText }) => ({ click: async () => {
+      // Startup/polling completed between the text read and the actual click.
+      label = 'Publish this preview';
+      if (hasNotText.test(label)) throw new Error('The preparation locator no longer matches');
+      signed = true;
+    } }),
+  };
+  const page = { waitForFunction: async () => {}, locator: selector => selector === '#publish' ? publish : { isVisible: async () => false } };
+  await prepareWithoutSigning(page);
+  assert.equal(signed, false);
+  assert.equal(label, 'Publish this preview', 'The caller can now create the commit gate before its explicit review click');
+});
+
+test('a new commit cannot claim lost-response recovery without acceptance evidence from this run', () => {
+  for (const state of [undefined, 'preparing', 'needs_signature', 'failed']) {
+    assert.throws(() => assertCommitRecoveryEvidence(state), /must prove service acceptance/);
+    assert.throws(() => assertCommitRecoveryEvidence(state, { responseWithheld: false }), /must prove service acceptance/);
+    assert.doesNotThrow(() => assertCommitRecoveryEvidence(state, { responseWithheld: true }));
+  }
+  // Receipt/status-only reruns need not dispatch a second commit to prove the
+  // original one. They retain any prior evidence without inventing new proof.
+  assert.doesNotThrow(() => assertCommitRecoveryEvidence('published'));
+  assert.doesNotThrow(() => assertCommitRecoveryEvidence('committing'));
 });
