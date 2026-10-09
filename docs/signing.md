@@ -55,6 +55,21 @@ ordinary release reruns from overwriting a published release or exposing a
 half-built updater release. Tag-triggered workflows must be safe before a tag
 is created; using the GitHub API to create a tag is not a CI-bypass mechanism.
 
+Draft lookup uses the authenticated, paginated releases list. GitHub's
+release-by-tag REST endpoint returns published releases only; its 404 is not
+proof that a draft is absent. Any lookup error fails staging closed.
+
+If staging stops after GoReleaser has uploaded its archives, preserve the tag
+and existing assets. `installer/stage-windows.ps1` owns Windows compilation and
+append-only uploads, verifies frozen installer inputs and archive checksums,
+and rejects any existing installer with different bytes. The narrowly scoped
+`release-staging-repair.yml` workflow repairs only the pinned v0.13.20 draft;
+it never rebuilds the engine or publishes a release. Its retained Windows
+outputs can be used to recover a partially completed upload without rebuilding
+or replacing an existing installer. A skipped Homebrew artifact must be
+regenerated from the verified release archive hashes, not described as a
+retained CI output.
+
 ## Legacy latest-only Mac repair helper
 
 `installer/release-macos.sh <version>` and `installer/publish-macos.py` **without**

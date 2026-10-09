@@ -39,18 +39,42 @@ class ReleaseGuardTests(unittest.TestCase):
                                  "v0.13.20", allow_missing=True)
 
     def test_network_or_auth_failure_never_means_missing(self):
-        for status in ("401", "403", "500"):
+        for status in ("401", "403", "404", "500"):
             result = subprocess.CompletedProcess([], 1, json.dumps({"status": status}), "")
             with self.subTest(status=status), patch.object(GUARD.subprocess, "run", return_value=result), self.assertRaises(RuntimeError):
-                GUARD.api("repos/example/app/releases/tags/v1.0.0", allow_missing=True)
-        result = subprocess.CompletedProcess([], 1, '{"status":"404"}', "")
-        with patch.object(GUARD.subprocess, "run", return_value=result):
-            self.assertIsNone(GUARD.api("missing", allow_missing=True))
-            with self.assertRaises(RuntimeError):
-                GUARD.api("missing")
+                GUARD.api("repos/example/app/releases?per_page=100&page=1")
         result = subprocess.CompletedProcess([], 1, "", "network failed")
         with patch.object(GUARD.subprocess, "run", return_value=result), self.assertRaises(RuntimeError):
-            GUARD.api("unreachable", allow_missing=True)
+            GUARD.api("unreachable")
+
+    def test_release_lookup_includes_drafts_and_exhausts_pagination(self):
+        draft = {"id": 408137039, "tag_name": "v0.13.20", "draft": True,
+                 "prerelease": False, "target_commitish": "a" * 40, "assets": []}
+        paths = []
+        def request(path):
+            paths.append(path)
+            return [{"tag_name": "v0.13.19", "draft": False}] * 100 if len(paths) == 1 else [draft]
+        self.assertEqual(GUARD.find_release("owner/repo", "v0.13.20", request), draft)
+        self.assertEqual(paths, ["repos/owner/repo/releases?per_page=100&page=1",
+                                 "repos/owner/repo/releases?per_page=100&page=2"])
+        self.assertIsNone(GUARD.find_release("owner/repo", "v0.13.21", lambda _: []))
+        with self.assertRaises(ValueError):
+            GUARD.find_release("owner/repo", "v0.13.20", lambda _: [draft, draft])
+        for malformed in ({"status": "404"}, [None]):
+            with self.subTest(malformed=malformed), self.assertRaises(RuntimeError):
+                GUARD.find_release("owner/repo", "v0.13.20", lambda _: malformed)
+        def failure(_):
+            raise RuntimeError("network failure")
+        with self.assertRaises(RuntimeError):
+            GUARD.find_release("owner/repo", "v0.13.20", failure)
+
+    def test_recovery_draft_must_match_release_id_and_source(self):
+        draft = {"id": 408137039, "tag_name": "v0.13.20", "draft": True,
+                 "target_commitish": "a" * 40}
+        GUARD.validate_draft(draft, "v0.13.20", commit="a" * 40, release_id=408137039)
+        for options in ({"commit": "b" * 40}, {"release_id": 1}):
+            with self.subTest(options=options), self.assertRaises(ValueError):
+                GUARD.validate_draft(draft, "v0.13.20", **options)
 
     def test_tag_must_resolve_to_exact_checked_out_commit(self):
         commit, tag = "a" * 40, "b" * 40
@@ -91,7 +115,8 @@ class ReleaseGuardTests(unittest.TestCase):
         for gate in ("go test ./...", "go vet ./..."):
             self.assertLess(workflow.index(gate), workflow.index("uses: goreleaser/goreleaser-action@"))
         self.assertEqual(workflow.count("installer/release_guard.py"), 2)
-        self.assertEqual(windows.count("installer/release_guard.py"), 2)
+        self.assertIn('$guard = Join-Path $PSScriptRoot "release_guard.py"', windows)
+        self.assertEqual(windows.count("$release = Get-StagingRelease"), 3)
         self.assertIn("run: ./installer/stage-windows.ps1", workflow)
         self.assertIn("signed-mac-handoff:", workflow)
         self.assertIn("needs: [goreleaser, windows-installer]", workflow)
@@ -102,6 +127,30 @@ class ReleaseGuardTests(unittest.TestCase):
         build = (ROOT / "installer/macos-build-number").read_text().strip()
         self.assertTrue(build.isdecimal())
         self.assertGreaterEqual(int(build), 1161)
+
+    def test_recovery_is_source_pinned_and_only_appends_windows_assets(self):
+        workflow = (ROOT / ".github/workflows/release-staging-repair.yml").read_text()
+        windows = (ROOT / "installer/stage-windows.ps1").read_text()
+        self.assertIn('branches: ["release/0.13.20-staging-repair"]', workflow)
+        self.assertIn("group: release-refs/tags/v0.13.20", workflow)
+        self.assertEqual(workflow.count("06c69d6a921a16ceb0352ef0d7dc699de191266c"), 2)
+        self.assertIn("-Tag v0.13.20", workflow)
+        self.assertIn("-ReleaseId 408137039", workflow)
+        self.assertIn("-SourceRoot ./source", workflow)
+        self.assertIn("./helpers/installer/stage-windows.ps1", workflow)
+        self.assertIn("if: always()", workflow)
+        self.assertIn("path: source/dist/croptop-setup-*.exe", workflow)
+        for forbidden in ("goreleaser", "gh release edit", "gh release create", "--clobber",
+                          "appcast", "publish-macos", "HOMEBREW", "--allow-missing"):
+            self.assertNotIn(forbidden, workflow + windows)
+        self.assertIn("$actualCommit -ne $Commit", windows)
+        self.assertIn("installer/windows.iss installer/Croptop.ico", windows)
+        self.assertIn('Assert-FileDigest "in/checksums.txt" $manifestAsset.digest', windows)
+        self.assertIn('Assert-FileDigest "in/$archive" $checksums[$archive]', windows)
+        self.assertIn('$name = "croptop-setup-${arch}.exe"', windows)
+        self.assertEqual(windows.count("gh release upload"), 1)
+        self.assertIn('gh release upload $Tag "dist/$name" --repo $Repo', windows)
+        self.assertIn("$current.id -ne $original.id", windows)
 
 
 if __name__ == "__main__":

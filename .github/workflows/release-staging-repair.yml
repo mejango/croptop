@@ -1,0 +1,52 @@
+name: finish-v0.13.20-draft-staging
+on:
+  push:
+    branches: ["release/0.13.20-staging-repair"]
+
+permissions:
+  contents: write
+
+# Share the original tag publisher's lock; never cancel an asset writer.
+concurrency:
+  group: release-refs/tags/v0.13.20
+  cancel-in-progress: false
+
+jobs:
+  windows-installer:
+    if: github.repository == 'mejango/croptop'
+    runs-on: windows-latest
+    timeout-minutes: 20
+    steps:
+      - name: Check out corrected staging helpers
+        uses: actions/checkout@v4
+        with:
+          path: helpers
+          persist-credentials: false
+      - name: Check out immutable release source
+        uses: actions/checkout@v4
+        with:
+          ref: 06c69d6a921a16ceb0352ef0d7dc699de191266c
+          path: source
+          persist-credentials: false
+      - name: Test corrected staging guards
+        shell: pwsh
+        run: |
+          python -m unittest discover -s helpers/installer -p 'test_release_guard.py' -v
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - name: Append only missing Windows installers to the pinned draft
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: >-
+          ./helpers/installer/stage-windows.ps1
+          -Tag v0.13.20
+          -Commit 06c69d6a921a16ceb0352ef0d7dc699de191266c
+          -SourceRoot ./source
+          -ReleaseId 408137039
+      - name: Retain exact Windows outputs for any interrupted upload recovery
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-installers-v0.13.20
+          path: source/dist/croptop-setup-*.exe
+          if-no-files-found: warn
