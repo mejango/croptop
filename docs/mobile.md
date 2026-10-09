@@ -2,7 +2,7 @@
 
 The mobile website, iPhone companion with Share extension, and Android companion with share receiver use one keyless publishing service. After a one-time connection to an existing site, a phone can select a screenshot, preview it, add optional text, and publish while the desktop is asleep. Native sharing can save an image before connection is set up.
 
-This is implementation/pilot documentation, not a statement that phone publishing or store releases are live. An isolated Railway service and a disabled dedicated Cloudflare Worker have been provisioned; the application deployment and public end-to-end publication smoke test are pending. The original desktop checkout remains untouched; this build lives in the isolated `app-mobile` source snapshot. The signed publication format and the desktop publishing path are retained.
+This is scoped-pilot documentation, not a native app-store release. The isolated Railway service and dedicated Cloudflare composer are deployed; live connection/publication acceptance is tracked below. The original desktop checkout remains untouched; this build lives in the isolated `app-mobile` source snapshot. The signed publication format and the desktop publishing path are retained.
 
 ## Release boundaries
 
@@ -69,7 +69,7 @@ Missing secret, missing rate-limit bindings or a failed limiter makes the dedica
 ```sh
 cd worker
 node --experimental-loader ./text-loader.mjs --test test/*.test.mjs
-npx --yes wrangler@4.86.0 deploy --dry-run --config wrangler.mobile.toml
+npx --yes wrangler@4.145.0 deploy --dry-run --config wrangler.mobile.toml
 ```
 
 ### Production targets and rollback
@@ -86,7 +86,7 @@ Railway uses explicitly configured service settings for this pilot. Exclude the 
 
 Record the exact source revision, container deployment and Worker version before enabling. If validation fails, set `MOBILE_ENABLED="false"` on the **dedicated** Worker and redeploy that configuration while retaining its hostname and trusted code; never delete/reassign the key-holding origin or fall through to author content. Preserve the private backend volume and publication receipts. Roll back only the dedicated service to a known-good immutable build; do not restore stale journals over newer commits. Reconcile uncertain operations before re-enabling. Never change the stable crop.top host, stable desktop appcast, existing site storage policies or production site heads as a rollback step.
 
-Infrastructure and the disabled Worker are provisioned. A deployed application, enabled composer and successful public publication/recovery smoke test must be recorded separately before handing out a working pilot link.
+The backend is deployed from `df717b583177bd3640a53cf6068791c11a0c2efe`: Railway deployment `ba90d61b-aa5c-4b5b-9331-a85370add58f`, image `sha256:f67cce10420bdb231b400303a320d75d0a663bd77037a5adbceb9e1377a04219`. The enabled Worker version is `8e200864-c917-4c39-a176-62672dc6f880` (enable configuration commit `99de24c`). Live checks confirm health200, direct API403, no host/IPFS gateway, actual 2CPU/2GiB limits and private0700 data directories. Existing hosting deployment and stable appcast are unchanged. Record successful public connection/publication/recovery acceptance before handing out the pilot.
 
 ## Connect an existing site
 
@@ -102,7 +102,7 @@ Shared contracts: [API](design/mobile-api.md), [pairing](design/mobile-pairing.m
 
 Run `go vet ./...` and `go test ./...`; run the mobile service with `go test -race ./internal/mobile`. `.github/workflows/mobile.yml` gates browser protocol/pairing, Worker behavior/bundling, iOS shared tests plus unsigned app/extension compilation, and Android unit tests plus APK compilation. Native app READMEs contain their platform build and signing instructions.
 
-Before a public pilot, test on real iPhone and Android devices:
+The scoped pilot is for device acceptance. Before a broad release, test on real iPhone and Android devices:
 
 - First screenshot share before connection; setup preserves the image and returns to it.
 - Photos/Files/Google Photos and remotely backed photo-library images; app switching, extension termination, device lock and process death.
@@ -139,4 +139,4 @@ Artifacts in this workspace:
 - Browser screenshots: `/private/tmp/croptop-mobile-web-check/`; iOS launch: `/tmp/croptop-ios-first-launch-signed.png`.
 - Local media-test Docker image: `croptop-mobile-media-test:local`.
 
-Independent reviews covered service/origin security, browser recovery, native storage/signing and the production media path. Findings were fixed and regression-tested. Local tests and simulator success do not replace physical iPhone/Android sharing, Safari/Chrome screenshot-fidelity and lifecycle acceptance, or signed native distribution. HDR tone mapping remains unsupported. Production infrastructure and a disabled dedicated Worker have been provisioned; application deployment, enabling the composer and the public publication/recovery smoke test remain pending. No app-store release is implied.
+Independent reviews covered service/origin security, browser recovery, native storage/signing and the production media path. Findings were fixed and regression-tested. Local tests and simulator success do not replace physical iPhone/Android sharing, Safari/Chrome screenshot-fidelity and lifecycle acceptance, or signed native distribution. HDR tone mapping remains unsupported. Live Chromium and WebKit show clean360px layouts and11/11 offline-shell assets matching integrity hashes; Chromium offline reload passes. WebKit's automation offline mode fails with an engine error, so iPhone airplane-mode behavior is explicitly unverified. The backend and composer are live; synthetic connection/publication recovery is being verified. No app-store release is implied.
