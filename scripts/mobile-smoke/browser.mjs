@@ -46,6 +46,59 @@ export function privateKeyDetector(pem) {
   };
 }
 
+// A locally saved "committing" state precedes network dispatch. This gate
+// proves the exact commit was accepted by the service before simulating a lost
+// response, so navigation cannot accidentally cancel the only commit request.
+export function commitRecoveryGate(origin, operationID, { timeout = 180000 } = {}) {
+  const target = new URL('/v0/mobile/operations/' + encodeURIComponent(operationID) + '/commit', origin).href;
+  let resolve, reject, settled = false, unauthorized = 0;
+  const accepted = new Promise((yes, no) => { resolve = yes; reject = no; });
+  accepted.catch(() => {}); // A route can fail before the click promise finishes.
+  const finish = (error, value) => {
+    if (settled) return;
+    settled = true;
+    clearTimeout(timer);
+    if (error) reject(error); else resolve(value);
+  };
+  const timer = setTimeout(() => finish(new Error('Commit acceptance was not observed; keep the same directory/profile and operation before retrying')), timeout);
+  return {
+    accepted,
+    async handle(route) {
+      const request = route.request();
+      if (request.method() !== 'POST' || request.url() !== target) return false;
+      if (settled) { await route.abort('failed'); return true; }
+      let response;
+      try {
+        // The caller already inspected this request for private-key material.
+        // Do not forward its authorization through any HTTP redirect.
+        response = await route.fetch({ maxRedirects: 0, timeout });
+        const status = response.status();
+        if (status === 401 && unauthorized++ === 0) {
+          // Preserve the app's single session-renewal retry on the same ID.
+          await route.fulfill({ response });
+          return true;
+        }
+        if (status !== 200 && status !== 202) {
+          await route.fulfill({ response });
+          finish(new Error('Commit was not accepted (HTTP ' + status + '); retain the same directory/profile before retrying'));
+          return true;
+        }
+        // A service response proves dispatch and durable acceptance. Withhold
+        // it from the page deliberately; the subsequent reload must use GET.
+        await route.abort('failed');
+        finish(null, { status, responseWithheld: true });
+      } catch {
+        await route.abort('failed').catch(() => {});
+        finish(new Error('Commit transport is uncertain; retain the same directory/profile and check this operation before retrying'));
+      } finally {
+        await response?.dispose().catch(() => {});
+      }
+      return true;
+    },
+    close() { finish(new Error('Commit recovery check interrupted; retain the same directory/profile')); },
+  };
+}
+
 async function jsonFile(path) {
   try { return JSON.parse(await readFile(path, 'utf8')); }
   catch (error) { if (error.code === 'ENOENT') return null; throw error; }
@@ -66,6 +119,14 @@ const readDraft = page => page.evaluate(async () => {
   const { id, ipns, title, caption, submitted, operation } = value;
   return { id, ipns, title, caption, submitted, operation };
 });
+
+export function isExpiredRetainedProposal(draft, expectedID, expectedIPNS, now = Math.floor(Date.now() / 1000)) {
+  const operation = draft?.operation;
+  return !!expectedID && draft?.id === expectedID && draft.ipns === expectedIPNS && draft.submitted === true &&
+    operation?.id === expectedID && operation.postID === expectedID && operation.ipns === expectedIPNS &&
+    operation.state === 'needs_signature' && Number.isSafeInteger(operation.proposal?.expiresAt) &&
+    operation.proposal.expiresAt > 0 && operation.proposal.expiresAt <= now;
+}
 
 export async function run(o) {
   const fixture = await jsonFile(join(o.dir, 'fixture.json'));
@@ -101,6 +162,7 @@ export async function run(o) {
   let outboundRequests = 0;
   let keyViolation = false;
   let pageFailure = false;
+  let commitGate;
   const safeError = message => new Error(message); // never echo server/key data
   try {
     await context.route('**/*', async route => {
@@ -118,6 +180,7 @@ export async function run(o) {
         return;
       }
       outboundRequests++;
+      if (commitGate && await commitGate.handle(route)) return;
       await route.continue();
     });
     const pages = context.pages();
@@ -142,7 +205,16 @@ export async function run(o) {
       const status = document.getElementById('site-status').textContent;
       return status.includes('Your computer can sleep') || status.includes('Allow phone posting') || (!document.getElementById('error').hidden);
     });
-    if (await page.locator('#error').isVisible()) throw safeError('Site connection failed; inspect the composer manually using this isolated browser profile');
+    // Startup also reconciles the saved operation. Wait until that finishes so
+    // a late preview-expiry message cannot be mistaken for a connection error.
+    await page.waitForFunction(() => !document.getElementById('refresh-site').disabled);
+    if (await page.locator('#error').isVisible()) {
+      const siteReady = (await page.locator('#site-status').textContent()).includes('Your computer can sleep');
+      const canRefresh = isExpiredRetainedProposal(await readDraft(page), runState?.operationID, fixture.ipns);
+      if (!siteReady || !canRefresh) throw safeError('Site connection failed; inspect the composer manually using this isolated browser profile');
+      // The normal Publish/Check publication action below re-prepares this
+      // expired proposal under the same verified draft identity before review.
+    }
     if (await page.locator('#enable').isVisible()) await page.locator('#enable').click();
     await page.locator('#site-status').filter({ hasText: 'Your computer can sleep' }).waitFor();
     const savedConnection = await page.evaluate(async () => {
@@ -179,17 +251,15 @@ export async function run(o) {
         assert.equal((await readDraft(page)).id, runState.operationID);
         await page.screenshot({ path: join(o.dir, 'prepared-preview.png'), fullPage: true });
         // This second, explicit UI action signs only the reviewed preparation.
+        commitGate = commitRecoveryGate(o.origin, runState.operationID);
         await page.locator('#publish').filter({ hasText: 'Publish this preview' }).click();
-        // Do not reload while the asynchronous click handler is still signing
-        // locally. Wait until its commit is in flight/acknowledged or uncertain.
-        await page.waitForFunction(async () => {
-          const saved = await (await import('./storage.js')).read('draft');
-          return ['committing', 'published'].includes(saved?.operation?.state) || !document.getElementById('error').hidden;
-        }, null, { timeout: 180000 });
+        const acceptance = await commitGate.accepted;
+        runState = { ...runState, commitResponseWithheld: acceptance.responseWithheld };
+        await saveJSON(runPath, runState);
       }
     }
-    // Reload whether the commit response arrives or is lost. The application
-    // must recover the same public receipt; no second identity is allocated.
+    // The commit was accepted before its response was withheld (or an earlier
+    // run already published). Reload must recover the same public receipt.
     await page.reload({ waitUntil: 'domcontentloaded' });
     await page.locator('#receipt').waitFor({ timeout: 180000 });
     const finalDraft = await readDraft(page);
@@ -226,6 +296,7 @@ export async function run(o) {
     await saveJSON(runPath, runState);
     return runState;
   } finally {
+    commitGate?.close();
     await context.close();
   }
 }
