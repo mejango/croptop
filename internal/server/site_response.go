@@ -15,5 +15,6 @@ func siteResponse(site *store.Site) map[string]json.RawMessage {
 	json.Unmarshal(data, &response)
 	response["croptopURL"], _ = json.Marshal(gateway.URL(site))
 	response[store.StorageKey], _ = json.Marshal(site.StorageMode())
+	response["croptopStorageNeedsReview"], _ = json.Marshal(site.StorageNeedsReview())
 	return response
 }

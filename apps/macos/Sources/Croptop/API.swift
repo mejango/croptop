@@ -19,6 +19,7 @@ struct Site: Codable, Identifiable, Hashable {
     var croptopGateway: String?
     var croptopHost: String?
     var croptopStorage: String?
+    var croptopStorageNeedsReview: Bool?
     var croptopName: String?
     var storage: SiteStorage { SiteStorage(savedValue: croptopStorage) }
     var plausibleEnabled: Bool?

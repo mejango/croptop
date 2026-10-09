@@ -54,7 +54,7 @@ final class AppUpdater: NSObject, ObservableObject, SPUUpdaterDelegate {
     static func blocksRelaunch(screen: Screen, sheet: Sheet?, publishing: Set<String>, collaborationOpen: Bool = false) -> Bool {
         if collaborationOpen || sheet != nil || !publishing.isEmpty { return true }
         switch screen {
-        case .editor, .settings: return true
+        case .editor, .settings, .storageSettings: return true
         default: return false
         }
     }

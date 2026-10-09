@@ -71,6 +71,7 @@ struct RootView: View {
                 case .followingSite(let ipns): FeedView(scope: .site(ipns)).id("following:" + ipns)
                 case .site: EmptyView()
                 case .settings(let id): SiteSettingsView(siteID: id).id(id)
+                case .storageSettings(let id): SiteSettingsView(siteID: id, section: "Storage").id("storage:" + id)
                 case .editor(let site, let post): EditorView(siteID: site, postID: post).id(site + (post ?? "new"))
                 }
             }

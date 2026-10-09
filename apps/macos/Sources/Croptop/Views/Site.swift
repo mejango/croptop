@@ -236,6 +236,14 @@ struct SiteView: View {
                     if model.status?.legacyApp == true {
                         LegacyNotice().padding(.bottom, 22)
                     }
+                    if site?.croptopStorageNeedsReview == true {
+                        VStack(alignment: .leading, spacing: 8) {
+                            Text("Review your storage choice").font(Theme.heading(17))
+                            Text(StoragePublishReview.explanation).font(Theme.body(13)).foregroundColor(Theme.muted)
+                            Button("Open Storage settings") { model.screen = .storageSettings(siteID) }
+                                .buttonStyle(BorderedButton(kind: .quiet))
+                        }.padding(.bottom, 22)
+                    }
                     if model.posts[siteID]?.isEmpty == true {
                         CaptureShortcutPrompt().padding(.bottom, 28)
                     }

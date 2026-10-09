@@ -8,6 +8,7 @@ enum Screen: Hashable {
     case followingSite(String)
     case site(String)
     case settings(String)
+    case storageSettings(String)
     case editor(site: String, post: String?)
 }
 
@@ -62,13 +63,14 @@ final class AppModel: ObservableObject {
 
     var currentSite: Site? {
         switch screen {
-        case .site(let id), .settings(let id), .editor(let id, _): return sites.first { $0.id == id }
+        case .site(let id), .settings(let id), .storageSettings(let id), .editor(let id, _): return sites.first { $0.id == id }
         default: return nil
         }
     }
     var currentSiteID: String? {
         if case .site(let id) = screen { return id }
         if case .settings(let id) = screen { return id }
+        if case .storageSettings(let id) = screen { return id }
         if case .editor(let id, _) = screen { return id }
         return nil
     }
@@ -170,8 +172,19 @@ final class AppModel: ObservableObject {
     func publish(_ site: String) {
         guard !publishing.contains(site) else { return }
         publishing.insert(site)
+        let requestedScreen = screen
         Task {
             do {
+                let review = try await StoragePublishReview.prepare(siteID: site,
+                    read: { try await self.api.site($0) },
+                    saveP2P: { try await self.api.saveSite($0, values: ["storage": SiteStorage.p2p.rawValue]) },
+                    choose: StoragePublishReview.choose,
+                    isCurrent: { self.screen == requestedScreen && self.sites.contains { $0.id == site } })
+                guard review == .publish else {
+                    publishing.remove(site)
+                    if review == .settings { screen = .storageSettings(site) }
+                    return
+                }
                 let r = try await api.publish(site: site)
                 // Publishing is complete; refreshing the feed must not keep the CTA busy.
                 publishing.remove(site)

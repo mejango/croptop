@@ -54,6 +54,7 @@ struct SiteSettingsView: View {
     @State private var gateway = "crop.top"
     @State private var host = "https://crop.top"
     @State private var storage = SiteStorage.p2p
+    @State private var storageChoiceChanged = false
     @State private var freeName = ""
     @State private var headCode = ""
     @State private var bodyCode = ""
@@ -295,6 +296,9 @@ struct SiteSettingsView: View {
 
     private var storageFields: some View {
         VStack(alignment: .leading, spacing: 24) {
+            if original?.croptopStorageNeedsReview == true {
+                Text(StoragePublishReview.explanation).font(Theme.formHelp).foregroundColor(Theme.muted)
+            }
             VStack(alignment: .leading, spacing: 8) {
                 Text("Peer-to-peer storage").font(Theme.formLabel)
                 Text("Your site is stored on this computer and shared with peers. Keep Croptop open and this computer online so visitors can find its content. Other peers may keep copies, but availability is not guaranteed.")
@@ -304,7 +308,7 @@ struct SiteSettingsView: View {
             VStack(alignment: .leading, spacing: 8) {
                 Toggle(hostingPresentation.label, isOn: Binding(get: {
                     storage == .hosted
-                }, set: { storage = $0 ? .hosted : .p2p }))
+                }, set: { storage = $0 ? .hosted : .p2p; storageChoiceChanged = true }))
                     .toggleStyle(.checkbox).font(Theme.formLabel)
                     .disabled(busy)
                 Text(hostingPresentation.description)
@@ -575,6 +579,7 @@ struct SiteSettingsView: View {
             let (s, v, m, g) = try await (site, settings, metadata, choices)
             name = s.name; about = s.about ?? ""; domain = s.domain ?? ""; gateway = s.croptopGateway ?? "crop.top"
             storage = s.storage
+            storageChoiceChanged = false
             customDomain = s.croptopCustomDomain ?? ""
             host = s.croptopHost?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
             if host.isEmpty { host = "https://crop.top" }
@@ -628,7 +633,8 @@ struct SiteSettingsView: View {
                 if !host.isEmpty {
                     guard let u = URL(string: host), ["http", "https"].contains(u.scheme), u.host != nil else { throw APIError(message: "Enter a full host address, such as https://crop.top.") }
                 }
-                var changes: [String: Any] = ["name": name, "about": about, "domain": trimmedDomain, "gateway": gateway, "host": host, "storage": storage.rawValue]
+                var changes: [String: Any] = ["name": name, "about": about, "domain": trimmedDomain, "gateway": gateway, "host": host]
+                if let choice = storage.settingChange(original: original, explicitlyChanged: storageChoiceChanged) { changes["storage"] = choice }
                 let normalizedCustomDomain: String
                 if customDomain.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
                     normalizedCustomDomain = ""
