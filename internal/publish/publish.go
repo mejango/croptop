@@ -94,14 +94,14 @@ type Result struct {
 // pushed again, at most twice. Otherwise the version is announced first and
 // uploaded in the background.
 func (p *Publisher) Publish(ctx context.Context, siteID string, force bool) (Result, error) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
 	return p.publishRetry(ctx, siteID, force, p.publishOnce)
 }
 
-// publishRetry serializes publication and takes in competing host versions
-// before retrying the same publication strategy.
+// publishRetry takes in competing host versions before retrying the same
+// publication strategy. Its caller holds mu throughout.
 func (p *Publisher) publishRetry(ctx context.Context, siteID string, force bool, once func(context.Context, string, bool, string) (Result, *ipfs.Record, error)) (Result, error) {
-	p.mu.Lock()
-	defer p.mu.Unlock()
 	base := ""
 	for attempt := 0; ; attempt++ {
 		res, behind, err := once(ctx, siteID, force, base)
@@ -135,7 +135,7 @@ func (p *Publisher) publishRetry(ctx context.Context, siteID string, force bool,
 // the next attempt. base is the version this machine builds on: its last
 // publish, or a version just taken in.
 func (p *Publisher) publishOnce(ctx context.Context, siteID string, force bool, base string) (Result, *ipfs.Record, error) {
-	v, behind, err := p.prepareVersion(ctx, siteID, force, base)
+	v, behind, err := p.prepareVersion(ctx, siteID, force, base, nil)
 	if behind != nil || err != nil {
 		return Result{}, behind, err
 	}
@@ -187,15 +187,16 @@ func (p *Publisher) publishOnce(ctx context.Context, siteID string, force bool, 
 }
 
 type publicationVersion struct {
-	site *store.Site
-	cid  string
-	seq  uint64
-	base string
+	site  *store.Site
+	cid   string
+	seq   uint64
+	base  string
+	fresh bool
 }
 
 // prepareVersion owns rendering, content addressing and sequence/conflict
 // selection. It does not announce or upload the version.
-func (p *Publisher) prepareVersion(ctx context.Context, siteID string, force bool, base string) (publicationVersion, *ipfs.Record, error) {
+func (p *Publisher) prepareVersion(ctx context.Context, siteID string, force bool, base string, progress func(HostedStage)) (publicationVersion, *ipfs.Record, error) {
 	site, err := p.Store.Site(siteID)
 	if err != nil {
 		return publicationVersion{}, nil, err
@@ -203,6 +204,7 @@ func (p *Publisher) prepareVersion(ctx context.Context, siteID string, force boo
 	if !p.Node.Keystore().Has(site.ID) {
 		return publicationVersion{}, nil, fmt.Errorf("no IPNS key for %s on this machine; run `croptop key import %s <file.pem>`", site.Name, site.ID)
 	}
+	hostedProgress(progress, HostedRendering)
 	p.log("rendering %s", site.Name)
 	if err := p.Render.Render(ctx, siteID); err != nil {
 		return publicationVersion{}, nil, fmt.Errorf("render: %w", err)
@@ -216,7 +218,10 @@ func (p *Publisher) prepareVersion(ctx context.Context, siteID string, force boo
 	if site, err = p.Store.Site(siteID); err != nil {
 		return publicationVersion{}, nil, err
 	}
+	hostedProgress(progress, HostedChecking)
 	rec, netErr := p.latestRecord(ctx, site)
+	fresh := errors.Is(netErr, ipfs.ErrNoRecord) && site.IPNSSequence == 0 &&
+		deref(site.LastPublishedCID) == "" && site.LastPublished == nil && len(versionsOf(site)) == 0
 	if netErr == nil {
 		p.log("network has sequence %d -> %s", rec.Sequence, rec.Value)
 	} else {
@@ -241,7 +246,7 @@ func (p *Publisher) prepareVersion(ctx context.Context, siteID string, force boo
 		}
 		return publicationVersion{}, nil, err
 	}
-	return publicationVersion{site: site, cid: cid, seq: seq, base: base}, nil, nil
+	return publicationVersion{site: site, cid: cid, seq: seq, base: base, fresh: fresh}, nil, nil
 }
 
 // pushJob is a version to upload in the background, with the signed record
