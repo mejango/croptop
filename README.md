@@ -24,9 +24,9 @@ irm https://crop.top/install.ps1 | iex             # Windows
 
 Or pick what fits:
 
-- **macOS app**: download `Croptop.dmg` from the [latest release](https://github.com/mejango/croptop/releases/latest), drag Croptop to Applications. It is not notarized yet: the first launch is blocked, then System Settings, Privacy & Security shows an Open Anyway button for it.
+- **macOS app**: download the signed, notarized `Croptop.dmg` from the [latest release](https://github.com/mejango/croptop/releases/latest), then drag Croptop to Applications. Existing installations can use **Croptop → Check for Updates…**.
 - **Homebrew**: `brew install mejango/tap/croptop`
-- **Windows installer**: `croptop-setup.exe` from the latest release. Windows will show a SmartScreen notice because the installer is unsigned; choose More info, Run anyway.
+- **Windows installer**: choose `croptop-setup-amd64.exe` or `croptop-setup-arm64.exe` from the latest release for your processor. Windows will show a SmartScreen notice because the installer is unsigned; choose More info, Run anyway.
 - **Debian, Ubuntu**: the `.deb` from the latest release. **Fedora**: the `.rpm`.
 - **Plain binary**: the `.tar.gz` or `.zip` for your platform.
 
@@ -60,15 +60,16 @@ host there. Saved host addresses and crop.top names do not enable hosting;
 each site needs an explicit opt-in. Billing for crop.top hosting is a
 future step; this version adds the storage choice.
 
-## Phone posting (pilot)
+## Phone posting
 
-The mobile website and native iPhone/Android companions can post a screenshot
-to an existing compatible hosted site after a one-time connection, without a
-running desktop. Native companions add system share-sheet intake. This source
-includes the implementation; the hosted service and store releases are not
-enabled by installing an older release. See [phone setup, builds and release
-gates](docs/mobile.md), [iOS](apps/ios/README.md), and
-[Android](apps/android/README.md).
+With Croptop 0.13.20 or later, choose **Connect phone** on your Mac, review the
+hosting permissions, and scan the QR code with your iPhone or Android phone.
+Confirm the connection on both devices. The phone website can then post a
+screenshot to your compatible hosted site even while the Mac is asleep.
+
+The native iPhone/Android companions add system share-sheet intake, but are not
+yet distributed through the app stores. See [phone setup, builds and release
+gates](docs/mobile.md), [iOS](apps/ios/README.md), and [Android](apps/android/README.md).
 
 ## Coming from the Mac app
 
