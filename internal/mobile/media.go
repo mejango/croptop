@@ -523,24 +523,7 @@ func walkHEIFBoxes(data []byte, visit func(string, []byte) error) error {
 		if depth > 4 {
 			return ErrInvalidImage
 		}
-		for len(boxes) > 0 {
-			if len(boxes) < 8 {
-				return ErrInvalidImage
-			}
-			n, header := uint64(binary.BigEndian.Uint32(boxes[:4])), uint64(8)
-			if n == 1 {
-				if len(boxes) < 16 {
-					return ErrInvalidImage
-				}
-				n, header = binary.BigEndian.Uint64(boxes[8:16]), 16
-			} else if n == 0 {
-				n = uint64(len(boxes))
-			}
-			if n < header || n > uint64(len(boxes)) {
-				return ErrInvalidImage
-			}
-			body := boxes[header:n]
-			tag := string(boxes[4:8])
+		return eachHEIFBox(boxes, func(tag string, body []byte) error {
 			if err := visit(tag, body); err != nil {
 				return err
 			}
@@ -557,11 +540,35 @@ func walkHEIFBoxes(data []byte, visit func(string, []byte) error) error {
 					return err
 				}
 			}
-			boxes = boxes[n:]
-		}
-		return nil
+			return nil
+		})
 	}
 	return walk(data, 0)
+}
+
+func eachHEIFBox(boxes []byte, visit func(string, []byte) error) error {
+	for len(boxes) > 0 {
+		if len(boxes) < 8 {
+			return ErrInvalidImage
+		}
+		n, header := uint64(binary.BigEndian.Uint32(boxes[:4])), uint64(8)
+		if n == 1 {
+			if len(boxes) < 16 {
+				return ErrInvalidImage
+			}
+			n, header = binary.BigEndian.Uint64(boxes[8:16]), 16
+		} else if n == 0 {
+			n = uint64(len(boxes))
+		}
+		if n < header || n > uint64(len(boxes)) {
+			return ErrInvalidImage
+		}
+		if err := visit(string(boxes[4:8]), boxes[header:n]); err != nil {
+			return err
+		}
+		boxes = boxes[n:]
+	}
+	return nil
 }
 
 func findHEIFConverter() (string, error) {
