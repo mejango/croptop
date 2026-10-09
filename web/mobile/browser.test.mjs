@@ -191,11 +191,11 @@ for (const browserName of (process.env.MOBILE_BROWSERS || 'chromium,webkit').spl
     assert.match(await page.locator('#setup').textContent(), /Croptop → Check for Updates…/);
     assert.match(await page.locator('#setup').textContent(), /0\.13\.21 or later/);
     assert.match(await page.locator('#setup').textContent(), /Open your site and choose Connect phone \(the phone button beside Settings\)/);
-    assert.match(await page.locator('#setup').textContent(), /Setup stays in the Mac app\. Approve hosting if needed\./);
-    assert.match(await page.locator('#setup').textContent(), /If a site update is required, review and approve publishing your saved changes\./);
-    assert.match(await page.locator('#setup').textContent(), /Then scan the QR code with your phone\./);
+    assert.match(await page.locator('#setup').textContent(), /Setup stays in the Mac app\./);
+    assert.match(await page.locator('#setup').textContent(), /Review the permission to host your site and publish your saved changes if an update is needed, then choose Create connection\./);
+    assert.match(await page.locator('#setup').textContent(), /Scan the QR code with your phone\./);
     assert.doesNotMatch(await page.locator('#setup').textContent(), /pilot/i);
-    assert.match(await page.locator('#setup').textContent(), /Confirm the connection on both devices, then allow phone posting here/);
+    assert.match(await page.locator('#setup').textContent(), /Confirm the connection on both devices\. If prompted, allow phone posting here\./);
     await capture(page, browserName, 'first-open');
     await pick(page);
     await page.locator('#caption').fill('A little moment, kept.');
