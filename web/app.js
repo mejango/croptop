@@ -361,6 +361,7 @@
           h("a", { class: "btn quiet", href: `/${id}/`, target: "_blank" }, "Preview"),
           h("a", { class: "btn quiet", href: `#/site/${id}/template` }, "Template"),
           h("a", { class: "btn quiet", href: `#/site/${id}/settings` }, "Settings"),
+          h("a", { class: "btn quiet", href: `/mobile-connect#${id}`, target: "_blank", rel: "noopener" }, "Connect phone"),
           h("button", { class: "btn hot", id: "publish", onclick: () => publish(site) }, "Publish"))),
       strip, tagbar, grid);
     if (site.croptopTemplate && site.croptopTemplate.forked) {

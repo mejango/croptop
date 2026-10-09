@@ -1,0 +1,28 @@
+{
+  "cid": "bafkreigh2akiscaildcxk7zhwlm4conbh6x5xjvdcz5cmnz7x5e5ckihxa",
+  "expiresAt": 4070909340,
+  "host": "crop.top",
+  "ipns": "k51qzi5uqu5dg9ufswxt229ntzdy7p4125xzv5rtyjso89ajdujg6csfxcj260",
+  "origin": "https://crop.top",
+  "privateKeyPEM": "-----BEGIN PRIVATE KEY-----\nMC4CAQAwBQYDK2VwBCIEIAABAgMEBQYHCAkKCwwNDg8QERITFBUWFxgZGhscHR4f\n-----END PRIVATE KEY-----\n",
+  "publicKey": "A6EHv/POEL4dcN0Y50vAmWfk1jCbpQ1fHdyGZBJVMbg=",
+  "pushPayload": "Y3JvcHRvcC1wdXNoCmNyb3AudG9wCms1MXF6aTV1cXU1ZGc5dWZzd3h0MjI5bnR6ZHk3cDQxMjV4enY1cnR5anNvODlhamR1amc2Y3NmeGNqMjYwCmJhZmtyZWlnaDJha2lzY2FpbGRjeGs3emh3bG00Y29uYmg2eDV4anZkY3o1Y21uejd4NWU1Y2tpaHhhCjQyCjQwNzA5MDg4MDA=",
+  "pushSignature": "hNuZnvA8sMkkzZuqgqWARbgX16klAFKoBrBfWN9f+xWqMhLaXf2C7YVdslZIhQWPVt3hKHuBqr931bDdYwgcAg==",
+  "record": "QkCu0lXAwWHGNkjIVsMK6lNWEnjha30ZMa8ZUtwhUOa64a/CwqhnadLc1cgqLjOUliyDl4o7sioWdbdE4oWHEsYCSo4BpWNUVEwbAAAADfhHWABlVmFsdWVYQS9pcGZzL2JhZmtyZWlnaDJha2lzY2FpbGRjeGs3emh3bG00Y29uYmg2eDV4anZkY3o1Y21uejd4NWU1Y2tpaHhhaFNlcXVlbmNlGCpoVmFsaWRpdHlUMjA5OS0xMC0yOFQwMDowMDowMFpsVmFsaWRpdHlUeXBlAA==",
+  "recordPayload": "aXBucy1zaWduYXR1cmU6pWNUVEwbAAAADfhHWABlVmFsdWVYQS9pcGZzL2JhZmtyZWlnaDJha2lzY2FpbGRjeGs3emh3bG00Y29uYmg2eDV4anZkY3o1Y21uejd4NWU1Y2tpaHhhaFNlcXVlbmNlGCpoVmFsaWRpdHlUMjA5OS0xMC0yOFQwMDowMDowMFpsVmFsaWRpdHlUeXBlAA==",
+  "recordSignature": "rtJVwMFhxjZIyFbDCupTVhJ44Wt9GTGvGVLcIVDmuuGvwsKoZ2nS3NXIKi4zlJYsg5eKO7IqFnW3ROKFhxLGAg==",
+  "recordTTLNanos": "60000000000",
+  "recordValidation": "Require prefix ipns-signature: followed by exactly one canonical DAG-CBOR map with exactly five fields, in order TTL, Value, Sequence, Validity, ValidityType. TTL is integer 60000000000 (nanoseconds); Value is bytes equal to UTF-8 /ipfs/\u003cproposal.cid\u003e; Sequence is a nonnegative integer \u003c= 9223372036854775807 exactly equal to the decimal proposal.sequence; Validity is bytes containing an RFC3339Nano UTC timestamp later than the proposal expiry and no later than proposal.time + 7200 hours + 60 seconds; ValidityType is integer 0. Reject duplicate, extra, reordered, incorrectly typed, non-canonical, truncated, or trailing values. Fixture tests freeze the current time to the fixture time field.",
+  "recordValidity": "2099-10-28T00:00:00Z",
+  "sequence": "42",
+  "sessionChallenge": {
+    "expiresAt": 4070909400,
+    "id": "mobile-fixture-challenge-00000001",
+    "message": "croptop-mobile-session\nhttps://crop.top\nk51qzi5uqu5dg9ufswxt229ntzdy7p4125xzv5rtyjso89ajdujg6csfxcj260\nmobile-fixture-challenge-00000001\n4070909400",
+    "signature": "k9Dn3uJlTSfitcAOoxhycPAAXaUXafUF7hXvNNHHTPrHytuqfk0n21YcJkymVrO2vyuZsh1FrzmtYUlcQHXbDw=="
+  },
+  "time": 4070908800,
+  "unsignedRecord": "So4BpWNUVEwbAAAADfhHWABlVmFsdWVYQS9pcGZzL2JhZmtyZWlnaDJha2lzY2FpbGRjeGs3emh3bG00Y29uYmg2eDV4anZkY3o1Y21uejd4NWU1Y2tpaHhhaFNlcXVlbmNlGCpoVmFsaWRpdHlUMjA5OS0xMC0yOFQwMDowMDowMFpsVmFsaWRpdHlUeXBlAA==",
+  "version": 1,
+  "warning": "TEST ONLY. Public deterministic Ed25519 seed 000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f. Never import this key into a real site or publish this record."
+}

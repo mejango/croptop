@@ -140,7 +140,7 @@ var publicSiteKeys = []string{
 	// Croptop additions a page render depends on. They are public anyway (in
 	// the URLs and the HTML), and with them a machine holding only the key
 	// renders a new post the way the owner's machine would.
-	"domain", "croptopGateway", "croptopName", "croptopCustomDomain", StorageKey,
+	"domain", "croptopGateway", "croptopHost", "croptopName", "croptopCustomDomain", StorageKey, "croptopMobile",
 	"customCodeHeadEnabled", "customCodeHead", "customCodeBodyStartEnabled", "customCodeBodyStart",
 	"customCodeBodyEndEnabled", "customCodeBodyEnd",
 }

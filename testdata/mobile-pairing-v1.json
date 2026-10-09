@@ -1,0 +1,20 @@
+{
+  "senderPrivateKey": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAE=",
+  "receiverPrivateKey": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAI=",
+  "info": {
+    "id": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+    "origin": "https://app.crop.top",
+    "ipns": "k51qzi5uqu5dm3hvogw3iovl1y90ha7aqmqd5czq5p91kpf7m836hxsv1ptdqp",
+    "senderPublicKey": "BGsX0fLhLEJH+Lzm5WOkQPJ3A32BLeszoPShOUXYmMKWT+NC4v4af5uO5+tKfA+eFivOM1drMV7Oy7ZAaDe/UfU=",
+    "receiverPublicKey": "BHzyexiNA09+ilI4AwS1GsPAiWnid/IbNaYLSPxHZpl4B3dVENuO0EApPZrGn3Qw27p9reY86YIpngS3nSJ4c9E=",
+    "expiresAt": 2000000600,
+    "state": "consumed"
+  },
+  "transcript": "croptop-pairing-v1\nhttps://app.crop.top\nAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA\nk51qzi5uqu5dm3hvogw3iovl1y90ha7aqmqd5czq5p91kpf7m836hxsv1ptdqp\n2000000600\nBGsX0fLhLEJH+Lzm5WOkQPJ3A32BLeszoPShOUXYmMKWT+NC4v4af5uO5+tKfA+eFivOM1drMV7Oy7ZAaDe/UfU=\nBHzyexiNA09+ilI4AwS1GsPAiWnid/IbNaYLSPxHZpl4B3dVENuO0EApPZrGn3Qw27p9reY86YIpngS3nSJ4c9E=",
+  "sharedSecret": "fPJ7GI0DT36KUjgDBLUaw8CJaeJ38hs1pgtI/EdmmXg=",
+  "aesKey": "mhhvm438vm7l47DVBbImPCQfbAoWp1mJWdtlutp9GOo=",
+  "confirmationCode": "26892119",
+  "nonce": "AAECAwQFBgcICQoL",
+  "ciphertext": "Orrjk1eU49Sf0ZCLDSQE9B53xKELaoKyOxqyvzHepkc/rXZKUJ4PVGX2YkgWbEUZoRcoB1ySRTBEKIE+69ZMLCGNvgw7tPcD/2qxNB/9UwHblDYtgCmyM/BW45VUvoPz7XBW7V3QxAybJt+WrBGAoWQ3w7yZMIn4LQELHPfqarDaFuB3t8r8dhxUXAjRtWEi5G8wOE/oO60jZtL+8c2tvTG8bNF9/01GwAKBrTyIf1w3MGwoLaPH8bJsjTa12eLjlkm6l5Sv+icxJwQr0UDHBbFTQRemzvwVuDCBV7CiYqBgKRVIPmudKo/EwSx4+XNhmeNdLJBKkmtdg3R18uMIbTOCyh666OiotjlPo35fKe46aOU/I0Nr4xeWEjrRDoBN+Q==",
+  "plaintext": "{\"version\":1,\"origin\":\"https://app.crop.top\",\"ipns\":\"k51qzi5uqu5dm3hvogw3iovl1y90ha7aqmqd5czq5p91kpf7m836hxsv1ptdqp\",\"name\":\"Pairing fixture\",\"pem\":\"-----BEGIN PRIVATE KEY-----\\nMC4CAQAwBQYDK2VwBCIEIAMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMD\\n-----END PRIVATE KEY-----\\n\"}"
+}

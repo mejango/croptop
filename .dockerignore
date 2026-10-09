@@ -2,3 +2,16 @@
 .git
 worker/node_modules
 croptop
+dist
+**/node_modules
+**/.build
+**/.gradle
+**/.kotlin
+**/build
+**/DerivedData
+**/xcuserdata
+**/local.properties
+**/*.jks
+**/*.keystore
+.env*
+.wrangler

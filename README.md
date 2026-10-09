@@ -60,6 +60,16 @@ host there. Saved host addresses and crop.top names do not enable hosting;
 each site needs an explicit opt-in. Billing for crop.top hosting is a
 future step; this version adds the storage choice.
 
+## Phone posting (pilot)
+
+The mobile website and native iPhone/Android companions can post a screenshot
+to an existing compatible hosted site after a one-time connection, without a
+running desktop. Native companions add system share-sheet intake. This source
+includes the implementation; the hosted service and store releases are not
+enabled by installing an older release. See [phone setup, builds and release
+gates](docs/mobile.md), [iOS](apps/ios/README.md), and
+[Android](apps/android/README.md).
+
 ## Coming from the Mac app
 
 With the Croptop Mac app installed on the same Mac:

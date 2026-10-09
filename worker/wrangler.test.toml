@@ -4,15 +4,27 @@ main = "src/index.js"
 compatibility_date = "2026-09-01"
 
 # the text imports (scripts and docs) are served from the bare domain
-rules = [{ type = "Text", globs = ["**/*.sh", "**/*.ps1", "**/*.md"] }]
+rules = [
+  { type = "Text", globs = ["**/*.sh", "**/*.ps1", "**/*.md", "**/web/mobile/*.html", "**/web/mobile/*.js", "**/web/mobile/*.css", "**/web/mobile/*.svg", "**/web/mobile/*.webmanifest"], fallthrough = false },
+  { type = "Data", globs = ["**/templates/croptop/assets/SimplonNorm-*-WebXL.woff2"], fallthrough = false },
+]
 workers_dev = false
-routes = [{ pattern = "test.crop.top/*", zone_name = "crop.top" }]
+routes = [
+  { pattern = "test.crop.top/*", zone_name = "crop.top" },
+  { pattern = "app.test.crop.top/*", zone_name = "crop.top" },
+]
 
 [vars]
 DOMAIN = "test.crop.top"
 ROOT = "croptop.eth"
 UPSTREAMS = "eth.sucks,eth.shop,https://croptop-host-production.up.railway.app"
 NODE = "https://croptop-host-production.up.railway.app"   # every push is replicated here
+MOBILE_ENABLED = "false"     # enable only with a node configured for https://app.test.crop.top
+# Optional fresh HTTPS origin outside *.test.crop.top: attach its hostname above
+# and configure the mobile node with the exact same origin. The default
+# app.test.crop.top remains reserved and unavailable when moved elsewhere.
+# MOBILE_ORIGIN = "https://fresh-staging-app.example"
+# MOBILE_NODE = "https://..." # optional separate mobile API origin; defaults to NODE
 
 [[r2_buckets]]
 binding = "SITES"

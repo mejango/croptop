@@ -617,10 +617,14 @@ func PushMessage(domain, ipns, cid string, seq uint64, t int64) []byte {
 	return []byte(fmt.Sprintf("croptop-push\n%s\n%s\n%s\n%d\n%d", domain, ipns, cid, seq, t))
 }
 
-func fresh(t int64) bool {
+// FreshTimestamp reports whether t is within the host's authorization window.
+// Clients relaying externally signed requests use the same bounds.
+func FreshTimestamp(t int64) bool {
 	d := time.Since(time.Unix(t, 0))
 	return d < skew && d > -skew
 }
+
+func fresh(t int64) bool { return FreshTimestamp(t) }
 
 func (h *Host) claim(w http.ResponseWriter, r *http.Request) {
 	var in struct {

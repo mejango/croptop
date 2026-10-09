@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math"
 	"net/http"
 	"net/url"
 	"os"
@@ -23,8 +24,11 @@ import (
 // NewPost is what `croptop post --key` adds to a site.
 type NewPost struct {
 	Title, Content string
-	Tags           string   // comma separated, as in the console
-	Files          []string // attachments
+	Tags           string           // comma separated, as in the console
+	Files          []string         // attachments
+	ID             string           // optional stable identity for a recoverable operation
+	Created        *store.AppleTime // optional stable creation time
+	HeroImage      string           // attachment basename; empty keeps the console default
 }
 
 // Posted is where a new post went.
@@ -53,8 +57,8 @@ func (p *Publisher) Post(ctx context.Context, hostURL string, key []byte, np New
 	if !ok {
 		return Posted{}, errors.New("posting with a key needs the embedded engine (croptop --engine embedded)")
 	}
-	if strings.TrimSpace(np.Title+np.Content) == "" && len(np.Files) == 0 {
-		return Posted{}, errors.New("nothing to post: give a title, content, or files")
+	if err := validateNewPost(np); err != nil {
+		return Posted{}, err
 	}
 	ks := p.Node.Keystore()
 	keyName := "post-" + store.NewID() // not the site's id: a planet.json must not choose which key gets replaced
@@ -66,7 +70,7 @@ func (p *Publisher) Post(ctx context.Context, hostURL string, key []byte, np New
 	if err != nil {
 		return Posted{}, err
 	}
-	prepared, err := p.preparePost(ctx, eng, hostURL, ipnsName, np)
+	prepared, err := p.preparePost(ctx, eng, hostURL, ipnsName, np, "", nil)
 	if err != nil {
 		return Posted{}, err
 	}
@@ -90,34 +94,47 @@ type preparedPost struct {
 	site                     *store.Site
 	store                    *store.Store
 	parent, changed, workDir string
+	postID                   string
 }
 
-func (p *Publisher) preparePost(ctx context.Context, eng postEngine, hostURL, ipnsName string, np NewPost) (_ preparedPost, resultErr error) {
-	entry, err := hostEntry(ctx, hostURL, ipnsName)
-	if err != nil {
-		return preparedPost{}, err
+func (p *Publisher) preparePost(ctx context.Context, eng postEngine, hostURL, ipnsName string, np NewPost, workDir string, entry *hostKey) (_ preparedPost, resultErr error) {
+	var err error
+	if entry == nil {
+		entry, err = hostEntry(ctx, hostURL, ipnsName)
+		if err != nil {
+			return preparedPost{}, err
+		}
 	}
 	if !entry.AcceptsParent {
 		// an older host would take the post for the whole site and lose the rest
 		return preparedPost{}, fmt.Errorf("%s cannot add a post to a site yet; it needs updating", hostURL)
+	}
+	if entry.Sequence == math.MaxUint64 {
+		return preparedPost{}, errors.New("site sequence is exhausted")
 	}
 	seq := entry.Sequence + 1
 	nctx, cancel := context.WithTimeout(ctx, networkTimeout)
 	rec, netErr := p.Node.NetworkRecord(nctx, ipnsName)
 	cancel()
 	if netErr == nil {
+		if rec.Sequence == math.MaxUint64 {
+			return preparedPost{}, errors.New("site sequence is exhausted")
+		}
 		if rec.Sequence > entry.Sequence && rec.Value != "/ipfs/"+entry.CID {
 			return preparedPost{}, fmt.Errorf("the network has a newer version of this site (sequence %d) than %s (sequence %d); publish it from the machine that made it, then post again", rec.Sequence, hostURL, entry.Sequence)
 		}
 		seq = max(seq, rec.Sequence+1)
 	}
 
-	tmp, err := os.MkdirTemp(p.Store.Root, "post-*")
-	if err != nil {
-		return preparedPost{}, err
+	tmp := workDir
+	if tmp == "" {
+		tmp, err = os.MkdirTemp(p.Store.Root, "post-*")
+		if err != nil {
+			return preparedPost{}, err
+		}
 	}
 	defer func() {
-		if resultErr != nil {
+		if resultErr != nil && workDir == "" {
 			os.RemoveAll(tmp)
 		}
 	}()
@@ -136,6 +153,9 @@ func (p *Publisher) preparePost(ctx context.Context, eng postEngine, hostURL, ip
 	}
 	if !head.HostingEnabled() {
 		return preparedPost{}, ErrHostingDisabled
+	}
+	if np.ID != "" && links[np.ID] != "" {
+		return preparedPost{}, ErrPostExists
 	}
 	st := &store.Store{Root: filepath.Join(tmp, "store")}
 	if err := rebuildSource(st, head.ID, published); err != nil {
@@ -187,7 +207,17 @@ func (p *Publisher) preparePost(ctx context.Context, eng postEngine, hostURL, ip
 	if err != nil {
 		return preparedPost{}, err
 	}
-	return preparedPost{Posted: Posted{Result: Result{CID: cid, Sequence: seq}, URL: render.BrowserURL(site, post)}, site: site, store: st, parent: entry.CID, changed: changed, workDir: tmp}, nil
+	return preparedPost{Posted: Posted{Result: Result{CID: cid, Sequence: seq}, URL: render.BrowserURL(site, post)}, site: site, store: st, parent: entry.CID, changed: changed, workDir: tmp, postID: post.ID}, nil
+}
+
+func validateNewPost(np NewPost) error {
+	if strings.TrimSpace(np.Title+np.Content) == "" && len(np.Files) == 0 {
+		return errors.New("nothing to post: give a title, content, or files")
+	}
+	if np.ID != "" && !safeIdentity(np.ID) {
+		return errors.New("invalid post ID")
+	}
+	return nil
 }
 
 type hostKey struct {
@@ -332,9 +362,23 @@ func navigationPages(st *store.Store, siteID, pubDir string) error {
 // addPost saves np in st the way the console's new-post form does.
 func addPost(st *store.Store, siteID string, np NewPost) (*store.Post, error) {
 	id, empty := store.NewID(), ""
+	if np.ID != "" {
+		if !safeIdentity(np.ID) {
+			return nil, errors.New("invalid post ID")
+		}
+		id = np.ID
+		if _, err := st.Post(siteID, id); err == nil {
+			return nil, ErrPostExists
+		} else if !errors.Is(err, store.ErrNotFound) {
+			return nil, err
+		}
+	}
 	post := &store.Post{
 		ID: id, Title: np.Title, Content: np.Content, Created: store.Now(), Link: "/" + id + "/",
 		Attachments: []string{}, CIDs: map[string]string{}, Tags: map[string]string{}, Summary: &empty, Slug: &empty,
+	}
+	if np.Created != nil {
+		post.Created = *np.Created
 	}
 	for _, t := range strings.Split(np.Tags, ",") {
 		if t = strings.TrimSpace(t); t == "" {
@@ -361,6 +405,16 @@ func addPost(st *store.Store, siteID string, np NewPost) (*store.Post, error) {
 		post.Attachments = append(post.Attachments, name)
 	}
 	sort.Strings(post.Attachments)
+	if np.HeroImage != "" {
+		found := false
+		for _, attachment := range post.Attachments {
+			found = found || attachment == np.HeroImage
+		}
+		if !found {
+			return nil, errors.New("hero image must be one of the post's attachments")
+		}
+		post.HeroImage = &np.HeroImage
+	}
 	return post, st.SavePost(siteID, post)
 }
 

@@ -133,6 +133,11 @@ func (r *Renderer) Render(ctx context.Context, siteID string) error {
 		planetMap[k] = v
 	}
 	planetMap["articles"] = pubPosts
+	digest, err := MobileTemplateDigest(tfs)
+	if err != nil {
+		return fmt.Errorf("template compatibility: %w", err)
+	}
+	planetMap[MobileDescriptorKey] = MobileDescriptor{Version: 1, TemplateDigest: digest}
 	if err := writeSwiftJSON(filepath.Join(pub, "planet.json"), planetMap); err != nil {
 		return err
 	}

@@ -22,6 +22,7 @@ import (
 	"github.com/mejango/croptop/internal/follow"
 	"github.com/mejango/croptop/internal/host"
 	"github.com/mejango/croptop/internal/ipfs"
+	"github.com/mejango/croptop/internal/mobile"
 	"github.com/mejango/croptop/internal/publish"
 	"github.com/mejango/croptop/internal/render"
 	"github.com/mejango/croptop/internal/server"
@@ -69,6 +70,8 @@ Common flags: --data <dir> (default: ` + "%s" + `), --templates <dir>
 type app struct {
 	pubWait      bool // command-line publish waits for the push and warm-up
 	dataDir      string
+	mobileOrigin string
+	mobileHost   string
 	templatesDir string
 	cfg          *config.Config
 	store        *store.Store
@@ -113,6 +116,12 @@ func run(args []string) error {
 	root := fs.String("root", "", "site the bare domain serves: an ENS name, IPNS name, or CID (host)")
 	announce := fs.String("announce", os.Getenv("CROPTOP_ANNOUNCE"), "public multiaddrs to advertise, comma separated, for a node behind a proxy (host)")
 	trust := fs.String("trust", os.Getenv("CROPTOP_TRUST"), "domains whose forwarded pushes are accepted, comma separated (host)")
+	fs.StringVar(&a.mobileOrigin, "mobile-origin", os.Getenv("CROPTOP_MOBILE_ORIGIN"), "dedicated HTTPS phone composer origin; enables the mobile service for host, or selects the connection service for serve")
+	mobileHost := os.Getenv("CROPTOP_MOBILE_HOST")
+	if mobileHost == "" {
+		mobileHost = publish.DefaultHost
+	}
+	fs.StringVar(&a.mobileHost, "mobile-host", mobileHost, "fixed publication host for the mobile service (host)")
 	if err := fs.Parse(flagsFirst(args)); err != nil {
 		return nil
 	}
@@ -553,6 +562,7 @@ func (a *app) serve(listen string, noOpen bool) error {
 	srv := &server.Server{
 		Store: a.store, Pub: a.pub, Follow: a.follow, Tpl: a.tpl, Node: a.engine, Cfg: a.cfg, UI: ui, Templates: a.tmpl,
 		Version: version, DataDir: a.dataDir, Log: println, Quit: cancel,
+		MobileOrigin: a.mobileOrigin,
 	}
 	a.pub.Gate = srv.Locker() // before the background loops: a background publish never renders while the console does
 	go a.pub.RunKeepalive(ctx, 10*time.Minute)
@@ -612,7 +622,30 @@ func (a *app) host(domain, listen, root, announce, trust string) error {
 		return err
 	}
 	go h.Run(ctx)
-	srv := &http.Server{Addr: listen, Handler: h, ReadHeaderTimeout: 30 * time.Second}
+	// app.<domain> is a permanent trust boundary, even after the mobile
+	// service is switched off or moved to a different dedicated origin.
+	var handler http.Handler = mobile.Gateway(&mobile.Server{Origin: "https://app." + h.Domain}, nil, nil, h.Domain, h)
+	if a.mobileOrigin != "" {
+		if err := mobile.ValidateComposerOrigin(a.mobileOrigin, h.Domain); err != nil {
+			return err
+		}
+		digest, err := render.MobileTemplateDigest(a.tmpl)
+		if err != nil {
+			return fmt.Errorf("phone template: %w", err)
+		}
+		phone := &mobile.Server{Publisher: mobile.NewPrivatePublisher(a.pub), DataDir: filepath.Join(a.dataDir, "mobile"), Origin: a.mobileOrigin, HostURL: a.mobileHost, TemplateDigest: digest, Enabled: true}
+		if err := phone.Init(); err != nil {
+			return fmt.Errorf("phone service: %w", err)
+		}
+		defer phone.Close()
+		assets, err := fs.Sub(web.FS, "mobile")
+		if err != nil {
+			return err
+		}
+		handler = mobile.Gateway(phone, assets, a.tmpl, h.Domain, h)
+		println("phone composer enabled at " + a.mobileOrigin)
+	}
+	srv := &http.Server{Addr: listen, Handler: handler, ReadHeaderTimeout: 30 * time.Second}
 	go func() {
 		<-ctx.Done()
 		println("stopping")

@@ -3,5 +3,5 @@ package web
 
 import "embed"
 
-//go:embed index.html app.js style.css shop.html shop.js shop.css shop-logo.png shop-connect.html shop-connect.js shop-setup.html shop-setup.js
+//go:embed index.html app.js style.css shop.html shop.js shop.css shop-logo.png shop-connect.html shop-connect.js shop-setup.html shop-setup.js mobile mobile-connect.html mobile-connect.js mobile-connect.css
 var FS embed.FS

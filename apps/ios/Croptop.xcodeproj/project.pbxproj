@@ -1,0 +1,659 @@
+// !$*UTF8*$!
+{
+	archiveVersion = 1;
+	classes = {
+	};
+	objectVersion = 77;
+	objects = {
+
+/* Begin PBXBuildFile section */
+		1CF5A55379E6227D34EA3A55 /* DeviceStorage.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3FC97EDCC829995AD3018605 /* DeviceStorage.swift */; };
+		22EE5001614A03AE8B204D99 /* CroptopMobileCore in Frameworks */ = {isa = PBXBuildFile; productRef = D7AD70F81CC1FE631FE44B99 /* CroptopMobileCore */; };
+		40664C879F4903D5909D7832 /* ComposerView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 413CC6B585E607E9445495EF /* ComposerView.swift */; };
+		446EC52F5A8CF18036796838 /* CroptopMobileCore in Frameworks */ = {isa = PBXBuildFile; productRef = B1C2821EBC7817F13EB7929A /* CroptopMobileCore */; };
+		469EB203A107CD77E0DB0C19 /* ComposerView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 413CC6B585E607E9445495EF /* ComposerView.swift */; };
+		59A23C94A6F3F32743ABADD7 /* CroptopApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = CBFC225400666FDEFEC8D4DA /* CroptopApp.swift */; };
+		5EF54AB8BA5AD14B7ED3E7FA /* mobile-protocol-fixture.json in Resources */ = {isa = PBXBuildFile; fileRef = 8396644CC73C35E0EB8C53D7 /* mobile-protocol-fixture.json */; };
+		60BC6F93D0B4246A5A89E859 /* mobile-pairing-v1.json in Resources */ = {isa = PBXBuildFile; fileRef = EC9842665D6F40E8EF696159 /* mobile-pairing-v1.json */; };
+		6486C073CC5D32F0BC16B605 /* ProposalValidatorTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5A1F4722F117C077D90E761D /* ProposalValidatorTests.swift */; };
+		64E1FEFEECB76974EDEB7B9E /* ComposerModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 22BF6E8D940B3C71ABE45DF8 /* ComposerModel.swift */; };
+		69BA9B3DE47D9AAF0CE9B724 /* DeviceStorage.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3FC97EDCC829995AD3018605 /* DeviceStorage.swift */; };
+		B4F3555A89165A6D831942AC /* ShareViewController.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5517963392713FC90B8EB823 /* ShareViewController.swift */; };
+		CCD03AA9FE8B4FB41A6CB8C3 /* DraftStoreTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = DF29D2FE001A0ACDC15025AA /* DraftStoreTests.swift */; };
+		D2DC5F50298AB24C8B0DDDE8 /* IdentityTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = ECB8E774631F5B2D59C18071 /* IdentityTests.swift */; };
+		DAA6A3228DAF8F2B3545C4D3 /* ComposerModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 22BF6E8D940B3C71ABE45DF8 /* ComposerModel.swift */; };
+		DF91DEAFFB049D0D39CD5BDF /* CroptopShare.appex in Embed Foundation Extensions */ = {isa = PBXBuildFile; fileRef = 20B39D6D86F232522FB69BF3 /* CroptopShare.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
+		E2281FD13E49DAF1C53090D4 /* PairingCryptoTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 35FFA3DACA6601D74DBBBB2D /* PairingCryptoTests.swift */; };
+		FEEEC5ABAAD69724F39E75F8 /* CroptopMobileCore in Frameworks */ = {isa = PBXBuildFile; productRef = D58D75ACC6073D84CE753732 /* CroptopMobileCore */; };
+/* End PBXBuildFile section */
+
+/* Begin PBXContainerItemProxy section */
+		3B02B9A425E12F4A22CF180F /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = 6B77871E58A8A30507264213 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = 8810A06D942D96E61996A08B;
+			remoteInfo = CroptopShare;
+		};
+/* End PBXContainerItemProxy section */
+
+/* Begin PBXCopyFilesBuildPhase section */
+		8B484906AE5F3B7AEC31A543 /* Embed Foundation Extensions */ = {
+			isa = PBXCopyFilesBuildPhase;
+			buildActionMask = 2147483647;
+			dstPath = "";
+			dstSubfolderSpec = 13;
+			files = (
+				DF91DEAFFB049D0D39CD5BDF /* CroptopShare.appex in Embed Foundation Extensions */,
+			);
+			name = "Embed Foundation Extensions";
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXCopyFilesBuildPhase section */
+
+/* Begin PBXFileReference section */
+		0A5810E6ECC583C08EEBE044 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = Info.plist; sourceTree = "<group>"; };
+		20B39D6D86F232522FB69BF3 /* CroptopShare.appex */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = "wrapper.app-extension"; path = CroptopShare.appex; sourceTree = BUILT_PRODUCTS_DIR; };
+		22BF6E8D940B3C71ABE45DF8 /* ComposerModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ComposerModel.swift; sourceTree = "<group>"; };
+		35FFA3DACA6601D74DBBBB2D /* PairingCryptoTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PairingCryptoTests.swift; sourceTree = "<group>"; };
+		3FC97EDCC829995AD3018605 /* DeviceStorage.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DeviceStorage.swift; sourceTree = "<group>"; };
+		413CC6B585E607E9445495EF /* ComposerView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ComposerView.swift; sourceTree = "<group>"; };
+		4A23779A3BBDE3D74913267C /* CroptopCoreTests.xctest */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.cfbundle; path = CroptopCoreTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+		5517963392713FC90B8EB823 /* ShareViewController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ShareViewController.swift; sourceTree = "<group>"; };
+		5A1F4722F117C077D90E761D /* ProposalValidatorTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProposalValidatorTests.swift; sourceTree = "<group>"; };
+		6FC8D4ADFD8B188E84382C30 /* ios */ = {isa = PBXFileReference; lastKnownFileType = folder; name = ios; path = .; sourceTree = SOURCE_ROOT; };
+		7438276A686FB67CF4E221D8 /* Croptop.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = Croptop.entitlements; sourceTree = "<group>"; };
+		80F4881415EC5D10D30109E9 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = Info.plist; sourceTree = "<group>"; };
+		8396644CC73C35E0EB8C53D7 /* mobile-protocol-fixture.json */ = {isa = PBXFileReference; lastKnownFileType = text.json; path = "mobile-protocol-fixture.json"; sourceTree = "<group>"; };
+		9ADAC04E97AF4E41FD2C0BD2 /* CroptopShare.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = CroptopShare.entitlements; sourceTree = "<group>"; };
+		A261458306771FBB447DE0BB /* Croptop.app */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.application; path = Croptop.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		CBFC225400666FDEFEC8D4DA /* CroptopApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CroptopApp.swift; sourceTree = "<group>"; };
+		DF29D2FE001A0ACDC15025AA /* DraftStoreTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DraftStoreTests.swift; sourceTree = "<group>"; };
+		EC9842665D6F40E8EF696159 /* mobile-pairing-v1.json */ = {isa = PBXFileReference; lastKnownFileType = text.json; path = "mobile-pairing-v1.json"; sourceTree = "<group>"; };
+		ECB8E774631F5B2D59C18071 /* IdentityTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IdentityTests.swift; sourceTree = "<group>"; };
+/* End PBXFileReference section */
+
+/* Begin PBXFrameworksBuildPhase section */
+		591F6A4541153DC5A7CDD3A1 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				446EC52F5A8CF18036796838 /* CroptopMobileCore in Frameworks */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		687198E6B8A5DF13A838A265 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				FEEEC5ABAAD69724F39E75F8 /* CroptopMobileCore in Frameworks */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		E309E3F92CDB2F8C683B660C /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				22EE5001614A03AE8B204D99 /* CroptopMobileCore in Frameworks */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXFrameworksBuildPhase section */
+
+/* Begin PBXGroup section */
+		2BC86B9A6AF0DD5B98D2BE46 /* Tests */ = {
+			isa = PBXGroup;
+			children = (
+				DF29D2FE001A0ACDC15025AA /* DraftStoreTests.swift */,
+				ECB8E774631F5B2D59C18071 /* IdentityTests.swift */,
+				35FFA3DACA6601D74DBBBB2D /* PairingCryptoTests.swift */,
+				5A1F4722F117C077D90E761D /* ProposalValidatorTests.swift */,
+			);
+			path = Tests;
+			sourceTree = "<group>";
+		};
+		493D4D9A394C7F6C4DBE1D9D = {
+			isa = PBXGroup;
+			children = (
+				80B513B040EC3B258301B452 /* App */,
+				EAC66D22F6E1602226AACB06 /* design */,
+				E610DCF1DC2EA17AE6DD0BDF /* Packages */,
+				9A6C00E687B1E710698DAE5D /* Shared */,
+				E7A197434F1172DD84CC97AF /* ShareExtension */,
+				AC8013FDBEE6F0A890CC67C3 /* testdata */,
+				2BC86B9A6AF0DD5B98D2BE46 /* Tests */,
+				B42E6C44A6F2F9717887F3C8 /* Products */,
+			);
+			sourceTree = "<group>";
+		};
+		80B513B040EC3B258301B452 /* App */ = {
+			isa = PBXGroup;
+			children = (
+				7438276A686FB67CF4E221D8 /* Croptop.entitlements */,
+				CBFC225400666FDEFEC8D4DA /* CroptopApp.swift */,
+				0A5810E6ECC583C08EEBE044 /* Info.plist */,
+			);
+			path = App;
+			sourceTree = "<group>";
+		};
+		9A6C00E687B1E710698DAE5D /* Shared */ = {
+			isa = PBXGroup;
+			children = (
+				22BF6E8D940B3C71ABE45DF8 /* ComposerModel.swift */,
+				413CC6B585E607E9445495EF /* ComposerView.swift */,
+				3FC97EDCC829995AD3018605 /* DeviceStorage.swift */,
+			);
+			path = Shared;
+			sourceTree = "<group>";
+		};
+		AC8013FDBEE6F0A890CC67C3 /* testdata */ = {
+			isa = PBXGroup;
+			children = (
+				EC9842665D6F40E8EF696159 /* mobile-pairing-v1.json */,
+			);
+			name = testdata;
+			path = ../../testdata;
+			sourceTree = "<group>";
+		};
+		B42E6C44A6F2F9717887F3C8 /* Products */ = {
+			isa = PBXGroup;
+			children = (
+				A261458306771FBB447DE0BB /* Croptop.app */,
+				4A23779A3BBDE3D74913267C /* CroptopCoreTests.xctest */,
+				20B39D6D86F232522FB69BF3 /* CroptopShare.appex */,
+			);
+			name = Products;
+			sourceTree = "<group>";
+		};
+		E610DCF1DC2EA17AE6DD0BDF /* Packages */ = {
+			isa = PBXGroup;
+			children = (
+				6FC8D4ADFD8B188E84382C30 /* ios */,
+			);
+			name = Packages;
+			sourceTree = "<group>";
+		};
+		E7A197434F1172DD84CC97AF /* ShareExtension */ = {
+			isa = PBXGroup;
+			children = (
+				9ADAC04E97AF4E41FD2C0BD2 /* CroptopShare.entitlements */,
+				80F4881415EC5D10D30109E9 /* Info.plist */,
+				5517963392713FC90B8EB823 /* ShareViewController.swift */,
+			);
+			path = ShareExtension;
+			sourceTree = "<group>";
+		};
+		EAC66D22F6E1602226AACB06 /* design */ = {
+			isa = PBXGroup;
+			children = (
+				8396644CC73C35E0EB8C53D7 /* mobile-protocol-fixture.json */,
+			);
+			name = design;
+			path = ../../docs/design;
+			sourceTree = "<group>";
+		};
+/* End PBXGroup section */
+
+/* Begin PBXNativeTarget section */
+		8810A06D942D96E61996A08B /* CroptopShare */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 0702C996FE344E284613CEDB /* Build configuration list for PBXNativeTarget "CroptopShare" */;
+			buildPhases = (
+				88B9DD8A0BA6067CD1255293 /* Sources */,
+				591F6A4541153DC5A7CDD3A1 /* Frameworks */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			name = CroptopShare;
+			packageProductDependencies = (
+				B1C2821EBC7817F13EB7929A /* CroptopMobileCore */,
+			);
+			productName = CroptopShare;
+			productReference = 20B39D6D86F232522FB69BF3 /* CroptopShare.appex */;
+			productType = "com.apple.product-type.app-extension";
+		};
+		96E0742FFA025D1BB67D3AC1 /* Croptop */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 07A11CD59093354E5E0BF778 /* Build configuration list for PBXNativeTarget "Croptop" */;
+			buildPhases = (
+				6DC5EC958A8CA2F464AE57C8 /* Sources */,
+				687198E6B8A5DF13A838A265 /* Frameworks */,
+				8B484906AE5F3B7AEC31A543 /* Embed Foundation Extensions */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+				B27C9B18EEF7953A7AE06AD7 /* PBXTargetDependency */,
+			);
+			name = Croptop;
+			packageProductDependencies = (
+				D58D75ACC6073D84CE753732 /* CroptopMobileCore */,
+			);
+			productName = Croptop;
+			productReference = A261458306771FBB447DE0BB /* Croptop.app */;
+			productType = "com.apple.product-type.application";
+		};
+		FC9D90CF105A7092BC17DC5A /* CroptopCoreTests */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = C29B9AB5EAEF94B813445E9F /* Build configuration list for PBXNativeTarget "CroptopCoreTests" */;
+			buildPhases = (
+				91FB64823C2E1FFBFFFFF282 /* Sources */,
+				17B467D153A4BEC4562ECC8E /* Resources */,
+				E309E3F92CDB2F8C683B660C /* Frameworks */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			name = CroptopCoreTests;
+			packageProductDependencies = (
+				D7AD70F81CC1FE631FE44B99 /* CroptopMobileCore */,
+			);
+			productName = CroptopCoreTests;
+			productReference = 4A23779A3BBDE3D74913267C /* CroptopCoreTests.xctest */;
+			productType = "com.apple.product-type.bundle.unit-test";
+		};
+/* End PBXNativeTarget section */
+
+/* Begin PBXProject section */
+		6B77871E58A8A30507264213 /* Project object */ = {
+			isa = PBXProject;
+			attributes = {
+				BuildIndependentTargetsInParallel = YES;
+				LastUpgradeCheck = 2610;
+				TargetAttributes = {
+					8810A06D942D96E61996A08B = {
+						DevelopmentTeam = "";
+						ProvisioningStyle = Automatic;
+					};
+					96E0742FFA025D1BB67D3AC1 = {
+						DevelopmentTeam = "";
+						ProvisioningStyle = Automatic;
+					};
+					FC9D90CF105A7092BC17DC5A = {
+						DevelopmentTeam = "";
+						ProvisioningStyle = Automatic;
+					};
+				};
+			};
+			buildConfigurationList = 1FCC6BAC5B840870207C6488 /* Build configuration list for PBXProject "Croptop" */;
+			developmentRegion = en;
+			hasScannedForEncodings = 0;
+			knownRegions = (
+				Base,
+				en,
+			);
+			mainGroup = 493D4D9A394C7F6C4DBE1D9D;
+			minimizedProjectReferenceProxies = 1;
+			packageReferences = (
+				11130637DAD18CB51F85EE8E /* XCLocalSwiftPackageReference "." */,
+			);
+			preferredProjectObjectVersion = 77;
+			productRefGroup = B42E6C44A6F2F9717887F3C8 /* Products */;
+			projectDirPath = "";
+			projectRoot = "";
+			targets = (
+				96E0742FFA025D1BB67D3AC1 /* Croptop */,
+				FC9D90CF105A7092BC17DC5A /* CroptopCoreTests */,
+				8810A06D942D96E61996A08B /* CroptopShare */,
+			);
+		};
+/* End PBXProject section */
+
+/* Begin PBXResourcesBuildPhase section */
+		17B467D153A4BEC4562ECC8E /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				60BC6F93D0B4246A5A89E859 /* mobile-pairing-v1.json in Resources */,
+				5EF54AB8BA5AD14B7ED3E7FA /* mobile-protocol-fixture.json in Resources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXResourcesBuildPhase section */
+
+/* Begin PBXSourcesBuildPhase section */
+		6DC5EC958A8CA2F464AE57C8 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				DAA6A3228DAF8F2B3545C4D3 /* ComposerModel.swift in Sources */,
+				469EB203A107CD77E0DB0C19 /* ComposerView.swift in Sources */,
+				59A23C94A6F3F32743ABADD7 /* CroptopApp.swift in Sources */,
+				69BA9B3DE47D9AAF0CE9B724 /* DeviceStorage.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		88B9DD8A0BA6067CD1255293 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				64E1FEFEECB76974EDEB7B9E /* ComposerModel.swift in Sources */,
+				40664C879F4903D5909D7832 /* ComposerView.swift in Sources */,
+				1CF5A55379E6227D34EA3A55 /* DeviceStorage.swift in Sources */,
+				B4F3555A89165A6D831942AC /* ShareViewController.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		91FB64823C2E1FFBFFFFF282 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				CCD03AA9FE8B4FB41A6CB8C3 /* DraftStoreTests.swift in Sources */,
+				D2DC5F50298AB24C8B0DDDE8 /* IdentityTests.swift in Sources */,
+				E2281FD13E49DAF1C53090D4 /* PairingCryptoTests.swift in Sources */,
+				6486C073CC5D32F0BC16B605 /* ProposalValidatorTests.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXSourcesBuildPhase section */
+
+/* Begin PBXTargetDependency section */
+		B27C9B18EEF7953A7AE06AD7 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = 8810A06D942D96E61996A08B /* CroptopShare */;
+			targetProxy = 3B02B9A425E12F4A22CF180F /* PBXContainerItemProxy */;
+		};
+/* End PBXTargetDependency section */
+
+/* Begin XCBuildConfiguration section */
+		16F92A554623A773CB23BC19 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				GENERATE_INFOPLIST_FILE = YES;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@loader_path/Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = "top.crop.mobile.core-tests";
+				SDKROOT = iphoneos;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Debug;
+		};
+		41239FB2AC1A9F1FF48761DA /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++14";
+				CLANG_CXX_LIBRARY = "libc++";
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CLANG_ENABLE_OBJC_WEAK = YES;
+				CLANG_WARN_BLOCK_CAPTURE_AUTORELEASING = YES;
+				CLANG_WARN_BOOL_CONVERSION = YES;
+				CLANG_WARN_COMMA = YES;
+				CLANG_WARN_CONSTANT_CONVERSION = YES;
+				CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
+				CLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR;
+				CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
+				CLANG_WARN_EMPTY_BODY = YES;
+				CLANG_WARN_ENUM_CONVERSION = YES;
+				CLANG_WARN_INFINITE_RECURSION = YES;
+				CLANG_WARN_INT_CONVERSION = YES;
+				CLANG_WARN_NON_LITERAL_NULL_CONVERSION = YES;
+				CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF = YES;
+				CLANG_WARN_OBJC_LITERAL_CONVERSION = YES;
+				CLANG_WARN_OBJC_ROOT_CLASS = YES_ERROR;
+				CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
+				CLANG_WARN_RANGE_LOOP_ANALYSIS = YES;
+				CLANG_WARN_STRICT_PROTOTYPES = YES;
+				CLANG_WARN_SUSPICIOUS_MOVE = YES;
+				CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
+				CLANG_WARN_UNREACHABLE_CODE = YES;
+				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
+				CODE_SIGN_STYLE = Automatic;
+				COPY_PHASE_STRIP = NO;
+				CURRENT_PROJECT_VERSION = 1;
+				DEBUG_INFORMATION_FORMAT = dwarf;
+				DEVELOPMENT_TEAM = "";
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				ENABLE_TESTABILITY = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu11;
+				GCC_DYNAMIC_NO_PIC = NO;
+				GCC_NO_COMMON_BLOCKS = YES;
+				GCC_OPTIMIZATION_LEVEL = 0;
+				GCC_PREPROCESSOR_DEFINITIONS = (
+					"$(inherited)",
+					"DEBUG=1",
+				);
+				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
+				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
+				GCC_WARN_UNDECLARED_SELECTOR = YES;
+				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
+				GCC_WARN_UNUSED_FUNCTION = YES;
+				GCC_WARN_UNUSED_VARIABLE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				MARKETING_VERSION = 0.1.0;
+				MTL_ENABLE_DEBUG_INFO = INCLUDE_SOURCE;
+				MTL_FAST_MATH = YES;
+				ONLY_ACTIVE_ARCH = YES;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = iphoneos;
+				SWIFT_ACTIVE_COMPILATION_CONDITIONS = DEBUG;
+				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
+				SWIFT_VERSION = 5.10;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Debug;
+		};
+		994F625F5880798746042996 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				CODE_SIGN_ENTITLEMENTS = App/Croptop.entitlements;
+				CODE_SIGN_IDENTITY = "iPhone Developer";
+				INFOPLIST_FILE = App/Info.plist;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = top.crop.mobile;
+				SDKROOT = iphoneos;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Release;
+		};
+		AF3902525EF34B447A5C9CA2 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				APPLICATION_EXTENSION_API_ONLY = YES;
+				CODE_SIGN_ENTITLEMENTS = ShareExtension/CroptopShare.entitlements;
+				INFOPLIST_FILE = ShareExtension/Info.plist;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@executable_path/../../Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = top.crop.mobile.share;
+				SDKROOT = iphoneos;
+				SKIP_INSTALL = YES;
+				SWIFT_ACTIVE_COMPILATION_CONDITIONS = "$(inherited) SHARE_EXTENSION";
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Debug;
+		};
+		B6B6C8247D9C0E8F3615FDC2 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				APPLICATION_EXTENSION_API_ONLY = YES;
+				CODE_SIGN_ENTITLEMENTS = ShareExtension/CroptopShare.entitlements;
+				INFOPLIST_FILE = ShareExtension/Info.plist;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@executable_path/../../Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = top.crop.mobile.share;
+				SDKROOT = iphoneos;
+				SKIP_INSTALL = YES;
+				SWIFT_ACTIVE_COMPILATION_CONDITIONS = "$(inherited) SHARE_EXTENSION";
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Release;
+		};
+		B941E74FD8B9AB60A2E1FA39 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				GENERATE_INFOPLIST_FILE = YES;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@loader_path/Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = "top.crop.mobile.core-tests";
+				SDKROOT = iphoneos;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Release;
+		};
+		CB69EFE2AD6F25ADF74850D0 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++14";
+				CLANG_CXX_LIBRARY = "libc++";
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CLANG_ENABLE_OBJC_WEAK = YES;
+				CLANG_WARN_BLOCK_CAPTURE_AUTORELEASING = YES;
+				CLANG_WARN_BOOL_CONVERSION = YES;
+				CLANG_WARN_COMMA = YES;
+				CLANG_WARN_CONSTANT_CONVERSION = YES;
+				CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
+				CLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR;
+				CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
+				CLANG_WARN_EMPTY_BODY = YES;
+				CLANG_WARN_ENUM_CONVERSION = YES;
+				CLANG_WARN_INFINITE_RECURSION = YES;
+				CLANG_WARN_INT_CONVERSION = YES;
+				CLANG_WARN_NON_LITERAL_NULL_CONVERSION = YES;
+				CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF = YES;
+				CLANG_WARN_OBJC_LITERAL_CONVERSION = YES;
+				CLANG_WARN_OBJC_ROOT_CLASS = YES_ERROR;
+				CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
+				CLANG_WARN_RANGE_LOOP_ANALYSIS = YES;
+				CLANG_WARN_STRICT_PROTOTYPES = YES;
+				CLANG_WARN_SUSPICIOUS_MOVE = YES;
+				CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
+				CLANG_WARN_UNREACHABLE_CODE = YES;
+				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
+				CODE_SIGN_STYLE = Automatic;
+				COPY_PHASE_STRIP = NO;
+				CURRENT_PROJECT_VERSION = 1;
+				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
+				DEVELOPMENT_TEAM = "";
+				ENABLE_NS_ASSERTIONS = NO;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu11;
+				GCC_NO_COMMON_BLOCKS = YES;
+				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
+				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
+				GCC_WARN_UNDECLARED_SELECTOR = YES;
+				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
+				GCC_WARN_UNUSED_FUNCTION = YES;
+				GCC_WARN_UNUSED_VARIABLE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				MARKETING_VERSION = 0.1.0;
+				MTL_ENABLE_DEBUG_INFO = NO;
+				MTL_FAST_MATH = YES;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = iphoneos;
+				SWIFT_COMPILATION_MODE = wholemodule;
+				SWIFT_OPTIMIZATION_LEVEL = "-O";
+				SWIFT_VERSION = 5.10;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Release;
+		};
+		F3C1A5E6B0911B830F885A4A /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				CODE_SIGN_ENTITLEMENTS = App/Croptop.entitlements;
+				CODE_SIGN_IDENTITY = "iPhone Developer";
+				INFOPLIST_FILE = App/Info.plist;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = top.crop.mobile;
+				SDKROOT = iphoneos;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Debug;
+		};
+/* End XCBuildConfiguration section */
+
+/* Begin XCConfigurationList section */
+		0702C996FE344E284613CEDB /* Build configuration list for PBXNativeTarget "CroptopShare" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				AF3902525EF34B447A5C9CA2 /* Debug */,
+				B6B6C8247D9C0E8F3615FDC2 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
+		07A11CD59093354E5E0BF778 /* Build configuration list for PBXNativeTarget "Croptop" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				F3C1A5E6B0911B830F885A4A /* Debug */,
+				994F625F5880798746042996 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
+		1FCC6BAC5B840870207C6488 /* Build configuration list for PBXProject "Croptop" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				41239FB2AC1A9F1FF48761DA /* Debug */,
+				CB69EFE2AD6F25ADF74850D0 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
+		C29B9AB5EAEF94B813445E9F /* Build configuration list for PBXNativeTarget "CroptopCoreTests" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				16F92A554623A773CB23BC19 /* Debug */,
+				B941E74FD8B9AB60A2E1FA39 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
+/* End XCConfigurationList section */
+
+/* Begin XCLocalSwiftPackageReference section */
+		11130637DAD18CB51F85EE8E /* XCLocalSwiftPackageReference "." */ = {
+			isa = XCLocalSwiftPackageReference;
+			relativePath = .;
+		};
+/* End XCLocalSwiftPackageReference section */
+
+/* Begin XCSwiftPackageProductDependency section */
+		B1C2821EBC7817F13EB7929A /* CroptopMobileCore */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = CroptopMobileCore;
+		};
+		D58D75ACC6073D84CE753732 /* CroptopMobileCore */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = CroptopMobileCore;
+		};
+		D7AD70F81CC1FE631FE44B99 /* CroptopMobileCore */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = CroptopMobileCore;
+		};
+/* End XCSwiftPackageProductDependency section */
+	};
+	rootObject = 6B77871E58A8A30507264213 /* Project object */;
+}

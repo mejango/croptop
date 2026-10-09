@@ -1,0 +1,60 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#ffffff">
+  <meta name="referrer" content="no-referrer">
+  <meta name="description" content="Post a screenshot to your Croptop site, right from your phone.">
+  <title>Post · Croptop</title>
+  <link rel="stylesheet" href="./style.css">
+  <link rel="manifest" href="./manifest.webmanifest">
+  <link rel="icon" href="./icon.svg" type="image/svg+xml">
+  <script type="module" src="./app.js"></script>
+</head>
+<body>
+  <header class="masthead"><a class="brand" href="./" aria-label="Croptop home">croptop<span aria-hidden="true">✳</span></a><span class="edition">From your phone</span></header>
+  <main>
+    <div class="intro"><p class="eyebrow">A little piece of your day.</p><h1>Make it a post.</h1><p>A screenshot, a thought, something worth keeping.</p></div>
+    <div id="message" class="message" role="status" aria-live="polite" hidden></div>
+    <div id="error" class="error" role="alert" hidden></div>
+    <section id="receipt" class="receipt" aria-labelledby="receipt-heading" hidden>
+      <span class="stamp" aria-hidden="true">↗</span><h2 id="receipt-heading">It’s on your site.</h2><p>Your post is published.</p><a id="post-link" class="button primary" target="_blank" rel="noopener noreferrer">Open post ↗</a><button id="another" class="text-button" type="button">Make another post</button>
+    </section>
+    <form id="composer" aria-label="New post">
+      <div class="image-card" id="image-card">
+        <label class="picker" for="image" id="picker-label"><span class="picker-symbol" aria-hidden="true">+</span><strong>Choose a screenshot</strong><span>or any one image from your photos</span></label>
+        <input type="file" id="image" class="file-input" accept="image/png,image/jpeg,image/webp,image/heic,image/heif,.heic,.heif" aria-describedby="image-help">
+        <img id="preview" alt="Image for your post" hidden>
+        <div id="image-fallback" class="image-fallback" hidden>Your image is saved. A preview will appear when it’s prepared.</div>
+        <div id="image-tools" class="image-tools" hidden><span id="image-name"></span><button type="button" id="replace" class="text-button">Replace</button><button type="button" id="remove-image" class="text-button">Remove</button></div>
+      </div>
+      <p id="image-help" class="help">One image. PNG, JPEG, WebP, HEIC or HEIF.</p>
+      <label class="caption-label" for="caption">Add a thought <span>optional</span></label>
+      <textarea id="caption" name="caption" placeholder="What’s the story?" rows="3" maxlength="20000"></textarea>
+      <details class="more"><summary>More options</summary><label for="title">Title <span class="optional">optional</span></label><input type="text" id="title" name="title" maxlength="240" autocomplete="off" placeholder="Give it a name"></details>
+      <div id="destination" class="destination" hidden><span class="site-dot" aria-hidden="true"></span><span>Posting to <strong id="destination-name"></strong></span></div>
+      <p id="draft-status" class="help" aria-live="polite">Choose an image to start. Your draft stays on this phone.</p>
+      <div id="preview-notice" class="preview-notice" hidden><strong>Ready for your review</strong><p>This is the image that will appear on your site. Check it, then publish.</p></div>
+      <button id="publish" class="button primary" type="submit" disabled>Publish</button>
+      <button id="copy-expired" class="button" type="button" hidden>Use this image in a new draft</button>
+      <p id="publish-help" class="help publish-help">Connect your site below to publish from anywhere.</p>
+    </form>
+    <section id="pairing" class="connection" aria-labelledby="pairing-heading" hidden>
+      <p class="eyebrow">Connect this phone</p><h2 id="pairing-heading">A connection you can check.</h2><p id="pairing-status" role="status">Opening your secure connection…</p><p id="pairing-site" class="identity"></p><div id="pairing-code" class="pairing-code" hidden></div><button id="confirm-pairing" type="button" class="button" hidden>This is my site</button><button id="cancel-pairing" type="button" class="text-button">Cancel connection</button>
+    </section>
+    <section id="setup" class="connection" aria-labelledby="setup-heading">
+      <p class="eyebrow">First time here?</p><h2 id="setup-heading">Bring your site along.</h2><p>On your Croptop publisher, choose <strong>Connect phone</strong> and scan the code. After connecting, you can post even when your computer is asleep.</p>
+      <details id="import-details"><summary>Have a site key? Import it</summary><p class="help">Choose your Croptop PRIVATE KEY file. Your key stays on this phone and controls your whole site. Keep your original backup.</p><label class="button" for="key-file">Choose site key</label><input id="key-file" class="file-input" type="file" accept=".pem,.key,text/plain,application/x-pem-file"></details>
+    </section>
+    <section id="connected" class="connection" aria-labelledby="connected-heading" hidden>
+      <p class="eyebrow">Your site</p><h2 id="connected-heading"></h2><p id="site-id" class="identity"></p><p id="site-status" class="help" role="status"></p>
+      <div id="consent" hidden><p>Allow this service to prepare and publish the posts you approve on this phone. Your site key stays here.</p><button id="enable" type="button" class="button">Allow phone posting</button></div>
+      <div class="connection-actions"><button id="refresh-site" type="button" class="text-button">Check connection</button><button id="disable" type="button" class="text-button" hidden>Stop phone posting</button><button id="disconnect" type="button" class="text-button">Remove site from this phone</button></div>
+      <p class="help">Removing this connection deletes the key from this browser. It does not revoke other copies of the key.</p>
+    </section>
+    <details class="install"><summary>Keep Croptop on your home screen</summary><p>On iPhone, open Safari’s Share menu, then choose <strong>Add to Home Screen</strong>. On Android, open Chrome’s menu and choose <strong>Add to Home screen</strong> or <strong>Install app</strong>.</p><p>You can also keep posting right here in your browser.</p></details>
+  </main>
+  <footer>Your images. Your words. Your site.</footer>
+</body>
+</html>

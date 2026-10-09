@@ -5,6 +5,7 @@
 import installSh from "../../scripts/install.sh";
 import installPs1 from "../../scripts/install.ps1";
 import agentsMd from "../../docs/agents.md";
+import { mobileOriginConfig, serveMobile } from "./mobile.js";
 
 const SKEW = 10 * 60;
 const RESOLVE_TTL = 60;
@@ -35,6 +36,8 @@ async function route(request, env, ctx) {
   const url = new URL(request.url);
   const host = url.hostname.toLowerCase();
   const domain = env.DOMAIN.toLowerCase();
+  const mobile = mobileOriginConfig(env);
+  if (host === mobile.defaultHost || host === mobile.host) return serveMobile(request, url, env, mobile);
   if (host === domain) return serveBare(request, url, env, ctx);
   if (host.endsWith("." + domain)) return serveLabel(request, url, env, ctx, host.slice(0, -domain.length - 1));
   return text(`unknown host ${host} (this host serves ${domain})`, 404);

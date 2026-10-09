@@ -99,6 +99,9 @@ struct SiteView: View {
                     }
                 }
                 IconActionButton("Settings", systemImage: "gearshape") { model.screen = .settings(siteID) }
+                IconActionButton("Connect phone", systemImage: "iphone") {
+                    NSWorkspace.shared.open(API.shared.url("/mobile-connect#\(siteID)"))
+                }
             }
             Button(model.publishing.contains(siteID) ? "Publishing…" : "Publish") { model.publish(siteID) }
                 .buttonStyle(BorderedButton(kind: unpublished ? .plain : .quiet))

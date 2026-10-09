@@ -1,0 +1,45 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="referrer" content="no-referrer">
+  <title>Connect phone · Croptop</title>
+  <link rel="stylesheet" href="/mobile-connect.css">
+  <script type="module" src="/mobile-connect.js"></script>
+</head>
+<body>
+  <main>
+    <a class="back" href="/">← Croptop</a>
+    <p class="eyebrow">FROM YOUR PHONE</p>
+    <h1>Screenshot.<br>Share your world.</h1>
+    <p class="intro">Connect your site once. Post from your phone anywhere, even while this computer sleeps.</p>
+    <section id="setup" aria-labelledby="setup-title">
+      <h2 id="setup-title">Connect phone</h2>
+      <p>This publishes your current site and enables phone posting through crop.top. Your phone receives a full copy of the site’s publishing key through an encrypted connection.</p>
+      <div id="hosting" hidden>
+        <label><input id="enable-hosting" type="checkbox"> Allow crop.top to host this site</label>
+        <p class="hint">Keeps your published site available when this computer is asleep. Your private publishing key stays on your devices.</p>
+      </div>
+      <button id="start" type="button">Create connection link</button>
+    </section>
+    <section id="connection" hidden aria-labelledby="connection-title">
+      <h2 id="connection-title">Open on your phone</h2>
+      <p id="site-name"></p>
+      <img id="qr" width="256" height="256" alt="Scan this code with your phone camera to connect your site">
+      <div class="actions"><button id="copy" type="button" class="secondary">Copy link</button><a id="phone-link" rel="noreferrer" target="_blank">Open link ↗</a></div>
+      <p class="hint">Open the link in your phone browser, or paste it into the Croptop companion app. It expires in ten minutes.</p>
+      <form id="confirm" hidden>
+        <label for="code">Enter the eight-digit code shown on your phone</label>
+        <input id="code" autocomplete="off" inputmode="numeric" pattern="[0-9 ]{8,9}" maxlength="9" placeholder="1234 5678" required>
+        <p class="hint">Only confirm if this is the phone you want to give full publishing access to.</p>
+        <button id="confirm-button" type="submit">Confirm and connect</button>
+      </form>
+      <button id="restart" type="button" class="text-button">Start a new connection</button>
+    </section>
+    <p id="status" role="status" aria-live="polite"></p>
+    <p id="error" role="alert" hidden></p>
+    <p class="footnote">Keep this computer’s key backup. Removing the site from your phone removes its local key; it does not revoke other copies.</p>
+  </main>
+</body>
+</html>

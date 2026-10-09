@@ -49,6 +49,10 @@ type Embedded struct {
 	Log     func(string)
 	// Offline skips bootstrap and peering and listens on loopback only (tests).
 	Offline bool
+	// Private implies Offline and disables every network listener and local
+	// peer discovery. Use it for unpublished staging blocks; loopback-only
+	// listeners could otherwise be discovered by a public node on this host.
+	Private bool
 	// Announce lists public multiaddrs to advertise instead of guessing, for a
 	// node behind a fixed port mapping or a TCP proxy (Railway, Fly): e.g.
 	// /dns4/host.proxy.rlwy.net/tcp/12345. A node that announces is treated as
@@ -116,6 +120,9 @@ func (e *Embedded) Start(ctx context.Context) error {
 	if e.running {
 		return nil
 	}
+	if e.Private {
+		e.Offline = true
+	}
 	if err := os.MkdirAll(e.nodeDir(), 0o755); err != nil {
 		return err
 	}
@@ -142,8 +149,10 @@ func (e *Embedded) Start(ctx context.Context) error {
 	e.mds = dssync.MutexWrap(mds)
 	e.bstore = blockstore.NewBlockstore(e.mds)
 
-	if e.port, err = freePort(swarmPortLow, swarmPortHigh); err != nil {
-		return err
+	if !e.Private {
+		if e.port, err = freePort(swarmPortLow, swarmPortHigh); err != nil {
+			return err
+		}
 	}
 	listen := []string{
 		fmt.Sprintf("/ip4/0.0.0.0/tcp/%d", e.port), fmt.Sprintf("/ip6/::/tcp/%d", e.port),
@@ -158,10 +167,14 @@ func (e *Embedded) Start(ctx context.Context) error {
 	}
 	opts := []libp2p.Option{
 		libp2p.Identity(priv),
-		libp2p.ListenAddrStrings(listen...),
 		libp2p.ConnectionManager(cm),
 	}
-	if len(e.Announce) > 0 {
+	if e.Private {
+		opts = append(opts, libp2p.NoListenAddrs, libp2p.DisableRelay())
+	} else {
+		opts = append(opts, libp2p.ListenAddrStrings(listen...))
+	}
+	if len(e.Announce) > 0 && !e.Private {
 		var announce []ma.Multiaddr
 		for _, a := range e.Announce {
 			m, err := ma.NewMultiaddr(strings.TrimSpace(a))
@@ -357,6 +370,9 @@ func (e *Embedded) peer(ctx context.Context) {
 // ConnectLocalNodes dials other kubo or croptop nodes on this machine by
 // asking the kubo API ports for their identity.
 func (e *Embedded) ConnectLocalNodes(ctx context.Context) int {
+	if e.Private {
+		return 0
+	}
 	if e.host == nil {
 		return 0
 	}

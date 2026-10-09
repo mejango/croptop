@@ -104,11 +104,12 @@ var (
 // version's own blocks, so an upload sends exactly that version even if the
 // site is rendered again while it runs.
 type pushSpec struct {
-	Parent string   // the version the host must still hold for the push to apply
-	Files  []string // the version's files to send; nil sends them all
-	Carry  []string // non-nil makes a manifest push: the version is Files plus these paths of Parent
-	Dir    string   // send the files under this directory instead (post --key's staging dir)
-	Record []byte   // the signed record the host is to serve; nil takes the one the engine last signed for the key
+	Parent        string             // the version the host must still hold for the push to apply
+	Files         []string           // the version's files to send; nil sends them all
+	Carry         []string           // non-nil makes a manifest push: the version is Files plus these paths of Parent
+	Dir           string             // send the files under this directory instead (post --key's staging dir)
+	Record        []byte             // the signed record the host is to serve; nil takes the one the engine last signed for the key
+	Authorization *PostAuthorization // a device-signed request, never refreshed by the service
 }
 
 // hostConflict is a push the host refused because the site moved on (409).
@@ -418,9 +419,18 @@ func (p *Publisher) pushDir(ctx context.Context, site *store.Site, key, cid stri
 			return err
 		}
 		t := pushClock().Unix()
-		sig, err := p.Node.Keystore().Sign(key, host.PushMessage(domain, site.IPNS, cid, seq, t))
-		if err != nil {
-			return err
+		var sig []byte
+		if spec.Authorization != nil {
+			t, sig = spec.Authorization.Timestamp, spec.Authorization.Signature
+			if !host.FreshTimestamp(t) {
+				return ErrAuthorizationExpired
+			}
+		} else {
+			var err error
+			sig, err = p.Node.Keystore().Sign(key, host.PushMessage(domain, site.IPNS, cid, seq, t))
+			if err != nil {
+				return err
+			}
 		}
 		req.Header.Set("X-Croptop-Ipns", site.IPNS)
 		req.Header.Set("X-Croptop-Cid", cid)

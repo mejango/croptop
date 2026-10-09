@@ -3,7 +3,10 @@ main = "src/index.js"
 compatibility_date = "2026-09-01"
 
 # the text imports (scripts and docs) are served from the bare domain
-rules = [{ type = "Text", globs = ["**/*.sh", "**/*.ps1", "**/*.md"] }]
+rules = [
+  { type = "Text", globs = ["**/*.sh", "**/*.ps1", "**/*.md", "**/web/mobile/*.html", "**/web/mobile/*.js", "**/web/mobile/*.css", "**/web/mobile/*.svg", "**/web/mobile/*.webmanifest"], fallthrough = false },
+  { type = "Data", globs = ["**/templates/croptop/assets/SimplonNorm-*-WebXL.woff2"], fallthrough = false },
+]
 
 # crop.top: the bare domain and every subdomain
 routes = [
@@ -16,6 +19,16 @@ DOMAIN = "crop.top"
 ROOT = "croptop.eth"           # what the bare domain shows beside claimed names
 UPSTREAMS = "eth.sucks,eth.shop,https://croptop-host-production.up.railway.app"
 NODE = "https://croptop-host-production.up.railway.app"   # every push is replicated here
+MOBILE_ENABLED = "false"     # opt in after the mobile node and trusted origin are ready
+# Before enabling, establish that app.crop.top has never served author content
+# or an author's service worker; this origin stores device signing keys.
+# Or choose a fresh dedicated HTTPS origin OUTSIDE *.crop.top and attach its
+# hostname to this Worker in routes above. Other gateway subdomains are refused
+# because changing this setting would release their keys back to author content.
+# Configure the mobile node with the exact same origin.
+# MOBILE_ORIGIN = "https://fresh-app.example"
+# The default app.crop.top stays reserved and unavailable when moved elsewhere.
+# MOBILE_NODE = "https://..." # optional separate mobile API origin; defaults to NODE
 
 [[r2_buckets]]
 binding = "SITES"

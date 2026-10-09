@@ -48,7 +48,13 @@ type Server struct {
 	rel     string
 	relAt   time.Time
 	DataDir string
-	Log     func(string)
+	// MobileOrigin is the trusted, separately hosted phone composer. An empty
+	// value uses the standard service; MobileHTTP permits isolated tests.
+	MobileOrigin string
+	MobileHTTP   *http.Client
+	phoneOnce    sync.Once
+	phone        *phoneConnections
+	Log          func(string)
 	// PlanetContainer is the old Croptop Mac app's data folder; empty means
 	// publish.DefaultPlanetContainer (none off macOS).
 	PlanetContainer string
@@ -71,6 +77,7 @@ func (s *Server) Handler() http.Handler {
 	s.routesCollaboration(mux)
 	s.routesTemplate(mux)
 	s.quickRoutes(mux)
+	s.routesMobilePhone(mux)
 
 	// UI
 	mux.HandleFunc("GET /{$}", func(w http.ResponseWriter, r *http.Request) {
