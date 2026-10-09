@@ -14,7 +14,7 @@ rules = [
 
 [vars]
 DOMAIN = "crop.top"
-MOBILE_ENABLED = "false"
+MOBILE_ENABLED = "true"
 MOBILE_ORIGIN = "https://croptop-phone-923c1bafd14ea328.croptop.workers.dev"
 MOBILE_NODE = "https://croptop-mobile-pilot-production.up.railway.app"
 # MOBILE_PROXY_SECRET is a Worker secret, never a checked-in [vars] value.
