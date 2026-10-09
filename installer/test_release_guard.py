@@ -83,19 +83,22 @@ class ReleaseGuardTests(unittest.TestCase):
 
     def test_workflow_has_no_automatic_stable_or_unsigned_mac_writer(self):
         workflow = (ROOT / ".github/workflows/release.yml").read_text()
+        windows = (ROOT / "installer/stage-windows.ps1").read_text()
         self.assertIn("args: release --clean --draft", workflow)
         self.assertIn("cancel-in-progress: false", workflow)
         self.assertIn("test_release_guard.py", workflow)
         self.assertIn("timeout-minutes: 30", workflow)
         for gate in ("go test ./...", "go vet ./..."):
             self.assertLess(workflow.index(gate), workflow.index("uses: goreleaser/goreleaser-action@"))
-        self.assertEqual(workflow.count("installer/release_guard.py"), 4)
+        self.assertEqual(workflow.count("installer/release_guard.py"), 2)
+        self.assertEqual(windows.count("installer/release_guard.py"), 2)
+        self.assertIn("run: ./installer/stage-windows.ps1", workflow)
         self.assertIn("signed-mac-handoff:", workflow)
         self.assertIn("needs: [goreleaser, windows-installer]", workflow)
         for forbidden in ("gh release edit", "--clobber", "HOMEBREW_TAP_GITHUB_TOKEN",
                           "installer/macos.sh", "installer/publish-macos.py", "macos-app:"):
-            self.assertNotIn(forbidden, workflow)
-        self.assertIn('foreach ($arch in @("amd64", "arm64"))', workflow)
+            self.assertNotIn(forbidden, workflow + windows)
+        self.assertIn('foreach ($arch in @("amd64", "arm64"))', windows)
         build = (ROOT / "installer/macos-build-number").read_text().strip()
         self.assertTrue(build.isdecimal())
         self.assertGreaterEqual(int(build), 1161)
