@@ -46,6 +46,10 @@ class PilotTests(unittest.TestCase):
             with self.subTest(version=bad), self.assertRaises(argparse.ArgumentTypeError):
                 PILOT.validate_version(bad)
 
+    def test_bundle_version_is_numeric_while_prerelease_is_preserved(self):
+        self.assertEqual(PILOT.bundle_version("0.13.20-phone.1"), "0.13.20")
+        self.assertEqual(PILOT.bundle_version("0.13.20"), "0.13.20")
+
     def test_signing_probe_uses_explicit_temp_keychain_and_cleans_on_failure(self):
         runner = FakeRunner()
         with tempfile.TemporaryDirectory() as folder:

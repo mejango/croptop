@@ -59,6 +59,12 @@ def validate_version(value):
     return value
 
 
+def bundle_version(value):
+    # Apple permits only X.Y.Z in CFBundleShortVersionString. Keep the full
+    # prerelease version in the engine, archive names, and provenance instead.
+    return validate_version(value).split("-", 1)[0]
+
+
 def signing(runner, saved, temporary, action):
     password = secrets.token_urlsafe(32)
     runner.redactions.append(password)
@@ -137,6 +143,9 @@ def build(runner, args, temporary):
     runner.run("tar", "-xzf", source_archive, "-C", source)
     archives = output / "in"
     archives.mkdir()
+    package_in = temporary / "package-in"
+    package_in.mkdir()
+    app_version = bundle_version(args.version)
     runner.environment["CGO_ENABLED"] = "0"
     runner.environment["GOOS"] = "darwin"
     runner.environment["CROPTOP_BUILD_NUMBER"] = str(args.build)
@@ -151,11 +160,12 @@ def build(runner, args, temporary):
         runner.environment["GOARCH"] = arch
         runner.run("go", "build", "-trimpath", "-ldflags", flags, "-o", binary_dir / "croptop",
                    "./cmd/croptop", cwd=source)
-        runner.run("tar", "-czf", archives / f"croptop_{args.version}_darwin_{arch}.tar.gz",
-                   "-C", binary_dir, "croptop")
+        archive = archives / f"croptop_{args.version}_darwin_{arch}.tar.gz"
+        runner.run("tar", "-czf", archive, "-C", binary_dir, "croptop")
+        os.link(archive, package_in / f"croptop_{app_version}_darwin_{arch}.tar.gz")
     runner.environment.pop("GOARCH", None)
     runner.environment.pop("GOOS", None)
-    runner.run("sh", source / "installer/macos.sh", args.version, archives, output / "out", cwd=source)
+    runner.run("sh", source / "installer/macos.sh", app_version, package_in, output / "out", cwd=source)
     app = output / "out/Croptop.app"
     dmg = output / "out/Croptop.dmg"
     runner.run("codesign", "--verify", "--deep", "--strict", app)
@@ -164,13 +174,13 @@ def build(runner, args, temporary):
         runner.run("xcrun", "stapler", "validate", item)
     with (app / "Contents/Info.plist").open("rb") as stream:
         info = plistlib.load(stream)
-    if info["CFBundleVersion"] != str(args.build) or info["CFBundleShortVersionString"] != args.version:
+    if info["CFBundleVersion"] != str(args.build) or info["CFBundleShortVersionString"] != app_version:
         raise RuntimeError("packaged app version does not match requested pilot")
     packaged_version = runner.run(app / "Contents/Resources/croptop", "version", capture=True).decode().strip()
     if args.version not in packaged_version:
         raise RuntimeError("packaged engine version does not match requested pilot")
     provenance = {
-        "version": args.version, "build": args.build, "commit": commit,
+        "version": args.version, "bundleVersion": app_version, "build": args.build, "commit": commit,
         "origin": args.origin, "sourceSHA256": digest(source_archive), "dmgSHA256": digest(dmg),
         "go": runner.run("go", "version", capture=True).decode().strip(),
         "xcode": runner.run("xcodebuild", "-version", capture=True).decode().strip(),
