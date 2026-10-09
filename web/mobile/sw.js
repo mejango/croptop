@@ -5,7 +5,7 @@
 const ASSET_DIGESTS = {
   "/": "72c715c2ef930b7dfa71a0e103a2a18daff81f9e3644041ec0404ab94df5b374",
   "/index.html": "72c715c2ef930b7dfa71a0e103a2a18daff81f9e3644041ec0404ab94df5b374",
-  "/app.js": "dabc92ac8cb7bfaec89523d7d86fbc4f74e3a39834c3e85bfcc15121d259e945",
+  "/app.js": "d7e035dd71b4c59cb8146d96961a0031eaa532d36b90680c9fe4606eaeb7b8ce",
   "/protocol.js": "b73300818584399fb4d6c3add1a698617f372561d015dbbe4a1ccc1b785d18a9",
   "/pairing.js": "11f81ce49dbac529bb51f5a7d21f483d1c4d5a983998135886d3e4fffe472d32",
   "/storage.js": "b0d3818b48a88ef36e1547293b72aba0967c4bcb3416abc4dc0e40ba413c4375",

@@ -7,7 +7,7 @@ const API = '/v0/mobile';
 let connection, site, config, draft, session, normalizedImage, previewURL;
 let busy = false, storageReady = false, saving = Promise.resolve(), pollTimer, confirmPairing;
 let pairingActive = false, draftSaved = true, saveRevision = 0, pairingController;
-let activeTab = false, releaseTab;
+let activeTab = false, initialized = false, releaseTab;
 const hidden = (id, value) => { $(id).hidden = value; };
 function error(message = '') { $('error').textContent = message; hidden('error', !message); }
 function message(value = '') { $('message').textContent = value; hidden('message', !value); }
@@ -328,7 +328,17 @@ window.addEventListener('online', () => { if (draft?.submitted && draft.operatio
 window.addEventListener('beforeunload', event => { if (!draftSaved) { event.preventDefault(); event.returnValue = ''; } });
 
 async function pair() {
+  if (!activeTab || !initialized || !storageReady || !hasPairingLink()) return;
+  if (pairingActive) {
+    history.replaceState(null, '', location.pathname + location.search);
+    message('Finish or cancel the current connection before opening another link.');
+    return;
+  }
   if (connection) { history.replaceState(null, '', location.pathname + location.search); throw new Error('Remove the current site from this phone before opening a new connection link.'); }
+  confirmPairing = null;
+  hidden('pairing-code', true); hidden('confirm-pairing', true);
+  $('pairing-site').textContent = '';
+  error(); message();
   pairingActive = true; hidden('pairing', false); render();
   pairingController = new AbortController();
   try {
@@ -353,6 +363,9 @@ async function pair() {
 }
 $('confirm-pairing').addEventListener('click', () => { hidden('confirm-pairing', true); confirmPairing?.(true); });
 $('cancel-pairing').addEventListener('click', () => { confirmPairing?.(false); pairingController?.abort(); });
+window.addEventListener('hashchange', () => {
+  pair().catch(problem => { error(explain(problem)); render(); });
+});
 
 async function start() {
   try {
@@ -366,6 +379,7 @@ async function start() {
     if (config.maxImageBytes) $('image-help').textContent = `One image, up to ${Math.floor(config.maxImageBytes / 1048576)} MB. PNG, JPEG, WebP, HEIC or HEIF.`;
     if (Number.isSafeInteger(config.maxTitleBytes)) $('title').maxLength = config.maxTitleBytes;
     if (Number.isSafeInteger(config.maxCaptionBytes)) $('caption').maxLength = config.maxCaptionBytes;
+    initialized = true;
     if (hasPairingLink()) await pair();
     else if (connection) await run(async () => { await loadSite(); if (draft?.submitted && draft.ipns === connection.ipns) await checkOperation(); });
     if ('serviceWorker' in navigator) navigator.serviceWorker.register('./sw.js', { scope: './' }).catch(() => {});

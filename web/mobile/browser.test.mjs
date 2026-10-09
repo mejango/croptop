@@ -11,11 +11,12 @@ import { join } from 'node:path';
 const playwright = await import(process.env.PLAYWRIGHT_MODULE || 'playwright');
 const root = new URL('../../', import.meta.url);
 const fixture = JSON.parse(await readFile(new URL('docs/design/mobile-protocol-fixture.json', root)));
+const pairingFixture = JSON.parse(await readFile(new URL('testdata/mobile-pairing-v1.json', root)));
 const image = await readFile(new URL('templates/croptop/dev/fixture/B2000000-0000-4000-8000-000000000002/cover.png', root));
 const publicKey = createPublicKey(createPrivateKey(fixture.privateKeyPEM));
 
 async function fixtureService({ corruptPreview = false, dropCommit = false } = {}) {
-  const state = { uploads: 0, commits: 0, enableCalls: 0, sessions: 0, signed: 0, requests: [], operation: null, enabled: false, invalidateSession: false };
+  const state = { uploads: 0, commits: 0, enableCalls: 0, sessions: 0, signed: 0, pairingClaims: 0, requests: [], operation: null, enabled: false, invalidateSession: false };
   const send = (res, value, status = 200) => { res.writeHead(status, { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' }); res.end(JSON.stringify(value)); };
   let origin;
   const server = createServer(async (req, res) => {
@@ -41,6 +42,12 @@ async function fixtureService({ corruptPreview = false, dropCommit = false } = {
       const parsed = () => JSON.parse(body);
       const site = () => ({ ipns: fixture.ipns, name: 'Field notes', url: 'https://crop.top/ipns/' + fixture.ipns, ready: true, enabled: state.enabled });
       if (path === '/config') return send(res, { version: 1, enabled: true, origin, host: fixture.host, maxImageBytes: 20971520, maxImagePixels: 40000000, maxTitleBytes: 1000, maxCaptionBytes: 10000 });
+      const claim = path.match(/^\/pairings\/([A-Za-z0-9_-]{43})\/claim$/);
+      if (claim) {
+        state.pairingClaims++;
+        if (state.rejectPairing) return send(res, { code: 'pairing_expired', error: 'This connection expired. Start a new link.' }, 410);
+        return send(res, { id: claim[1], origin, ipns: fixture.ipns, senderPublicKey: pairingFixture.info.senderPublicKey, receiverPublicKey: parsed().receiverPublicKey, expiresAt: fixture.time + 600, state: 'claimed' });
+      }
       if (path === '/challenge') {
         assert.equal(parsed().ipns, fixture.ipns);
         state.challenge = { id: 'browser-fixture-challenge-00000001', expiresAt: fixture.time + 600 };
@@ -120,6 +127,58 @@ async function connect(page) {
 }
 
 for (const browserName of (process.env.MOBILE_BROWSERS || 'chromium,webkit').split(',')) {
+  test(browserName + ': pairing links opened in the existing tab preserve drafts and respect one active receiver', { timeout: 90000 }, async t => {
+    const service = await fixtureService();
+    t.after(service.close);
+    const options = browserName === 'chromium' && process.env.CHROMIUM_EXECUTABLE ? { executablePath: process.env.CHROMIUM_EXECUTABLE } : {};
+    const browser = await playwright[browserName].launch({ headless: true, ...options });
+    t.after(() => browser.close());
+    const { page, context, failures } = await open(browser, service.origin);
+    await pick(page);
+    await page.locator('#caption').fill('Keep this while I connect.');
+    await page.locator('#draft-status').filter({ hasText: 'Draft saved' }).waitFor();
+    const original = await page.evaluate(async () => { window.sameComposerDocument = true; const draft = await (await import('./storage.js')).read('draft'); return { id: draft.id, caption: draft.caption, imageBytes: draft.image.size }; });
+    const link = '#pair=' + 'B'.repeat(43) + '.' + 'C'.repeat(43);
+    const anotherLink = '#pair=' + 'D'.repeat(43) + '.' + 'E'.repeat(43);
+    await page.goto(service.origin + '/' + link);
+    await page.locator('#confirm-pairing').waitFor();
+    assert.equal(await page.evaluate(() => window.sameComposerDocument), true, 'Hash navigation must not require a page reload');
+    assert.equal(await page.evaluate(() => location.hash), '', 'The existing receiver removes the capability from the URL');
+    assert.equal(service.state.pairingClaims, 1);
+    assert.match(await page.locator('#pairing-code').textContent(), /^\d{4} \d{4}$/);
+    await page.goto(service.origin + '/' + anotherLink);
+    await page.locator('#message').filter({ hasText: 'Finish or cancel' }).waitFor();
+    assert.equal(service.state.pairingClaims, 1, 'Another hash cannot start a concurrent receiver');
+    assert.equal(await page.evaluate(() => location.hash), '');
+    const duplicate = await context.newPage();
+    await duplicate.goto(service.origin);
+    await duplicate.locator('#error').filter({ hasText: 'already open' }).waitFor();
+    await duplicate.goto(service.origin + '/' + anotherLink);
+    assert.equal(await duplicate.locator('#image').isDisabled(), true);
+    assert.equal(service.state.pairingClaims, 1, 'An inactive tab cannot consume a connection link');
+    await duplicate.close();
+    await page.locator('#cancel-pairing').click();
+    await page.locator('#pairing').waitFor({ state: 'hidden' });
+    service.state.rejectPairing = true;
+    await page.goto(service.origin + '/' + anotherLink);
+    await page.locator('#error').filter({ hasText: 'connection expired' }).waitFor();
+    assert.equal(service.state.pairingClaims, 2);
+    assert.equal(await page.evaluate(() => location.hash), '');
+    assert.equal(await page.locator('#pairing').isVisible(), false);
+    service.state.rejectPairing = false;
+    await connect(page);
+    await page.goto(service.origin + '/' + link);
+    await page.locator('#error').filter({ hasText: 'Remove the current site' }).waitFor();
+    assert.equal(service.state.pairingClaims, 2, 'A connected site must not be silently replaced');
+    assert.equal(await page.evaluate(() => location.hash), '');
+    const retained = await page.evaluate(async () => { const draft = await (await import('./storage.js')).read('draft'); return { id: draft.id, caption: draft.caption, imageBytes: draft.image.size }; });
+    assert.deepEqual(retained, original);
+    assert.equal(service.state.uploads, 0);
+    assert.equal(service.state.commits, 0);
+    assert.deepEqual(failures, []);
+    assert.ifError(service.state.serverError);
+    await context.close();
+  });
   test(browserName + ': first capture survives setup, signatures match Go, uncertain commit recovers after reload', { timeout: 90000 }, async t => {
     const service = await fixtureService({ dropCommit: true });
     t.after(service.close);
