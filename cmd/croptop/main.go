@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"io/fs"
 	"net/http"
+	_ "net/http/pprof" // on http.DefaultServeMux, served only on loopback by host
 	"os"
 	"os/exec"
 	"os/signal"
@@ -612,6 +613,9 @@ func (a *app) host(domain, listen, root, announce, trust string) error {
 		return err
 	}
 	go h.Run(ctx)
+	if port := os.Getenv("CROPTOP_PPROF"); port != "" { // heap and goroutine profiles for `railway ssh`; never public
+		go func() { println("pprof: " + fmt.Sprint(http.ListenAndServe("127.0.0.1:"+port, nil))) }()
+	}
 	srv := &http.Server{Addr: listen, Handler: h, ReadHeaderTimeout: 30 * time.Second}
 	go func() {
 		<-ctx.Done()
