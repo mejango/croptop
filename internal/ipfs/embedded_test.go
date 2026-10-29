@@ -1081,3 +1081,23 @@ func TestAnnounceASignedRecord(t *testing.T) {
 		t.Fatalf("the network holds another record: %v", err)
 	}
 }
+
+// The host re-provides every 30 minutes; walking and announcing every block
+// that often kept ~1,000 DHT connections open and grew memory without bound.
+func TestTreeProvideRunsOncePerInterval(t *testing.T) {
+	e := NewEmbedded(t.TempDir())
+	a, b := cid.NewCidV1(cid.Raw, []byte("a-not-a-real-hash")), cid.NewCidV1(cid.Raw, []byte("b-not-a-real-hash"))
+	now := time.Now()
+	if !e.claimTree(a, now) {
+		t.Fatal("first tree provide refused")
+	}
+	if e.claimTree(a, now.Add(30*time.Minute)) {
+		t.Fatal("tree provided again 30 minutes later")
+	}
+	if !e.claimTree(b, now.Add(30*time.Minute)) {
+		t.Fatal("a new version waited for the old one's interval")
+	}
+	if !e.claimTree(a, now.Add(treeReprovide)) {
+		t.Fatal("tree not provided again after the interval")
+	}
+}
