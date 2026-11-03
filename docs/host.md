@@ -94,6 +94,12 @@ Run it under systemd or any supervisor. It uses the embedded engine, so no kubo
 is needed. It needs an open swarm port (4001 to 4009, whichever is free, TCP and
 UDP) to be a good peer; the HTTP side stays local behind your proxy.
 
+An open TCP port reaches your kernel directly, so update Linux and reboot before
+opening it. [CVE-2026-98432](https://www.cve.org/CVERecord?id=CVE-2026-98432)
+affects kernels back to 4.4. Croptop turns off MPTCP, the path where remote root
+was demonstrated, but plain TCP can still trigger the bug, and only a patched
+kernel fixes it.
+
 `CROPTOP_DEBUG=1` prints the engine's log lines.
 
 ## DNS

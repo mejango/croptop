@@ -37,7 +37,11 @@ func NewNode(bin, repoPath string) *Node {
 func (n *Node) Keystore() *Keystore { return &Keystore{Dir: filepath.Join(n.RepoPath, "keystore")} }
 func (n *Node) GatewayURL() string  { return fmt.Sprintf("http://127.0.0.1:%d", n.GatewayPort) }
 
-func (n *Node) env() []string { return append(os.Environ(), "IPFS_PATH="+n.RepoPath) }
+func (n *Node) env() []string {
+	// kubo is a Go binary too, so go.mod's multipathtcp=0 has to be passed on.
+	// See CVE-2026-98432. A later GODEBUG entry wins, so the parent's is kept.
+	return append(os.Environ(), "IPFS_PATH="+n.RepoPath, "GODEBUG="+strings.TrimPrefix(os.Getenv("GODEBUG")+",multipathtcp=0", ","))
+}
 
 // Start launches the daemon and returns once it prints "Daemon is ready".
 func (n *Node) Start(ctx context.Context) error {
