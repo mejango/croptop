@@ -80,6 +80,8 @@ type Embedded struct {
 	bserv   blockservice.BlockService
 	dag     ipld.DAGService
 	port    int
+	// trees: when each root's blocks were last all announced
+	trees map[cid.Cid]time.Time
 }
 
 func NewEmbedded(dataDir string) *Embedded {
@@ -455,8 +457,34 @@ func (e *Embedded) Provide(ctx context.Context, c string) error {
 	if err := e.dht.Provide(pctx, id, true); err != nil {
 		return err
 	}
-	go e.provideTree(id)
+	if e.claimTree(id, time.Now()) {
+		go e.provideTree(id)
+	}
 	return nil
+}
+
+// treeReprovide is how often one version's blocks are all announced again:
+// kubo's reprovide interval, well inside the DHT's 48-hour record expiry.
+const treeReprovide = 22 * time.Hour
+
+// claimTree reports whether root's blocks are due to be announced, and if so
+// marks them announced now. The root itself is cheap and provided every call.
+func (e *Embedded) claimTree(root cid.Cid, now time.Time) bool {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	if at, ok := e.trees[root]; ok && now.Sub(at) < treeReprovide {
+		return false
+	}
+	if e.trees == nil {
+		e.trees = map[cid.Cid]time.Time{}
+	}
+	for c, at := range e.trees { // old versions drop out once due
+		if now.Sub(at) >= treeReprovide {
+			delete(e.trees, c)
+		}
+	}
+	e.trees[root] = now
+	return true
 }
 
 // provideTree announces every block under root, as kubo's reprovider does,
