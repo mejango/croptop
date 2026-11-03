@@ -2,6 +2,11 @@ module github.com/mejango/croptop
 
 go 1.27.1
 
+// CVE-2026-98432: remote root was demonstrated against MPTCP listeners, which
+// Go opens by default on Linux. Plain TCP can still trigger the kernel bug, so
+// this reduces exposure; only a patched kernel fixes it.
+godebug multipathtcp=0
+
 require (
 	github.com/flosch/pongo2/v6 v6.1.0
 	github.com/ipfs/boxo v0.42.2
