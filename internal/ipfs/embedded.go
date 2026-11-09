@@ -54,6 +54,10 @@ type Embedded struct {
 	// /dns4/host.proxy.rlwy.net/tcp/12345. A node that announces is treated as
 	// publicly reachable and serves the DHT.
 	Announce []string
+	// NoPubsub skips IPNS over pubsub. The host sets it: go-libp2p-pubsub
+	// (v0.17–v0.19) never cancels a dead peer's stream context, so on a node
+	// the whole network dials, memory grows until restart.
+	NoPubsub bool
 	// RoutingPuts are Delegated Routing endpoints (…/routing/v1/ipns/) each
 	// published record is also sent to, in the background. Empty for a host:
 	// it is the endpoint.
@@ -214,7 +218,7 @@ func (e *Embedded) Start(ctx context.Context) error {
 
 	runCtx, cancel := context.WithCancel(context.Background())
 	e.cancel = cancel
-	if !e.Offline {
+	if !e.Offline && !e.NoPubsub {
 		// IPNS over pubsub: gateways that resolve names this way only see updates
 		// as pubsub messages, so publish there as well as in the DHT. Peers on a
 		// record's topic are found through DHT rendezvous, as kubo does.
